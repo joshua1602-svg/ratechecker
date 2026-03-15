@@ -1,0 +1,91 @@
+{
+  "title": "Valuation Intake Form",
+  "layout": [
+    {
+      "section": "Contact",
+      "fields": [
+        { "name": "contact.business_name", "label": "Business Name", "type": "text", "placeholder": "e.g., Bean & Brew Ltd" },
+        { "name": "contact.email", "label": "Email", "type": "email" },
+        { "name": "contact.phone", "label": "Phone (optional)", "type": "tel" }
+      ]
+    },
+    {
+      "section": "Property",
+      "fields": [
+        { "name": "property.address", "label": "Address", "type": "textarea" },
+        { "name": "property.postcode", "label": "Postcode", "type": "text" },
+        {
+          "name": "property.business_type",
+          "label": "Business Type",
+          "type": "select",
+          "options": ["Restaurant/Café", "Retail", "Hair/Beauty", "Nursery", "Pub"]
+        },
+        { "name": "property.voa_rv", "label": "Current VOA RV (if known)", "type": "number", "min": 0 },
+        {
+          "name": "property.nia_sqm",
+          "label": "Net Internal Area (sqm)",
+          "type": "number",
+          "min": 1,
+          "help": "NIA excludes walls/structural spaces. Use plans or best estimate."
+        },
+        {
+          "name": "property.frontage_m",
+          "label": "Frontage Width (m)",
+          "type": "number",
+          "min": 0,
+          "help": "Visible shopfront width; estimates are acceptable."
+        },
+        {
+          "name": "property.depth_m",
+          "label": "Shop Depth (m)",
+          "type": "number",
+          "min": 0,
+          "help": "If unknown, we can estimate from NIA and frontage."
+        },
+        { "name": "property.floors", "label": "Number of Floors", "type": "number", "min": 1 },
+        { "name": "property.layout_notes", "label": "Layout Notes (optional)", "type": "textarea" }
+      ]
+    },
+    {
+      "section": "Areas",
+      "show_if": "property.business_type in ['Restaurant/Café','Retail','Hair/Beauty']",
+      "fields": [
+        { "name": "areas.sales_area_sqm", "label": "Sales/Dining Area (sqm)", "type": "number", "min": 0 },
+        { "name": "areas.visible_kitchen_sqm", "label": "Visible Kitchen (sqm)", "type": "number", "min": 0 },
+        { "name": "areas.non_visible_kitchen_sqm", "label": "Non-visible Kitchen (sqm)", "type": "number", "min": 0 },
+        { "name": "areas.storage_sqm", "label": "Back-of-House/Storage (sqm)", "type": "number", "min": 0 },
+        { "name": "areas.basement_sqm", "label": "Basement Storage (sqm)", "type": "number", "min": 0 },
+        { "name": "areas.upper_sqm", "label": "Upper/Mezzanine (sqm)", "type": "number", "min": 0 },
+        { "name": "areas.outdoor_seating", "label": "Outdoor Seating", "type": "checkbox" }
+      ]
+    },
+    {
+      "section": "Nursery Details",
+      "show_if": "property.business_type == 'Nursery'",
+      "fields": [
+        { "name": "nursery.purpose_built", "label": "Purpose-built nursery", "type": "checkbox" },
+        { "name": "nursery.outdoor_play", "label": "Outdoor play area", "type": "checkbox" }
+      ]
+    },
+    {
+      "section": "Confirmations",
+      "fields": [
+        {
+          "name": "flags.fitout_year",
+          "label": "Fit-out year (if relevant)",
+          "type": "number",
+          "min": 1900,
+          "max": 2100
+        },
+        { "name": "flags.layout_flag", "label": "Awkward layout (tick if true)", "type": "checkbox" },
+        { "name": "flags.cramped_flag", "label": "Cramped layout (tick if true)", "type": "checkbox" },
+        {
+          "name": "flags.consent_disclaimer",
+          "label": "I understand this is an indicative valuation using VOA methods and not a guaranteed outcome.",
+          "type": "checkbox",
+          "required": true
+        }
+      ]
+    }
+  ]
+}

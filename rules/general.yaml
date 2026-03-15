@@ -1,0 +1,43 @@
+# rules/general.yaml
+# Universal valuation rules applied across retail-method sectors
+# (Retail, Restaurants/Cafés, Hair/Beauty; Nurseries inherit only what is relevant)
+
+general_rules:
+  zoning:
+    zone_depth_m: 6.1
+    relativities:
+      zone_a: 1.00
+      zone_b: 0.50
+      zone_c: 0.25
+      remainder: 0.125
+
+  floor_weights:
+    ground_floor: apply_zoning
+    upper_floor: 0.50          # mezzanine / upper trading at 50% equivalence
+    basement_storage: 0.15     # storage-only basements at 15% equivalence
+
+  allowances:
+    poor_frontage:
+      trigger: frontage_m < 3.0
+      adjustment: -0.05
+    awkward_layout:
+      trigger: layout_flag == true
+      adjustment: -0.08
+    excessive_depth:
+      trigger: depth_m > 20
+      adjustment: -0.05
+    external_seating:
+      trigger: outdoor_seating == true
+      adjustment: +0.05
+
+  proximity:
+    ranges_m:
+      same_parade: 100
+      close: 500
+      broader: 1000
+      fallback_radius_m: 2000
+    weights:
+      same_parade: 1.0
+      close: 0.7
+      broader: 0.5
+      fallback: 0.4

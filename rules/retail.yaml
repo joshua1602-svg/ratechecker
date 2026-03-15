@@ -1,0 +1,31 @@
+# rules/retail.yaml
+# General retail / hair / beauty (retail-method with zoning)
+
+valuation_method: zoning
+
+zoning:
+  zone_depth_m: 6.1
+  relativities:
+    zone_a: 1.00
+    zone_b: 0.50
+    zone_c: 0.25
+    remainder: 0.125
+
+area_weights:
+  sales_area: 1.00
+  back_of_house: 0.30
+  storage: 0.25
+  wcs: 0.20
+  basement_storage: 0.15
+  upper_floor: 0.50
+
+allowances:
+  poor_frontage:
+    trigger: frontage_m < 3.0
+    adjustment: -0.05
+  awkward_layout:
+    trigger: layout_flag == true
+    adjustment: -0.08
+  excessive_depth:
+    trigger: depth_m > 20
+    adjustment: -0.05

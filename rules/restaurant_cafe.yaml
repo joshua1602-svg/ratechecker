@@ -1,0 +1,63 @@
+# rules/restaurant_cafe.yaml
+# Restaurants, cafés, takeaways (retail-method with zoning)
+
+valuation_method: zoning
+
+zoning:
+  zone_depth_m: 6.1
+  relativities:
+    zone_a: 1.00
+    zone_b: 0.50
+    zone_c: 0.25
+    remainder: 0.125
+
+area_weights:
+  dining_area: 1.00
+  visible_kitchen: 1.00
+  non_visible_kitchen: 0.40
+  storage: 0.25
+  wcs: 0.20
+  basement_storage: 0.15
+
+allowances:
+  outdoor_seating:
+    trigger: outdoor_seating == true
+    adjustment: +0.05
+  cramped_layout:
+    trigger: cramped_flag == true
+    adjustment: -0.05
+  premium_fitout:
+    trigger: fitout_year >= 2020
+    adjustment: +0.02
+  excessive_depth:
+    trigger: depth_m > 20
+    adjustment: -0.05
+
+proximity:
+  ranges_m:
+    same_parade: 100
+    close: 500
+    broader: 1000
+    fallback_radius_m: 2000  # CSA may extend to fallback_radius_m if too few comps
+  weights:
+    same_parade: 1.0
+    close: 0.7
+    broader: 0.5
+    fallback: 0.4
+
+unit_size_adjustment:
+  small_unit:
+    trigger: NIA < 50
+    factor: 1.25
+  large_unit:
+    trigger: NIA > 250
+    factor: 0.75
+
+outlier_rules:
+  percentile_cutoff:
+    lower: 0.10    # drop bottom 10%
+    upper: 0.90    # drop top 10%
+  method: "zone_a_tone"
+
+rounding:
+  rv_round_to: 100   # round modeled RV to nearest £100

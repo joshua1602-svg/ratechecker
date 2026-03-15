@@ -1,0 +1,22 @@
+# rules/nursery.yaml
+# Nurseries: rental comparison using NIA x £/m² (no zoning)
+
+valuation_method: nia_only
+
+base_valuation:
+  apply_zone_a: false
+  unit: sqm
+
+adjustments:
+  purpose_built:
+    trigger: purpose_built == true
+    adjustment: +0.03
+  converted_building:
+    trigger: purpose_built == false
+    adjustment: -0.05
+  outdoor_play_area:
+    trigger: outdoor_play == true
+    adjustment: +0.03
+  awkward_layout:
+    trigger: layout_flag == true
+    adjustment: -0.05

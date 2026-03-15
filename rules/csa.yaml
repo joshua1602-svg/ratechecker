@@ -1,0 +1,71 @@
+# rules/csa.yaml
+# Comparable Selection Algorithm (CSA) - filter, normalise, outlier removal, tone derivation
+
+csa:
+  filters:
+    use_class: "same_or_equivalent"       # same business category; allow near-equivalents when thin
+    size_band_pct: 30                      # initial ±30% NIA band
+    size_band_pct_fallback: 50            # broaden to ±50% if thin
+    distance_m:
+      same_parade: 100
+      close: 500
+      broader: 1000
+      fallback: 2000
+    avd:
+      date: "2024-04-01"
+      window_months: 18
+
+  normalisation:
+    to_zone_a_equivalent: true
+    time_adjustment_to_avd: true
+    size_curve_adjustment: true           # small units ↗ tone; large units ↘ tone
+    proximity_weighting:
+      same_parade: 1.0
+      close: 0.7
+      broader: 0.5
+      fallback: 0.4
+
+  outliers:
+    drop_percentiles:
+      lower: 0.10
+      upper: 0.90
+    secondary_policy: "downweight_suspicious"  # downweight if included with flags
+
+  tone:
+    statistic: "weighted_median"           # robust against outliers
+    fallback_statistic: "iqr_mean"
+
+  confidence:
+    high_if_min_comps: 5
+    medium_if_min_comps: 3
+    low_if_min_comps: 1
+
+  # SCAT codes confirmed from VOA 2026 Data Specification Appendix 2
+  scat_codes:
+    retail_shop: 249          # includes launderettes (CS5) — see modelling filter below
+    showroom: 251
+    cafe: 409
+    restaurant: 234
+    hair_beauty: 417
+    nursery: 85
+    gym_fitness: 416
+    pub: 226                  # Phase 2 only
+    pub_with_lodge: 227       # Phase 2 only
+
+  # Modelling rule (not in VOA spec): exclude launderettes from retail shop comparables
+  # Apply in engine: drop rows where scat_code=249 AND description contains 'LAUNDERETTE'
+  scat_exclusions:
+    - scat_code: 249
+      exclude_if_description_contains: "LAUNDERETTE"
+
+  # GIA exclusion rule: only use NIA-measured properties as comparables for
+  # zoning-method valuations. GIA properties use a different measurement basis.
+  measurement_filter:
+    zoning_method_requires: "NIA"
+
+  # Comparable source weighting — applied multiplicatively to proximity weight
+  # voa_published: unadjusted_price_psm from summary valuation file (field 29, record type 01)
+  # implied: back-calculated from total area using standard 6.1m zone depth assumption
+  comparable_source_weights:
+    voa_published_rate: 1.3   # VOA-published primary survey unit rate — prefer these
+    implied_rate: 1.0         # back-calculated fallback — baseline weight

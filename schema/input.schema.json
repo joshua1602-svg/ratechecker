@@ -1,0 +1,79 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Retail-Method Valuation Input",
+  "type": "object",
+  "properties": {
+    "contact": {
+      "type": "object",
+      "properties": {
+        "business_name": { "type": "string", "minLength": 1 },
+        "email": { "type": "string", "format": "email" },
+        "phone": { "type": "string" }
+      },
+      "required": ["business_name", "email"]
+    },
+    "property": {
+      "type": "object",
+      "properties": {
+        "address": { "type": "string", "minLength": 3 },
+        "postcode": { "type": "string", "minLength": 4 },
+        "uprn": { "type": "string" },
+        "business_type": {
+          "type": "string",
+          "enum": ["Restaurant/Café", "Retail", "Hair/Beauty", "Nursery", "Pub"]
+        },
+        "voa_rv": { "type": "number", "minimum": 0 },
+        "nia_sqm": { "type": "number", "minimum": 1 },
+        "frontage_m": { "type": "number", "minimum": 0 },
+        "depth_m": { "type": "number", "minimum": 0 },
+        "floors": { "type": "integer", "minimum": 1 },
+        "layout_notes": { "type": "string" }
+      },
+      "required": ["address", "postcode", "business_type", "nia_sqm"]
+    },
+    "areas": {
+      "type": "object",
+      "properties": {
+        "sales_area_sqm": { "type": "number", "minimum": 0 },
+        "visible_kitchen_sqm": { "type": "number", "minimum": 0 },
+        "non_visible_kitchen_sqm": { "type": "number", "minimum": 0 },
+        "storage_sqm": { "type": "number", "minimum": 0 },
+        "basement_sqm": { "type": "number", "minimum": 0 },
+        "upper_sqm": { "type": "number", "minimum": 0 },
+        "outdoor_seating": { "type": "boolean", "default": false }
+      }
+    },
+    "nursery": {
+      "type": "object",
+      "properties": {
+        "purpose_built": { "type": "boolean", "default": false },
+        "outdoor_play": { "type": "boolean", "default": false }
+      }
+    },
+    "flags": {
+      "type": "object",
+      "properties": {
+        "layout_flag": { "type": "boolean", "default": false },
+        "cramped_flag": { "type": "boolean", "default": false },
+        "fitout_year": { "type": "integer", "minimum": 1900, "maximum": 2100 },
+        "consent_disclaimer": { "type": "boolean", "const": true }
+      },
+      "required": ["consent_disclaimer"]
+    }
+  },
+  "required": ["contact", "property", "flags"],
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "property": {
+            "properties": {
+              "business_type": { "const": "Nursery" }
+            }
+          }
+        }
+      },
+      "then": { "required": ["nursery"] }
+    }
+  ]
+}
