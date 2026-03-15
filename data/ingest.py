@@ -26,7 +26,7 @@ VOA_ENCODING = "latin-1"  # pragmatic default; spec is ASCII, latin-1 is a super
 
 # Rows per read/write cycle — tune down if still hitting memory limits
 READ_CHUNK = 50_000   # rows read from CSV at once
-FLUSH_EVERY = 50_000  # rows accumulated before flushing to DB (summary valuations)
+FLUSH_EVERY = 10_000  # rows accumulated before flushing to DB (summary valuations)
 
 
 # ─────────────────────────────────────────────
@@ -532,19 +532,67 @@ def create_indexes() -> None:
 # MAIN
 # ─────────────────────────────────────────────
 
+USAGE = """
+VOA ingest pipeline — run each step independently or all at once.
+
+Subcommands:
+  list    <list_file>             Ingest list entries only
+  sv      <sv_file>               Ingest summary valuations only
+  post                            Add has_summary_valuation flag + indexes
+  geocode                         Geocode postcodes into postcode_coords
+  all     <list_file> <sv_file>   Run every step in order
+
+Examples:
+  python data/ingest.py list    listentries.csv
+  python data/ingest.py sv      summaryvaluations.csv
+  python data/ingest.py post
+  python data/ingest.py geocode
+  python data/ingest.py all     listentries.csv summaryvaluations.csv
+
+Files can be raw .csv or .zip archives.
+"""
+
 if __name__ == "__main__":
-    if len(sys.argv) < 3:
-        print("Usage: python data/ingest.py <list_entries_file> <summary_valuations_file>")
-        print("Files can be .csv or .zip")
+    args = sys.argv[1:]
+
+    if not args:
+        print(USAGE)
         sys.exit(1)
 
-    list_file = sys.argv[1]
-    sv_file = sys.argv[2]
+    cmd = args[0].lower()
 
-    ingest_list_entries(list_file)
-    ingest_summary_valuations(sv_file)
-    add_summary_valuation_flag()
-    geocode_postcodes()
-    create_indexes()
+    if cmd == "list":
+        if len(args) < 2:
+            print("Usage: python data/ingest.py list <list_file>")
+            sys.exit(1)
+        ingest_list_entries(args[1])
 
-    print("\nIngest complete. Run queries against voa_list_entries and voa_sv_header.")
+    elif cmd == "sv":
+        if len(args) < 2:
+            print("Usage: python data/ingest.py sv <sv_file>")
+            sys.exit(1)
+        ingest_summary_valuations(args[1])
+
+    elif cmd == "post":
+        add_summary_valuation_flag()
+        create_indexes()
+
+    elif cmd == "geocode":
+        geocode_postcodes()
+
+    elif cmd == "all":
+        if len(args) < 3:
+            print("Usage: python data/ingest.py all <list_file> <sv_file>")
+            sys.exit(1)
+        ingest_list_entries(args[1])
+        ingest_summary_valuations(args[2])
+        add_summary_valuation_flag()
+        geocode_postcodes()
+        create_indexes()
+
+    else:
+        print(f"Unknown subcommand: {cmd!r}")
+        print(USAGE)
+        sys.exit(1)
+
+    print("\nDone.")
