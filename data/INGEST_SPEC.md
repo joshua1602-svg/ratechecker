@@ -36,9 +36,10 @@ One row per property assessment. Columns to ingest:
 | 6       | primary_description_text     | Human-readable description                     |
 | 15      | postcode                     | Geographic filter                              |
 | 8       | full_property_identifier     | Address string for display                     |
-| 18      | rateable_value               | The RV                                         |
-| 16      | effective_date               | When assessment came into force                |
+| 18      | rateable_value               | The RV; null for proxy deletion records — exclude these |
+| 16      | effective_date               | When assessment came into force; **null for revaluation assessments** (treat as 2026-04-01 in DB) |
 | 17      | composite_indicator          | C = mixed domestic/non-domestic                |
+| 21      | list_alteration_date         | Date of list change; **null for revaluation assessments** — must not reject null here |
 
 Exclusion rule: drop any row where composite_indicator = 'C'.
 Mixed-use properties have apportioned RVs and are invalid as comparables.
@@ -57,11 +58,11 @@ Table: voa_sv_header (record type 01)
 |---------|------------------------------|------------------------------------------------|
 | 3       | uarn                         | Join key to list entries                       |
 | 2       | assessment_reference_number  | Secondary join key — preserve for history      |
-| 17      | total_area                   | Total area in m²                               |
+| 17      | total_area_or_units          | Area in m² for area-based properties; unit count for unit-based properties — **ambiguous field**, coerce to numeric and treat as area only for NIA records (see D6) |
 | 18      | sub_total                    | Pre-adjustment valuation total                 |
 | 20      | adopted_rv                   | Final RV as shown in rating list               |
 | 27      | scat_code                    | Property type                                  |
-| 28      | unit_of_measurement          | NIA or GIA — critical for comparability        |
+| 28      | unit_of_measurement          | **NIA, GIA, EFA, GEA, RCA, OTH** — six possible values; zoning-method comparables must be NIA only, exclude all others (see D3, D6) |
 | 29      | unadjusted_price_psm         | VOA unadjusted primary survey unit rate (£/m²) |
 
 Note on field 29: The spec calls this "Unadjusted Matrix price (£/m²) for the
@@ -111,7 +112,7 @@ assessed per standard CSA rules.
 
 ### Tier 2 — Implied rate (fallback)
 
-Condition: has_summary_valuation = false OR unit_of_measurement = 'GIA'
+Condition: has_summary_valuation = false OR unit_of_measurement != 'NIA'
 
 Rate: back-calculate using standard 6.1m zone depth assumption:
       implied_zone_a_rate = rateable_value / itza_from_total_area
@@ -142,19 +143,63 @@ Launderette exclusion (modelling rule — not in VOA spec):
 SCAT 249 includes launderettes. Exclude with:
   drop rows where scat_code=249 AND primary_description_text ILIKE '%LAUNDERETTE%'
 
-GIA filter: for zoning-method comparables, only use rows where
-unit_of_measurement = 'NIA'. GIA properties are not directly comparable
-on a £/m² Zone A basis.
+Measurement filter: for zoning-method comparables, only use rows where
+unit_of_measurement = 'NIA'. All other measurement types (GIA, EFA, GEA,
+RCA, OTH) must be excluded — they are not directly comparable on a
+£/m² Zone A basis.
 
 ---
 
 ## D5: Update Cadence
 
 - Compiled 2026 list goes live 1 April 2026 — download on that date
-- Epochs refreshed periodically; bi-monthly observed for 2017 list but not
-  guaranteed as a 2026 SLA — treat as approximate
+- Bi-monthly epoch cadence **confirmed in writing** in the compiled list specification: "We look to do this bi-monthly." Treat as the expected schedule, not just an observation.
 - Weekly change-update files accumulate between epochs
 - Recommended schedule: full re-ingest on each new epoch; weekly change-update
   ingest in between
 - Monitor for new files via Azure Blob API:
   https://voaratinglists.blob.core.windows.net/downloads?restype=container&comp=list
+
+---
+
+## D6: Compiled List Specification — Corrections to Earlier Notes
+
+These corrections come from the 2026 compiled list documentation and supersede
+any conflicting statements elsewhere in this spec.
+
+### D6a: Field 28 (unit_of_measurement) — six values, not two
+
+The compiled list spec defines six valid values for field 28:
+
+| Value | Meaning                  | Use in comparables engine                      |
+|-------|--------------------------|------------------------------------------------|
+| NIA   | Net Internal Area        | **Include** — only valid basis for zoning ITZA |
+| GIA   | Gross Internal Area      | Exclude from zoning-method comparables         |
+| EFA   | Effective Floor Area     | Exclude                                        |
+| GEA   | Gross External Area      | Exclude                                        |
+| RCA   | Reduced Covered Area     | Exclude                                        |
+| OTH   | Other                    | Exclude                                        |
+
+Filter logic: `WHERE unit_of_measurement = 'NIA'` (not `!= 'GIA'`).
+Any value other than NIA is invalid as a zoning-method comparable.
+
+### D6b: Field 17 (total_area_or_units) — ambiguous for unit-based properties
+
+The compiled list spec labels this field "Total Area / Total Units."
+For area-based properties (NIA, GIA, etc.) it is m². For unit-based properties
+(e.g. car parks charged per space) it is a unit count.
+
+Ingest rule:
+- Coerce to numeric; non-numeric or negative values → NULL.
+- Treat as area (m²) only when unit_of_measurement = 'NIA'.
+- Do not use this field for non-NIA properties in the comparables engine.
+- Column name in schema: `total_area_or_units` (not `total_area`).
+
+### D6c: Null dates for revaluation assessments
+
+`effective_date` (field 16, list entries) and `list_alteration_date`
+(field 21, list entries) are **output as null** in the compiled list file for
+properties on the list from the revaluation date (1 April 2026).
+
+These properties are valid and should **not** be rejected. Ingest as NULL;
+application logic should treat NULL effective_date as 2026-04-01.

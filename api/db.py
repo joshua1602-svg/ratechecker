@@ -24,6 +24,11 @@ DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite:///./ratechecker.db")
 _engine_kwargs: dict[str, Any] = {}
 if "sqlite" in DATABASE_URL:
     _engine_kwargs["connect_args"] = {"check_same_thread": False}
+else:
+    # PostgreSQL / Supabase — SSL required, bounded pool for the API server
+    _engine_kwargs["connect_args"] = {"sslmode": "require"}
+    _engine_kwargs["pool_size"] = 5
+    _engine_kwargs["max_overflow"] = 10
 
 engine = create_engine(DATABASE_URL, **_engine_kwargs)
 
@@ -59,7 +64,7 @@ def get_comparables(
             le.scat_code,
             le.rateable_value                     AS rv,
             le.primary_description_text           AS description,
-            COALESCE(svh.total_area, :nia_fallback) AS nia_sqm,
+            COALESCE(svh.total_area_or_units, :nia_fallback) AS nia_sqm,
             svh.unadjusted_price_psm,
             svh.unit_of_measurement,
             pc.latitude                           AS lat,
@@ -74,7 +79,8 @@ def get_comparables(
             AND le.rateable_value > 0
             AND pc.latitude  BETWEEN :lat_lo AND :lat_hi
             AND pc.longitude BETWEEN :lon_lo AND :lon_hi
-            AND COALESCE(svh.total_area, :nia_fallback) BETWEEN :lo_nia AND :hi_nia
+            AND COALESCE(svh.total_area_or_units, :nia_fallback) BETWEEN :lo_nia AND :hi_nia
+            AND (svh.unit_of_measurement IS NULL OR svh.unit_of_measurement = 'NIA')
     """)
 
     try:
