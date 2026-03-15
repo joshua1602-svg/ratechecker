@@ -9,6 +9,7 @@ import os
 import sys
 import zipfile
 from contextlib import contextmanager
+from io import StringIO
 
 # Allow `from db import ...` regardless of working directory
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -19,6 +20,65 @@ from sqlalchemy import text
 from db import get_engine
 
 engine = get_engine()
+
+
+# ─────────────────────────────────────────────
+# DB WRITE HELPER
+# ─────────────────────────────────────────────
+
+def _is_postgres() -> bool:
+    url = str(engine.url)
+    return "postgresql" in url or "postgres" in url
+
+
+def _write_df(df: pd.DataFrame, table_name: str, if_exists: str) -> None:
+    """
+    Write a DataFrame to the database.
+
+    For PostgreSQL/Supabase: uses COPY FROM STDIN, which streams data as CSV
+    through the connection and is not subject to statement timeouts.  10-50x
+    faster than INSERT and reliable on slow or remote connections.
+
+    For SQLite (local dev): falls back to to_sql with small batches.
+
+    if_exists:
+      'replace' — drop the table and recreate it, then load.
+      'append'  — table already exists, stream data straight in.
+    """
+    if _is_postgres():
+        if if_exists == "replace":
+            # Create (or replace) the table schema using an empty DataFrame.
+            # Pandas infers column types from the dtypes; no data is inserted here.
+            with engine.connect() as conn:
+                df.head(0).to_sql(table_name, conn, if_exists="replace", index=False)
+                conn.commit()
+
+        # Stream data via COPY FROM STDIN — no statement timeout, single round-trip.
+        buf = StringIO()
+        df.to_csv(buf, index=False, header=True, na_rep="")
+        buf.seek(0)
+
+        raw = engine.raw_connection()
+        try:
+            with raw.cursor() as cur:
+                cur.copy_expert(
+                    f"COPY {table_name} FROM STDIN WITH (FORMAT CSV, HEADER TRUE, NULL '')",
+                    buf,
+                )
+            raw.commit()
+        finally:
+            raw.close()
+
+    else:
+        # SQLite fallback — small batches, no multi-row INSERT needed
+        df.to_sql(
+            table_name,
+            engine,
+            if_exists=if_exists,
+            index=False,
+            chunksize=1_000,
+            method="multi",
+        )
 
 # ── CRITICAL: VOA files are asterisk-delimited ASCII despite .csv extension ──
 VOA_DELIMITER = "*"
@@ -204,14 +264,7 @@ def ingest_list_entries(filepath: str) -> int:
             if processed.empty:
                 continue
 
-            processed.to_sql(
-                "voa_list_entries",
-                engine,
-                if_exists="replace" if first_write else "append",
-                index=False,
-                chunksize=5_000,
-                method="multi",
-            )
+            _write_df(processed, "voa_list_entries", "replace" if first_write else "append")
             rows_written += len(processed)
             first_write = False
 
@@ -279,14 +332,7 @@ def _flush_headers(batch: list[dict], first: bool) -> None:
     df["total_area_or_units"] = pd.to_numeric(df["total_area_or_units"], errors="coerce")
     df["adopted_rv"] = pd.to_numeric(df["adopted_rv"], errors="coerce")
     df["is_nia"] = df["unit_of_measurement"].str.strip() == "NIA"
-    df.to_sql(
-        "voa_sv_header",
-        engine,
-        if_exists="replace" if first else "append",
-        index=False,
-        chunksize=5_000,
-        method="multi",
-    )
+    _write_df(df, "voa_sv_header", "replace" if first else "append")
 
 
 def _flush_lines(batch: list[dict], first: bool) -> None:
@@ -295,14 +341,7 @@ def _flush_lines(batch: list[dict], first: bool) -> None:
     df["area"] = pd.to_numeric(df["area"], errors="coerce")
     df["price"] = pd.to_numeric(df["price"], errors="coerce")
     df["value"] = pd.to_numeric(df["value"], errors="coerce")
-    df.to_sql(
-        "voa_sv_lines",
-        engine,
-        if_exists="replace" if first else "append",
-        index=False,
-        chunksize=5_000,
-        method="multi",
-    )
+    _write_df(df, "voa_sv_lines", "replace" if first else "append")
 
 
 def ingest_summary_valuations(filepath: str) -> tuple[int, int]:
@@ -443,14 +482,7 @@ def geocode_postcodes() -> None:
             time.sleep(0.5)  # be polite to the free API
 
     df_coords = pd.DataFrame(coords)
-    df_coords.to_sql(
-        "postcode_coords",
-        engine,
-        if_exists="replace",
-        index=False,
-        chunksize=5_000,
-        method="multi",
-    )
+    _write_df(df_coords, "postcode_coords", "replace")
 
     with engine.connect() as conn:
         conn.execute(
