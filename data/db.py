@@ -19,7 +19,10 @@ if not DATABASE_URL:
 engine = create_engine(
     DATABASE_URL,
     poolclass=NullPool,
-    connect_args={"sslmode": "require"},  # Supabase requires SSL
+    connect_args={
+        "sslmode": "require",       # Supabase requires SSL
+        "options": "-c statement_timeout=0",  # disable per-statement timeout for bulk ingest
+    },
 )
 
 
