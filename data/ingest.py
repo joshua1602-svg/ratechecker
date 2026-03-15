@@ -8,11 +8,11 @@
 import os
 import sys
 import zipfile
+from contextlib import contextmanager
 
 # Allow `from db import ...` regardless of working directory
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-import numpy as np
 import pandas as pd
 from sqlalchemy import text
 
@@ -23,6 +23,36 @@ engine = get_engine()
 # ── CRITICAL: VOA files are asterisk-delimited ASCII despite .csv extension ──
 VOA_DELIMITER = "*"
 VOA_ENCODING = "latin-1"  # pragmatic default; spec is ASCII, latin-1 is a superset
+
+# Rows per read/write cycle — tune down if still hitting memory limits
+READ_CHUNK = 50_000   # rows read from CSV at once
+FLUSH_EVERY = 50_000  # rows accumulated before flushing to DB (summary valuations)
+
+
+# ─────────────────────────────────────────────
+# FILE HELPERS
+# ─────────────────────────────────────────────
+
+@contextmanager
+def _open_csv(filepath: str, name_fragment: str):
+    """
+    Context manager that yields an open file handle for a CSV (or the matching
+    member of a zip archive).  Keeping this as a context manager ensures the
+    ZipFile stays open for the full duration of chunked reads.
+    """
+    if filepath.endswith(".zip"):
+        with zipfile.ZipFile(filepath) as z:
+            candidates = [f for f in z.namelist() if name_fragment in f.lower()]
+            if not candidates:
+                raise FileNotFoundError(
+                    f"No file matching '{name_fragment}' found in {filepath}. "
+                    f"Contents: {z.namelist()}"
+                )
+            with z.open(candidates[0]) as f:
+                yield f
+    else:
+        with open(filepath, "r", encoding=VOA_ENCODING) as f:
+            yield f
 
 
 # ─────────────────────────────────────────────
@@ -60,126 +90,136 @@ LIST_ENTRY_COLUMNS = [
     "current_to_date",            # 28
 ]
 
+COLS_TO_STORE = [
+    "uarn",
+    "assessment_reference_number",
+    "ba_code",
+    "scat_code",
+    "scat_code_and_suffix",
+    "primary_description_code",
+    "primary_description_text",
+    "postcode",
+    "postcode_sector",
+    "full_property_identifier",
+    "street",
+    "town",
+    "county",
+    "rateable_value",
+    "effective_date",
+    "list_alteration_date",
+    "composite_indicator",
+    "current_from_date",
+    "current_to_date",
+]
+
 # SCAT codes for Phase 1 property types (confirmed from VOA spec Appendix 2)
 PHASE_1_SCAT_CODES = [249, 251, 409, 234, 417, 85, 416]
-# Phase 2 additions: 226, 227 (pubs) — not ingested at Phase 1
+PHASE_1_SCAT_SET = set(PHASE_1_SCAT_CODES)
 
 
-def _open_csv(filepath: str, name_fragment: str):
-    """Open a CSV from a direct path or from the matching file inside a zip."""
-    if filepath.endswith(".zip"):
-        with zipfile.ZipFile(filepath) as z:
-            candidates = [f for f in z.namelist() if name_fragment in f.lower()]
-            if not candidates:
-                raise FileNotFoundError(
-                    f"No file matching '{name_fragment}' found in {filepath}. "
-                    f"Contents: {z.namelist()}"
-                )
-            return z.open(candidates[0])
-    return open(filepath, "r", encoding=VOA_ENCODING)
+def _process_list_chunk(chunk: pd.DataFrame) -> pd.DataFrame:
+    """Apply all filters and type conversions to one chunk of list entries."""
+    # Extract numeric SCAT code (strip suffix letter, e.g. "249S" → 249)
+    chunk["scat_code"] = pd.to_numeric(
+        chunk["scat_code_and_suffix"].str.extract(r"^(\d+)")[0],
+        errors="coerce",
+    )
+
+    # Filter to Phase 1 SCAT codes
+    chunk = chunk[chunk["scat_code"].isin(PHASE_1_SCAT_SET)]
+    if chunk.empty:
+        return chunk
+
+    # Exclude composite properties
+    chunk = chunk[chunk["composite_indicator"].str.strip() != "C"]
+
+    # Exclude proxy deletion records (null rateable_value)
+    chunk["rateable_value"] = pd.to_numeric(chunk["rateable_value"], errors="coerce")
+    chunk = chunk[chunk["rateable_value"].notna()]
+
+    if chunk.empty:
+        return chunk
+
+    # Numeric type conversions
+    chunk["uarn"] = pd.to_numeric(chunk["uarn"], errors="coerce")
+    chunk["assessment_reference_number"] = pd.to_numeric(
+        chunk["assessment_reference_number"], errors="coerce"
+    )
+
+    # Postcode normalisation + sector derivation
+    chunk["postcode"] = chunk["postcode"].str.strip().str.upper()
+    chunk["postcode_sector"] = chunk["postcode"].str.extract(
+        r"^([A-Z]{1,2}\d{1,2}[A-Z]?\s\d)"
+    )[0]
+
+    # Modelling rule (D4): exclude launderettes from SCAT 249
+    launderette_mask = (chunk["scat_code"] == 249) & (
+        chunk["primary_description_text"].str.contains("LAUNDERETTE", case=False, na=False)
+    )
+    chunk = chunk[~launderette_mask]
+
+    return chunk[COLS_TO_STORE]
 
 
-def ingest_list_entries(filepath: str) -> pd.DataFrame:
+def ingest_list_entries(filepath: str) -> int:
     """
-    Ingest VOA compiled list entries into voa_list_entries.
+    Stream VOA compiled list entries into voa_list_entries in chunks.
 
     - Filters to Phase 1 SCAT codes.
     - Excludes composite properties (composite_indicator = 'C').
     - Excludes proxy deletion records (rateable_value IS NULL).
     - Excludes launderettes from SCAT 249.
     - Accepts null effective_date and list_alteration_date (see D6c).
+
+    Returns total rows written.
     """
-    print(f"Reading list entries from {filepath}...")
+    print(f"Reading list entries from {filepath} (chunk size: {READ_CHUNK:,})…")
+
+    rows_written = 0
+    chunks_read = 0
+    first_write = True
 
     with _open_csv(filepath, "listentries") as f:
-        df = pd.read_csv(
+        reader = pd.read_csv(
             f,
             sep=VOA_DELIMITER,
             encoding=VOA_ENCODING,
             header=None,
             names=LIST_ENTRY_COLUMNS,
             dtype=str,
-            low_memory=False,
+            chunksize=READ_CHUNK,
         )
 
-    print(f"Raw row count: {len(df):,}")
+        for chunk in reader:
+            chunks_read += 1
 
-    # Validate delimiter — if row count is tiny, delimiter is wrong
-    assert len(df) > 100_000, (
-        f"Row count {len(df)} is suspiciously low. "
-        "Check the delimiter is '*' not ','."
-    )
+            # Validate delimiter on the very first chunk
+            if chunks_read == 1 and len(chunk.columns) < 10:
+                raise ValueError(
+                    f"First chunk has only {len(chunk.columns)} columns — "
+                    "check the delimiter is '*' not ','."
+                )
 
-    # Extract numeric SCAT code (strip suffix letter, e.g. "249S" → 249)
-    df["scat_code"] = pd.to_numeric(
-        df["scat_code_and_suffix"].str.extract(r"^(\d+)")[0],
-        errors="coerce",
-    )
+            processed = _process_list_chunk(chunk)
+            if processed.empty:
+                continue
 
-    # Filter to Phase 1 SCAT codes
-    df = df[df["scat_code"].isin(PHASE_1_SCAT_CODES)]
-    print(f"After SCAT filter: {len(df):,} rows")
+            processed.to_sql(
+                "voa_list_entries",
+                engine,
+                if_exists="replace" if first_write else "append",
+                index=False,
+                chunksize=5_000,
+                method="multi",
+            )
+            rows_written += len(processed)
+            first_write = False
 
-    # Exclude composite properties
-    df = df[df["composite_indicator"].str.strip() != "C"]
+            if chunks_read % 10 == 0:
+                print(f"  … {chunks_read * READ_CHUNK:,} rows read, {rows_written:,} written so far")
 
-    # Exclude proxy deletion records (null rateable_value)
-    df["rateable_value"] = pd.to_numeric(df["rateable_value"], errors="coerce")
-    df = df[df["rateable_value"].notna()]
-
-    # Type conversions
-    df["uarn"] = pd.to_numeric(df["uarn"], errors="coerce")
-    df["assessment_reference_number"] = pd.to_numeric(
-        df["assessment_reference_number"], errors="coerce"
-    )
-    df["postcode"] = df["postcode"].str.strip().str.upper()
-
-    # Derive postcode sector for geographic pre-filtering (e.g. "SW19 1AB" → "SW19 1")
-    df["postcode_sector"] = df["postcode"].str.extract(
-        r"^([A-Z]{1,2}\d{1,2}[A-Z]?\s\d)"
-    )[0]
-
-    # Modelling rule (D4): exclude launderettes from SCAT 249
-    launderette_mask = (df["scat_code"] == 249) & (
-        df["primary_description_text"].str.contains("LAUNDERETTE", case=False, na=False)
-    )
-    df = df[~launderette_mask]
-    print(f"After launderette exclusion: {len(df):,} rows")
-
-    cols_to_store = [
-        "uarn",
-        "assessment_reference_number",
-        "ba_code",
-        "scat_code",
-        "scat_code_and_suffix",
-        "primary_description_code",
-        "primary_description_text",
-        "postcode",
-        "postcode_sector",
-        "full_property_identifier",
-        "street",
-        "town",
-        "county",
-        "rateable_value",
-        "effective_date",       # kept as string; NULL is valid (see D6c)
-        "list_alteration_date", # kept as string; NULL is valid (see D6c)
-        "composite_indicator",
-        "current_from_date",
-        "current_to_date",
-    ]
-    df = df[cols_to_store]
-
-    print("Writing to voa_list_entries...")
-    df.to_sql(
-        "voa_list_entries",
-        engine,
-        if_exists="replace",
-        index=False,
-        chunksize=5_000,
-        method="multi",
-    )
-    print(f"Done. {len(df):,} rows written to voa_list_entries.")
-    return df
+    print(f"Done. {rows_written:,} rows written to voa_list_entries.")
+    return rows_written
 
 
 # ─────────────────────────────────────────────
@@ -229,19 +269,77 @@ SV_LINE_COLUMNS = [
 ]
 
 
-def parse_summary_valuations(filepath: str) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """
-    Parse the multi-record-type summary valuation file.
-    Returns (df_headers, df_lines) for record types 01 and 02.
+def _flush_headers(batch: list[dict], first: bool) -> None:
+    df = pd.DataFrame(batch)
+    df["uarn"] = pd.to_numeric(df["uarn"], errors="coerce")
+    df["assessment_reference_number"] = pd.to_numeric(
+        df["assessment_reference_number"], errors="coerce"
+    )
+    df["unadjusted_price_psm"] = pd.to_numeric(df["unadjusted_price_psm"], errors="coerce")
+    df["total_area_or_units"] = pd.to_numeric(df["total_area_or_units"], errors="coerce")
+    df["adopted_rv"] = pd.to_numeric(df["adopted_rv"], errors="coerce")
+    df["is_nia"] = df["unit_of_measurement"].str.strip() == "NIA"
+    df.to_sql(
+        "voa_sv_header",
+        engine,
+        if_exists="replace" if first else "append",
+        index=False,
+        chunksize=5_000,
+        method="multi",
+    )
 
-    Record types 03–07 are not used in Phase 1 and are skipped.
-    """
-    print(f"Parsing summary valuations from {filepath}...")
 
-    headers = []
-    lines = []
+def _flush_lines(batch: list[dict], first: bool) -> None:
+    df = pd.DataFrame(batch)
+    df["uarn"] = pd.to_numeric(df["uarn"], errors="coerce")
+    df["area"] = pd.to_numeric(df["area"], errors="coerce")
+    df["price"] = pd.to_numeric(df["price"], errors="coerce")
+    df["value"] = pd.to_numeric(df["value"], errors="coerce")
+    df.to_sql(
+        "voa_sv_lines",
+        engine,
+        if_exists="replace" if first else "append",
+        index=False,
+        chunksize=5_000,
+        method="multi",
+    )
+
+
+def ingest_summary_valuations(filepath: str) -> tuple[int, int]:
+    """
+    Stream the multi-record-type summary valuation file into voa_sv_header and
+    voa_sv_lines, flushing to the DB every FLUSH_EVERY records so neither table
+    accumulates in memory.
+
+    Returns (headers_total, lines_total).
+    """
+    print(f"Parsing summary valuations from {filepath} (flush every {FLUSH_EVERY:,})…")
+
+    headers_batch: list[dict] = []
+    lines_batch: list[dict] = []
+    headers_total = 0
+    lines_total = 0
+    first_headers = True
+    first_lines = True
     current_uarn = None
     current_assessment_ref = None
+
+    def _maybe_flush_headers(force: bool = False) -> None:
+        nonlocal headers_batch, headers_total, first_headers
+        if headers_batch and (force or len(headers_batch) >= FLUSH_EVERY):
+            _flush_headers(headers_batch, first_headers)
+            headers_total += len(headers_batch)
+            headers_batch = []
+            first_headers = False
+            print(f"  … {headers_total:,} header rows written")
+
+    def _maybe_flush_lines(force: bool = False) -> None:
+        nonlocal lines_batch, lines_total, first_lines
+        if lines_batch and (force or len(lines_batch) >= FLUSH_EVERY):
+            _flush_lines(lines_batch, first_lines)
+            lines_total += len(lines_batch)
+            lines_batch = []
+            first_lines = False
 
     if filepath.endswith(".zip"):
         with zipfile.ZipFile(filepath) as z:
@@ -270,82 +368,27 @@ def parse_summary_valuations(filepath: str) -> tuple[pd.DataFrame, pd.DataFrame]
             row = dict(zip(SV_HEADER_COLUMNS, padded[: len(SV_HEADER_COLUMNS)]))
             current_uarn = row["uarn"]
             current_assessment_ref = row["assessment_reference_number"]
-            headers.append(row)
+            headers_batch.append(row)
+            _maybe_flush_headers()
 
         elif record_type == "02":
             padded = fields + [""] * (len(SV_LINE_COLUMNS) - len(fields))
             row = dict(zip(SV_LINE_COLUMNS, padded[: len(SV_LINE_COLUMNS)]))
             row["uarn"] = current_uarn
             row["assessment_reference_number"] = current_assessment_ref
-            lines.append(row)
+            lines_batch.append(row)
+            _maybe_flush_lines()
 
         # Record types 03–07: not needed for Phase 1 — skip
 
     raw_file.close()
 
-    df_headers = pd.DataFrame(headers)
-    df_lines = pd.DataFrame(lines)
-    print(f"Parsed {len(df_headers):,} summary valuation headers")
-    print(f"Parsed {len(df_lines):,} line items")
-    return df_headers, df_lines
+    # Final flush of any remaining rows
+    _maybe_flush_headers(force=True)
+    _maybe_flush_lines(force=True)
 
-
-def ingest_summary_valuations(filepath: str) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """
-    Ingest summary valuation headers and line items.
-
-    Stores all unit_of_measurement values; NIA filtering is applied at
-    query time by the comparables engine, not at ingest time.
-    """
-    df_headers, df_lines = parse_summary_valuations(filepath)
-
-    # Type conversions for headers
-    df_headers["uarn"] = pd.to_numeric(df_headers["uarn"], errors="coerce")
-    df_headers["assessment_reference_number"] = pd.to_numeric(
-        df_headers["assessment_reference_number"], errors="coerce"
-    )
-    df_headers["unadjusted_price_psm"] = pd.to_numeric(
-        df_headers["unadjusted_price_psm"], errors="coerce"
-    )
-    # D6b: total_area_or_units is area for NIA, unit count otherwise — coerce numeric
-    df_headers["total_area_or_units"] = pd.to_numeric(
-        df_headers["total_area_or_units"], errors="coerce"
-    )
-    df_headers["adopted_rv"] = pd.to_numeric(df_headers["adopted_rv"], errors="coerce")
-
-    # Flag NIA properties (the only valid zoning-method comparables — see D6a)
-    df_headers["is_nia"] = df_headers["unit_of_measurement"].str.strip() == "NIA"
-
-    print("Writing to voa_sv_header...")
-    df_headers.to_sql(
-        "voa_sv_header",
-        engine,
-        if_exists="replace",
-        index=False,
-        chunksize=5_000,
-        method="multi",
-    )
-
-    # Line items
-    df_lines["uarn"] = pd.to_numeric(df_lines["uarn"], errors="coerce")
-    df_lines["area"] = pd.to_numeric(df_lines["area"], errors="coerce")
-    df_lines["price"] = pd.to_numeric(df_lines["price"], errors="coerce")
-    df_lines["value"] = pd.to_numeric(df_lines["value"], errors="coerce")
-
-    print("Writing to voa_sv_lines...")
-    df_lines.to_sql(
-        "voa_sv_lines",
-        engine,
-        if_exists="replace",
-        index=False,
-        chunksize=5_000,
-        method="multi",
-    )
-
-    print(
-        f"Done. {len(df_headers):,} headers and {len(df_lines):,} lines written."
-    )
-    return df_headers, df_lines
+    print(f"Done. {headers_total:,} headers and {lines_total:,} lines written.")
+    return headers_total, lines_total
 
 
 # ─────────────────────────────────────────────
@@ -369,9 +412,9 @@ def geocode_postcodes() -> None:
         )
         postcodes = [r[0] for r in result.fetchall()]
 
-    print(f"Geocoding {len(postcodes):,} unique postcodes via postcodes.io...")
+    print(f"Geocoding {len(postcodes):,} unique postcodes via postcodes.io…")
 
-    coords = []
+    coords: list[dict] = []
     batch_size = 100
 
     for i in range(0, len(postcodes), batch_size):
@@ -427,7 +470,7 @@ def geocode_postcodes() -> None:
 
 def add_summary_valuation_flag() -> None:
     """Add has_summary_valuation boolean to voa_list_entries."""
-    print("Adding has_summary_valuation flag...")
+    print("Adding has_summary_valuation flag…")
     with engine.connect() as conn:
         conn.execute(
             text("""
@@ -471,7 +514,7 @@ def add_summary_valuation_flag() -> None:
 
 def create_indexes() -> None:
     """Create indexes after data load for query performance."""
-    print("Creating indexes...")
+    print("Creating indexes…")
     with engine.connect() as conn:
         for stmt in [
             "CREATE INDEX IF NOT EXISTS idx_le_postcode_sector ON voa_list_entries(postcode_sector)",
