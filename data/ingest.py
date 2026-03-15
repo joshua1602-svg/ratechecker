@@ -70,14 +70,13 @@ def _write_df(df: pd.DataFrame, table_name: str, if_exists: str) -> None:
             raw.close()
 
     else:
-        # SQLite fallback — small batches, no multi-row INSERT needed
+        # SQLite fallback — executemany (method=None) is faster than multi-row INSERT for SQLite
         df.to_sql(
             table_name,
             engine,
             if_exists=if_exists,
             index=False,
             chunksize=1_000,
-            method="multi",
         )
 
 # ── CRITICAL: VOA files are asterisk-delimited ASCII despite .csv extension ──
