@@ -20,7 +20,7 @@
         "uprn": { "type": "string" },
         "business_type": {
           "type": "string",
-          "enum": ["Restaurant/Café", "Retail", "Hair/Beauty", "Nursery", "Pub"]
+          "enum": ["restaurant_cafe", "retail", "hair_beauty", "nursery", "pub"]
         },
         "voa_rv": { "type": "number", "minimum": 0 },
         "nia_sqm": { "type": "number", "minimum": 1 },
@@ -68,7 +68,7 @@
         "properties": {
           "property": {
             "properties": {
-              "business_type": { "const": "Nursery" }
+              "business_type": { "const": "nursery" }
             }
           }
         }
