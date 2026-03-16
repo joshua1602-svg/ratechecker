@@ -19,7 +19,7 @@ import os
 
 import pandas as pd
 from dotenv import load_dotenv
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine
 
 from api.db import get_comparables
 from api.engine.csa import Comparable, run_csa
@@ -36,9 +36,12 @@ SAMPLES = [
                 le.postcode,
                 le.primary_description_text,
                 le.rateable_value,
-                svh.total_area_or_units AS nia_sqm
+                svh.total_area_or_units AS nia_sqm,
+                pc.latitude,
+                pc.longitude
             FROM voa_list_entries le
             JOIN voa_sv_header svh ON le.uarn = svh.uarn
+            JOIN postcode_coords pc ON le.postcode = pc.postcode
             WHERE le.scat_code IN (249, 251)
             AND le.rateable_value > 0
             AND svh.total_area_or_units > 0
@@ -56,9 +59,12 @@ SAMPLES = [
                 le.postcode,
                 le.primary_description_text,
                 le.rateable_value,
-                svh.total_area_or_units AS nia_sqm
+                svh.total_area_or_units AS nia_sqm,
+                pc.latitude,
+                pc.longitude
             FROM voa_list_entries le
             JOIN voa_sv_header svh ON le.uarn = svh.uarn
+            JOIN postcode_coords pc ON le.postcode = pc.postcode
             WHERE le.scat_code IN (409, 234)
             AND le.rateable_value > 0
             AND svh.total_area_or_units > 0
@@ -76,9 +82,12 @@ SAMPLES = [
                 le.postcode,
                 le.primary_description_text,
                 le.rateable_value,
-                svh.total_area_or_units AS nia_sqm
+                svh.total_area_or_units AS nia_sqm,
+                pc.latitude,
+                pc.longitude
             FROM voa_list_entries le
             JOIN voa_sv_header svh ON le.uarn = svh.uarn
+            JOIN postcode_coords pc ON le.postcode = pc.postcode
             WHERE le.scat_code = 85
             AND le.rateable_value > 0
             AND svh.total_area_or_units > 0
@@ -90,19 +99,6 @@ SAMPLES = [
     },
 ]
 
-
-def get_coords(postcode: str):
-    sql = text("""
-        SELECT latitude, longitude
-        FROM postcode_coords
-        WHERE postcode = :postcode
-        LIMIT 1
-    """)
-    with engine.connect() as conn:
-        row = conn.execute(sql, {"postcode": postcode}).fetchone()
-    if not row:
-        return None, None
-    return float(row.latitude), float(row.longitude)
 
 
 MIN_COMPS = 3  # fall back to outward code if sector yields fewer than this
@@ -149,33 +145,17 @@ for sample in SAMPLES:
     df = pd.read_sql(sample["sql"], engine)
     print(f"  Found {len(df)} rows")
 
-    for _, row in df.iterrows():
+    for i, (_, row) in enumerate(df.iterrows(), 1):
         uarn = row["uarn"]
         postcode = row["postcode"]
         desc = row["primary_description_text"]
         voa_rv = row["rateable_value"]
         nia_sqm = row["nia_sqm"]
+        lat = float(row["latitude"])
+        lon = float(row["longitude"])
+        print(f"  [{i}/{len(df)}] {postcode} ...", end="\r", flush=True)
 
         try:
-            lat, lon = get_coords(postcode)
-            if lat is None or lon is None:
-                all_rows.append({
-                    "segment": sample["label"],
-                    "uarn": uarn,
-                    "postcode": postcode,
-                    "postcode_sector": postcode_sector(postcode),
-                    "comp_source": None,
-                    "primary_description_text": desc,
-                    "voa_rv": voa_rv,
-                    "model_rv": None,
-                    "pct_diff": None,
-                    "confidence": None,
-                    "comparable_count": 0,
-                    "signal": None,
-                    "error": "No postcode coordinates found",
-                })
-                continue
-
             sector = postcode_sector(postcode)
             raw_comps = get_comparables(
                 lat=lat,
@@ -251,6 +231,8 @@ for sample in SAMPLES:
                 "signal": None,
                 "error": str(e),
             })
+
+    print()  # newline after the \r progress indicator
 
 out = pd.DataFrame(all_rows)
 out.to_csv("quick_test_results.csv", index=False)
