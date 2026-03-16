@@ -480,28 +480,40 @@ def geocode_postcodes() -> None:
 
     for i in range(0, len(postcodes), batch_size):
         batch = postcodes[i : i + batch_size]
-        try:
-            resp = httpx.post(
-                "https://api.postcodes.io/postcodes",
-                json={"postcodes": batch},
-                timeout=30.0,
-            )
-            for item in resp.json().get("result", []):
-                if item and item.get("result"):
-                    r = item["result"]
-                    coords.append(
-                        {
-                            "postcode": r["postcode"],
-                            "latitude": r["latitude"],
-                            "longitude": r["longitude"],
-                        }
-                    )
-        except Exception as exc:
-            print(f"  Batch {i // batch_size + 1} failed: {exc} — skipping")
+        batch_num = i // batch_size + 1
+
+        # Retry up to 3 times with exponential backoff before skipping
+        for attempt in range(1, 4):
+            try:
+                resp = httpx.post(
+                    "https://api.postcodes.io/postcodes",
+                    json={"postcodes": batch},
+                    timeout=30.0,
+                )
+                for item in resp.json().get("result", []):
+                    if item and item.get("result"):
+                        r = item["result"]
+                        coords.append(
+                            {
+                                "postcode": r["postcode"],
+                                "latitude": r["latitude"],
+                                "longitude": r["longitude"],
+                            }
+                        )
+                break  # success
+            except Exception as exc:
+                if attempt == 3:
+                    print(f"  Batch {batch_num} failed after 3 attempts: {exc} — skipping")
+                else:
+                    wait = 2 ** attempt  # 2s, 4s
+                    print(f"  Batch {batch_num} attempt {attempt} failed: {exc} — retrying in {wait}s…")
+                    time.sleep(wait)
+
+        # Small pause between every batch to avoid overwhelming the free API
+        time.sleep(0.1)
 
         if (i // batch_size) % 100 == 0 and i > 0:
             print(f"  Progress: {i:,} / {len(postcodes):,} postcodes geocoded…")
-            time.sleep(0.5)  # be polite to the free API
 
     df_coords = pd.DataFrame(coords)
     _write_df(df_coords, "postcode_coords", "replace")
