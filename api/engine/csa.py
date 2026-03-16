@@ -50,7 +50,7 @@ class Comparable:
         return "implied"
 
     def zone_a_rate(self, zone_depth_m: float = 6.1) -> Optional[float]:
-        """Return the Zone A equivalent rate (£/m²)."""
+        """Return the Zone A equivalent rate (£/m²).  Kept for report-flow use."""
         if self.rate_source == "voa_published" and self.unadjusted_price_psm:
             return float(self.unadjusted_price_psm)
         # Tier 2: back-calculate from RV using standard ITZA model
@@ -58,6 +58,32 @@ class Comparable:
         if itza > 0:
             return self.rv / itza
         return None
+
+    def normalised_rate(self) -> tuple[Optional[float], str]:
+        """Return (rate_£_per_sqm_nia, tier) for use in CSA tone derivation.
+
+        Tier priority (explicit and deterministic):
+          1. 'unadjusted_psm'  — svh.unadjusted_price_psm, used when the
+             comparable has a VOA summary valuation with NIA measurement and
+             a positive published rate.  This is the most reliable input.
+          2. 'rv_over_nia'     — rv / nia_sqm, used when no published rate is
+             available but the NIA area is known and positive.
+          3. 'excluded'        — neither can be computed safely; returns
+             (None, 'excluded').  The caller must skip this comparable.
+
+        Both tiers produce a £/m² NIA rate so they are directly comparable
+        and can be safely combined in the same weighted-median pool.
+        """
+        if (
+            self.has_summary
+            and self.unit_of_measurement == "NIA"
+            and self.unadjusted_price_psm is not None
+            and float(self.unadjusted_price_psm) > 0
+        ):
+            return float(self.unadjusted_price_psm), "unadjusted_psm"
+        if self.nia_sqm and self.nia_sqm > 0:
+            return self.rv / self.nia_sqm, "rv_over_nia"
+        return None, "excluded"
 
 
 # ---------------------------------------------------------------------------
@@ -215,12 +241,18 @@ def run_csa(
     if not with_dist:
         return _insufficient_data()
 
-    # --- Extract Zone A rates and combined weights ---
+    # --- Extract normalised NIA rates and combined weights ---
+    # Both tiers (unadjusted_psm and rv_over_nia) produce £/m² NIA so they
+    # are directly comparable in the weighted-median pool.
     rated: list[tuple[Comparable, float, float, float]] = []  # (comp, dist, rate, weight)
+    tier_counts: dict[str, int] = {"unadjusted_psm": 0, "rv_over_nia": 0}
+    excluded_no_rate = 0
     for c, d in with_dist:
-        rate = c.zone_a_rate(zone_depth)
+        rate, tier = c.normalised_rate()
         if rate is None or rate <= 0:
+            excluded_no_rate += 1
             continue
+        tier_counts[tier] = tier_counts.get(tier, 0) + 1
         w_prox = _proximity_weight(d, rules)
         w_src = _source_weight(c, rules)
         rated.append((c, d, rate, w_prox * w_src))
@@ -256,8 +288,10 @@ def run_csa(
         confidence = "Low"
 
     # --- Estimated RV ---
-    itza = itza_from_nia(nia_sqm, zone_depth)
-    estimated_rv = round(tone * itza / 100) * 100  # round to nearest £100
+    # Rate is £/m² NIA; multiply by subject NIA to reconstruct RV.
+    # This is consistent for all three segments (retail, restaurant_cafe,
+    # nursery) because get_comparables() only returns NIA-measured properties.
+    estimated_rv = round(tone * nia_sqm / 100) * 100  # round to nearest £100
 
     # --- Signal ---
     if voa_rv <= 0:
@@ -283,6 +317,11 @@ def run_csa(
         "tone_rate": tone,
         "estimated_rv": estimated_rv,
         "confidence": confidence,
+        "rate_normalisation": {
+            "tier_unadjusted_psm": tier_counts.get("unadjusted_psm", 0),
+            "tier_rv_over_nia": tier_counts.get("rv_over_nia", 0),
+            "excluded_no_rate": excluded_no_rate,
+        },
     }
 
 
@@ -334,21 +373,21 @@ def _explanation(
         delta = voa_rv - estimated_rv
         return (
             f"Based on {n_comps} comparable {label} properties nearby, the market tone is "
-            f"approximately £{tone:,.0f}/m² Zone A. This gives an estimated rateable value of "
+            f"approximately £{tone:,.0f}/m². This gives an estimated rateable value of "
             f"£{estimated_rv:,.0f}, suggesting your property may be overassessed by around "
             f"£{delta:,.0f} per year. Confidence: {confidence}."
         )
     if signal == "Medium":
         return (
             f"Based on {n_comps} comparable {label} properties nearby, the local tone of "
-            f"£{tone:,.0f}/m² Zone A gives an estimated RV of £{estimated_rv:,.0f}. There may "
+            f"£{tone:,.0f}/m² gives an estimated RV of £{estimated_rv:,.0f}. There may "
             f"be a modest case for overassessment against your current RV of £{voa_rv:,.0f}. "
             f"Confidence: {confidence}."
         )
     if signal == "Low":
         return (
             f"Based on {n_comps} comparable {label} properties nearby, your rateable value "
-            f"appears broadly in line with the local market tone of £{tone:,.0f}/m² Zone A. "
+            f"appears broadly in line with the local market tone of £{tone:,.0f}/m². "
             f"Confidence: {confidence}."
         )
     return "Assessment complete."
