@@ -478,42 +478,45 @@ def geocode_postcodes() -> None:
     coords: list[dict] = []
     batch_size = 100
 
-    for i in range(0, len(postcodes), batch_size):
-        batch = postcodes[i : i + batch_size]
-        batch_num = i // batch_size + 1
+    # Use a persistent client so one TCP/SSL connection is reused across all
+    # batches.  Creating a new SSL handshake per request (httpx.post()) caused
+    # frequent "Server disconnected" failures on Windows with 1,200+ batches.
+    with httpx.Client(timeout=httpx.Timeout(60.0, connect=15.0)) as client:
+        for i in range(0, len(postcodes), batch_size):
+            batch = postcodes[i : i + batch_size]
+            batch_num = i // batch_size + 1
 
-        # Retry up to 3 times with exponential backoff before skipping
-        for attempt in range(1, 4):
-            try:
-                resp = httpx.post(
-                    "https://api.postcodes.io/postcodes",
-                    json={"postcodes": batch},
-                    timeout=30.0,
-                )
-                for item in resp.json().get("result", []):
-                    if item and item.get("result"):
-                        r = item["result"]
-                        coords.append(
-                            {
-                                "postcode": r["postcode"],
-                                "latitude": r["latitude"],
-                                "longitude": r["longitude"],
-                            }
-                        )
-                break  # success
-            except Exception as exc:
-                if attempt == 3:
-                    print(f"  Batch {batch_num} failed after 3 attempts: {exc} — skipping")
-                else:
-                    wait = 2 ** attempt  # 2s, 4s
-                    print(f"  Batch {batch_num} attempt {attempt} failed: {exc} — retrying in {wait}s…")
-                    time.sleep(wait)
+            # Retry up to 3 times with exponential backoff before skipping
+            for attempt in range(1, 4):
+                try:
+                    resp = client.post(
+                        "https://api.postcodes.io/postcodes",
+                        json={"postcodes": batch},
+                    )
+                    for item in resp.json().get("result", []):
+                        if item and item.get("result"):
+                            r = item["result"]
+                            coords.append(
+                                {
+                                    "postcode": r["postcode"],
+                                    "latitude": r["latitude"],
+                                    "longitude": r["longitude"],
+                                }
+                            )
+                    break  # success
+                except Exception as exc:
+                    if attempt == 3:
+                        print(f"  Batch {batch_num} failed after 3 attempts: {exc} — skipping")
+                    else:
+                        wait = 2 ** attempt  # 2s, 4s
+                        print(f"  Batch {batch_num} attempt {attempt} failed: {exc} — retrying in {wait}s…")
+                        time.sleep(wait)
 
-        # Small pause between every batch to avoid overwhelming the free API
-        time.sleep(0.1)
+            # Small pause between every batch to avoid overwhelming the free API
+            time.sleep(0.1)
 
-        if (i // batch_size) % 100 == 0 and i > 0:
-            print(f"  Progress: {i:,} / {len(postcodes):,} postcodes geocoded…")
+            if (i // batch_size) % 100 == 0 and i > 0:
+                print(f"  Progress: {i:,} / {len(postcodes):,} postcodes geocoded…")
 
     df_coords = pd.DataFrame(coords)
     _write_df(df_coords, "postcode_coords", "replace")
