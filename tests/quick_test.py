@@ -221,9 +221,20 @@ for sample in SAMPLES:
             )
 
             model_rv = result.get("estimated_rv")
+            tone_rate = result.get("tone_rate")
             pct_diff = None
             if model_rv not in (None, 0) and voa_rv not in (None, 0):
                 pct_diff = ((model_rv - voa_rv) / voa_rv) * 100
+
+            # Diagnostic: subject implied VOA rate on the same basis the model used
+            rn = result.get("rate_normalisation") or {}
+            basis_label = rn.get("subject_basis_label")
+            subject_basis = rn.get("subject_basis_sqm")
+            voa_implied_rate = (
+                voa_rv / subject_basis
+                if subject_basis and subject_basis > 0
+                else None
+            )
 
             all_rows.append({
                 "segment": sample["label"],
@@ -235,6 +246,13 @@ for sample in SAMPLES:
                 "voa_rv": voa_rv,
                 "model_rv": model_rv,
                 "pct_diff": pct_diff,
+                "tone_rate": round(tone_rate, 2) if tone_rate else None,
+                "voa_implied_rate": round(voa_implied_rate, 2) if voa_implied_rate else None,
+                "basis": basis_label,
+                "subject_basis_sqm": subject_basis,
+                "tier_psm": rn.get("tier_unadjusted_psm"),
+                "tier_rv_nia": rn.get("tier_rv_over_nia"),
+                "excluded": rn.get("excluded_no_rate"),
                 "confidence": result.get("confidence"),
                 "comparable_count": result.get("comparable_count"),
                 "signal": result.get("signal"),
@@ -252,6 +270,13 @@ for sample in SAMPLES:
                 "voa_rv": voa_rv,
                 "model_rv": None,
                 "pct_diff": None,
+                "tone_rate": None,
+                "voa_implied_rate": None,
+                "basis": None,
+                "subject_basis_sqm": None,
+                "tier_psm": None,
+                "tier_rv_nia": None,
+                "excluded": None,
                 "confidence": None,
                 "comparable_count": 0,
                 "signal": None,
@@ -266,4 +291,7 @@ out.to_csv("quick_test_results.csv", index=False)
 print()
 print("Done. Saved: quick_test_results.csv")
 print()
-print(out[["segment", "postcode", "postcode_sector", "comp_source", "voa_rv", "model_rv", "pct_diff", "confidence", "comparable_count", "signal", "error"]].head(20).to_string(index=False))
+print(out[["segment", "postcode", "voa_rv", "model_rv", "pct_diff",
+           "tone_rate", "voa_implied_rate", "basis", "subject_basis_sqm",
+           "tier_psm", "tier_rv_nia", "comparable_count", "confidence",
+           "signal", "error"]].head(30).to_string(index=False))

@@ -86,22 +86,59 @@ class TestToneIsRateBased:
             f"Expected tone ≈ 200, got {result['tone_rate']}"
         )
 
-    def test_estimated_rv_uses_nia_not_itza(self):
+    def test_retail_reconstruction_uses_itza_not_nia(self):
         """
-        estimated_rv must equal tone × subject_nia, not tone × ITZA.
+        For retail, estimated_rv must equal tone × ITZA, not tone × NIA.
 
-        With tone = £200/m² and subject NIA = 100 m²:
-          NIA reconstruction:  200 × 100 = £20,000  ✓
-          ITZA reconstruction: 200 × ≈57 = ~£11,400  ✗  (itza_from_nia(100))
+        VOA values retail on ITZA (Zone A basis).  unadjusted_price_psm is a
+        Zone A rate; total_area_or_units in the SV header is ITZA.
+        Multiplying a Zone A rate by NIA instead of ITZA would overvalue
+        by approximately NIA/ITZA ≈ 1.75 for a typical 1:3 aspect shop.
+
+        Zone A rate implied by comp: rv / itza_from_nia(nia_sqm)
+        Subject ITZA:                itza_from_nia(100) ≈ 57.3 m²
+        Expected estimated_rv:       Zone_A_rate × 57.3 ≈ comp rv (self-consistent)
         """
-        comp = _comp("A", rv=20_000, nia_sqm=100,
-                     unadjusted_price_psm=200.0, has_summary=True)
-        result = _run([comp], nia_sqm=100.0)
+        from api.engine.csa import itza_from_nia
+        nia = 100.0
+        zone_a_rate = 200.0
+        itza = itza_from_nia(nia)
+        rv = zone_a_rate * itza  # what VOA would record: rate × ITZA
+
+        # Build a comparable whose unadjusted_price_psm IS the Zone A rate
+        # (not rv/nia — that would be an NIA rate, which is only correct for nurseries).
+        comp = _comp("A", rv=rv, nia_sqm=nia,
+                     unadjusted_price_psm=zone_a_rate, has_summary=True)
+        result = _run([comp], nia_sqm=nia, business_type="retail")
 
         assert result["signal"] != "Insufficient Data"
-        assert result["estimated_rv"] == pytest.approx(20_000, abs=200), (
-            f"Expected estimated_rv ≈ 20,000, got {result['estimated_rv']}"
+        expected = round(zone_a_rate * itza / 100) * 100
+        assert result["estimated_rv"] == pytest.approx(expected, abs=200), (
+            f"Expected estimated_rv ≈ {expected} (tone×ITZA), got {result['estimated_rv']}"
         )
+        assert result["rate_normalisation"]["subject_basis_label"] == "ITZA"
+
+    def test_nursery_reconstruction_uses_nia(self):
+        """
+        For nursery, estimated_rv must equal tone × NIA.
+
+        Nurseries are valued on NIA only; unadjusted_price_psm is an NIA rate.
+        """
+        nia = 200.0
+        nia_rate = 120.0
+        rv = nia_rate * nia  # nursery: rate × NIA = RV
+
+        comp = _comp("A", rv=rv, nia_sqm=nia,
+                     unadjusted_price_psm=nia_rate, has_summary=True,
+                     scat_code=85)
+        result = _run([comp], nia_sqm=nia, business_type="nursery")
+
+        assert result["signal"] != "Insufficient Data"
+        expected = round(nia_rate * nia / 100) * 100
+        assert result["estimated_rv"] == pytest.approx(expected, abs=200), (
+            f"Expected estimated_rv ≈ {expected} (tone×NIA), got {result['estimated_rv']}"
+        )
+        assert result["rate_normalisation"]["subject_basis_label"] == "NIA"
 
 
 # ---------------------------------------------------------------------------

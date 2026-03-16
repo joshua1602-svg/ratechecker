@@ -288,10 +288,29 @@ def run_csa(
         confidence = "Low"
 
     # --- Estimated RV ---
-    # Rate is £/m² NIA; multiply by subject NIA to reconstruct RV.
-    # This is consistent for all three segments (retail, restaurant_cafe,
-    # nursery) because get_comparables() only returns NIA-measured properties.
-    estimated_rv = round(tone * nia_sqm / 100) * 100  # round to nearest £100
+    # The reconstruction basis must match the rate basis used by the comparables.
+    #
+    # Retail / restaurant_cafe: VOA values these on ITZA (In Terms of Zone A).
+    #   svh.total_area_or_units for these properties is ITZA, and
+    #   unadjusted_price_psm is the Zone A rate (£/m² Zone A).
+    #   Tier 2 (rv / nia_sqm where nia_sqm=ITZA) also yields the Zone A rate.
+    #   → Correct reconstruction: Zone A rate × subject ITZA
+    #
+    # Nursery: VOA values on NIA only (no zoning).
+    #   unadjusted_price_psm is an NIA rate; total_area_or_units is NIA.
+    #   → Correct reconstruction: NIA rate × subject NIA
+    #
+    # Using NIA reconstruction for retail produces a ~1.75× uplift because
+    # NIA / ITZA ≈ 1.75 for a typical rectangular shop (1:3 aspect ratio).
+    if business_type == "nursery":
+        estimated_rv = round(tone * nia_sqm / 100) * 100
+        subject_basis = nia_sqm
+        basis_label = "NIA"
+    else:
+        itza = itza_from_nia(nia_sqm, zone_depth)
+        estimated_rv = round(tone * itza / 100) * 100
+        subject_basis = itza
+        basis_label = "ITZA"
 
     # --- Signal ---
     if voa_rv <= 0:
@@ -321,6 +340,8 @@ def run_csa(
             "tier_unadjusted_psm": tier_counts.get("unadjusted_psm", 0),
             "tier_rv_over_nia": tier_counts.get("rv_over_nia", 0),
             "excluded_no_rate": excluded_no_rate,
+            "subject_basis_sqm": round(subject_basis, 2),
+            "subject_basis_label": basis_label,
         },
     }
 
