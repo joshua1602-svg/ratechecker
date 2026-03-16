@@ -81,6 +81,8 @@ def itza_from_nia(nia_sqm: float, zone_depth_m: float = 6.1) -> float:
     Assumes a rectangular unit with a 1:3 width-to-depth aspect ratio, which is
     the standard fallback when measured frontage/depth are not supplied.
     This is consistent with the Tier 2 implied-rate approach in INGEST_SPEC.md.
+
+    When actual frontage and depth are available, prefer itza_from_geometry().
     """
     if nia_sqm <= 0:
         return 0.0
@@ -88,6 +90,17 @@ def itza_from_nia(nia_sqm: float, zone_depth_m: float = 6.1) -> float:
     aspect_ratio = 3.0  # depth ÷ width; typical high-street retail
     width = math.sqrt(nia_sqm / aspect_ratio)
     depth_total = nia_sqm / width  # == width * aspect_ratio
+
+    return itza_from_geometry(width, depth_total, zone_depth_m)
+
+
+def itza_from_geometry(width_m: float, depth_m: float, zone_depth_m: float = 6.1) -> float:
+    """
+    Compute ITZA from measured frontage (width) and depth using the standard
+    halving method.  Used when actual property geometry is known.
+    """
+    if width_m <= 0 or depth_m <= 0:
+        return 0.0
 
     zone_relativities = [
         (zone_depth_m, 1.000),
@@ -97,10 +110,10 @@ def itza_from_nia(nia_sqm: float, zone_depth_m: float = 6.1) -> float:
     ]
 
     itza = 0.0
-    remaining = depth_total
+    remaining = depth_m
     for zone_depth, relativity in zone_relativities:
         used = min(remaining, zone_depth)
-        itza += width * used * relativity
+        itza += width_m * used * relativity
         remaining -= used
         if remaining <= 0:
             break

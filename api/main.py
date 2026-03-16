@@ -6,6 +6,7 @@ import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from api.db import count_voa_rows, ensure_runtime_indexes
 from api.routes.assess import router as assess_router
 from api.routes.purchase import router as purchase_router
 
@@ -30,6 +31,24 @@ app.include_router(assess_router)
 app.include_router(purchase_router)
 
 
+@app.on_event("startup")
+def startup() -> None:
+    """Create any missing runtime indexes on the VOA tables."""
+    try:
+        ensure_runtime_indexes()
+    except Exception:
+        # Tables may not exist yet in a fresh dev environment — not fatal
+        pass
+
+
 @app.get("/health", tags=["ops"])
 def health() -> dict:
-    return {"status": "ok"}
+    """
+    Returns database row count so callers can confirm the VOA dataset is loaded.
+    Returns voa_row_count: null if the table is not yet populated.
+    """
+    try:
+        n = count_voa_rows()
+    except Exception:
+        n = None
+    return {"status": "ok", "voa_row_count": n}

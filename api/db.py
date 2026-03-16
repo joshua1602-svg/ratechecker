@@ -16,8 +16,11 @@ import math
 import os
 from typing import Any
 
+from dotenv import load_dotenv
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session
+
+load_dotenv()  # must come before os.environ.get so .env values are present
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite:///./ratechecker.db")
 
@@ -102,3 +105,35 @@ def get_comparables(
     except Exception:
         # Database not yet populated — caller will return "Insufficient Data"
         return []
+
+
+def count_voa_rows() -> int:
+    """
+    Return the number of rows in voa_list_entries.
+    Used by the /health endpoint to confirm the VOA dataset is loaded.
+    Raises if the table does not exist or the connection fails.
+    """
+    with Session(engine) as session:
+        return session.execute(text("SELECT COUNT(*) FROM voa_list_entries")).scalar()
+
+
+def ensure_runtime_indexes() -> None:
+    """
+    Create indexes needed for the API query path that are not created by the
+    ingest pipeline.  All statements use IF NOT EXISTS — safe to call on every
+    startup against an already-indexed database.
+
+    Indexes added here (beyond what data/ingest.py creates):
+      - voa_list_entries(postcode)  — used in the JOIN to postcode_coords
+      - postcode_coords(latitude, longitude) — used in the bounding-box WHERE clause
+    """
+    stmts = [
+        # The ingest pipeline indexes postcode_sector; the API query joins on postcode
+        "CREATE INDEX IF NOT EXISTS idx_le_postcode ON voa_list_entries(postcode)",
+        # Bounding-box pre-filter scans postcode_coords on lat/lon
+        "CREATE INDEX IF NOT EXISTS idx_pc_latlon ON postcode_coords(latitude, longitude)",
+    ]
+    with Session(engine) as session:
+        for stmt in stmts:
+            session.execute(text(stmt))
+        session.commit()

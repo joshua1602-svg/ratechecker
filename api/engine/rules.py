@@ -29,6 +29,20 @@ def csa_rules() -> dict:
 
 
 def general_rules() -> dict:
+    """
+    Load the shared general rules (rules/general.yaml).
+
+    NOTE: general_rules() is intentionally NOT called by the valuation engine.
+    Each sector YAML file (retail.yaml, restaurant_cafe.yaml, nursery.yaml)
+    explicitly declares its own allowances and zoning parameters, which fully
+    cover the definitions in general.yaml for Phase 1 property types.  The
+    sector-specific values are the authoritative source; general.yaml serves
+    as reference documentation and a fallback for future sectors.
+
+    If a new sector is added that does not have its own allowances block, the
+    engine should merge general_rules()["allowances"] as a base before
+    applying sector overrides.
+    """
     return _load("general")["general_rules"]
 
 

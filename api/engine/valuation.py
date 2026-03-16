@@ -6,9 +6,10 @@ Applies per-property allowances from the relevant business-type rule file.
 """
 from __future__ import annotations
 
+import re
 from typing import Optional
 
-from api.engine.csa import itza_from_nia
+from api.engine.csa import itza_from_geometry, itza_from_nia
 from api.engine.rules import business_rules
 from api.models import AreasInput, FlagsInput, NurseryInput, PropertyInput
 
@@ -25,7 +26,7 @@ def calculate_rv(
 
     Returns a dict containing:
         method, rv, base_rv, adjustments, adjustment_multiplier,
-        and method-specific fields (itza / nia / tone_rate).
+        geometry_assumed, and method-specific fields (itza / nia / tone_rate).
     """
     btype = property.business_type.value
     rules = business_rules(btype)
@@ -48,8 +49,19 @@ def _zoning_rv(
     rules: dict,
 ) -> dict:
     zone_depth = rules.get("zoning", {}).get("zone_depth_m", 6.1)
-    itza = itza_from_nia(property.nia_sqm, zone_depth)
 
+    # Use actual geometry when both dimensions are supplied; fall back to the
+    # 1:3 NIA-derived assumption otherwise and record that the assumption fired.
+    if property.frontage_m and property.depth_m:
+        itza = itza_from_geometry(property.frontage_m, property.depth_m, zone_depth)
+        geometry_assumed = False
+    else:
+        itza = itza_from_nia(property.nia_sqm, zone_depth)
+        geometry_assumed = True
+
+    # Adjustments are chained multiplicatively: each fires independently against
+    # the running multiplier.  This matches VOA survey practice and avoids the
+    # arithmetic error of summing percentages additively.
     adj_multiplier = 1.0
     adjustments: list[dict] = []
 
@@ -57,7 +69,7 @@ def _zoning_rv(
         trigger = rule.get("trigger", "")
         adj = float(rule.get("adjustment", 0))
         if _eval_trigger(trigger, property, areas, flags):
-            adj_multiplier += adj
+            adj_multiplier *= (1.0 + adj)
             adjustments.append({"name": name, "pct": round(adj * 100, 1)})
 
     base_rv = tone_rate * itza
@@ -71,6 +83,7 @@ def _zoning_rv(
         "base_rv": round(base_rv, 2),
         "adjustments": adjustments,
         "adjustment_multiplier": round(adj_multiplier, 4),
+        "geometry_assumed": geometry_assumed,
         "rv": rv,
     }
 
@@ -93,7 +106,7 @@ def _nursery_rv(
         trigger = rule.get("trigger", "")
         adj = float(rule.get("adjustment", 0))
         if _eval_nursery_trigger(trigger, nursery, flags):
-            adj_multiplier += adj
+            adj_multiplier *= (1.0 + adj)
             adjustments.append({"name": name, "pct": round(adj * 100, 1)})
 
     base_rv = tone_rate * property.nia_sqm
@@ -106,6 +119,7 @@ def _nursery_rv(
         "base_rv": round(base_rv, 2),
         "adjustments": adjustments,
         "adjustment_multiplier": round(adj_multiplier, 4),
+        "geometry_assumed": False,  # NIA method does not use geometric assumptions
         "rv": rv,
     }
 
@@ -114,26 +128,94 @@ def _nursery_rv(
 # Trigger evaluators
 # ---------------------------------------------------------------------------
 
+# Matches patterns like "frontage_m < 3.0", "layout_flag == true"
+_TRIGGER_RE = re.compile(r"^(\w+)\s*(<=|>=|==|!=|<|>)\s*(.+)$")
+
+
+def _resolve_field(
+    field: str,
+    property: PropertyInput,
+    areas: Optional[AreasInput],
+    flags: FlagsInput,
+) -> object:
+    """Return the Python value for a field name, or None if unavailable."""
+    mapping = {
+        "frontage_m": property.frontage_m,
+        "depth_m": property.depth_m,
+        "layout_flag": flags.layout_flag,
+        "cramped_flag": flags.cramped_flag,
+        "fitout_year": flags.fitout_year,
+        "outdoor_seating": areas.outdoor_seating if areas else False,
+    }
+    return mapping.get(field)
+
+
+def _resolve_nursery_field(
+    field: str,
+    nursery: NurseryInput,
+    flags: FlagsInput,
+) -> object:
+    mapping = {
+        "purpose_built": nursery.purpose_built,
+        "outdoor_play": nursery.outdoor_play,
+        "layout_flag": flags.layout_flag,
+    }
+    return mapping.get(field)
+
+
+def _apply_op(op: str, actual: object, target: object) -> bool:
+    """Apply a comparison operator between two values."""
+    ops = {
+        "<":  lambda a, b: a < b,
+        "<=": lambda a, b: a <= b,
+        ">":  lambda a, b: a > b,
+        ">=": lambda a, b: a >= b,
+        "==": lambda a, b: a == b,
+        "!=": lambda a, b: a != b,
+    }
+    fn = ops.get(op)
+    return fn(actual, target) if fn else False
+
+
+def _parse_trigger(trigger: str, actual_value: object) -> Optional[tuple]:
+    """
+    Parse "field op value" and return (op, coerced_actual, coerced_target)
+    or None if the trigger string is unrecognised.
+    """
+    m = _TRIGGER_RE.match(trigger.strip())
+    if not m:
+        return None
+    _, op, raw_target = m.group(1), m.group(2), m.group(3).strip().lower()
+
+    if raw_target == "true":
+        return (op, bool(actual_value), True)
+    if raw_target == "false":
+        return (op, bool(actual_value), False)
+    # Numeric comparison — coerce both sides to float
+    try:
+        return (op, float(actual_value), float(raw_target))
+    except (TypeError, ValueError):
+        return None
+
+
 def _eval_trigger(
     trigger: str,
     property: PropertyInput,
     areas: Optional[AreasInput],
     flags: FlagsInput,
 ) -> bool:
-    t = trigger.strip()
-    if "frontage_m < 3.0" in t:
-        return property.frontage_m is not None and property.frontage_m < 3.0
-    if "layout_flag == true" in t:
-        return flags.layout_flag
-    if "depth_m > 20" in t:
-        return property.depth_m is not None and property.depth_m > 20
-    if "outdoor_seating == true" in t:
-        return areas is not None and areas.outdoor_seating
-    if "cramped_flag == true" in t:
-        return flags.cramped_flag
-    if "fitout_year >= 2020" in t:
-        return flags.fitout_year is not None and flags.fitout_year >= 2020
-    return False
+    m = _TRIGGER_RE.match(trigger.strip())
+    if not m:
+        return False
+    field = m.group(1)
+    actual = _resolve_field(field, property, areas, flags)
+    if actual is None:
+        return False
+    parsed = _parse_trigger(trigger, actual)
+    if parsed is None:
+        return False
+    op, coerced_actual, target = parsed
+    return _apply_op(op, coerced_actual, target)
 
 
 def _eval_nursery_trigger(
@@ -141,13 +223,15 @@ def _eval_nursery_trigger(
     nursery: NurseryInput,
     flags: FlagsInput,
 ) -> bool:
-    t = trigger.strip()
-    if "purpose_built == true" in t:
-        return nursery.purpose_built
-    if "purpose_built == false" in t:
-        return not nursery.purpose_built
-    if "outdoor_play == true" in t:
-        return nursery.outdoor_play
-    if "layout_flag == true" in t:
-        return flags.layout_flag
-    return False
+    m = _TRIGGER_RE.match(trigger.strip())
+    if not m:
+        return False
+    field = m.group(1)
+    actual = _resolve_nursery_field(field, nursery, flags)
+    if actual is None:
+        return False
+    parsed = _parse_trigger(trigger, actual)
+    if parsed is None:
+        return False
+    op, coerced_actual, target = parsed
+    return _apply_op(op, coerced_actual, target)
