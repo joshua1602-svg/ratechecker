@@ -263,18 +263,24 @@ for sample in SAMPLES:
                 "n_after_size": dbg.get("n_after_size_and_launderette"),
                 "n_after_dist": dbg.get("n_after_distance"),
                 "n_after_outlier": dbg.get("n_after_outlier_removal"),
+                # Same-street narrowing
+                "same_street_count": dbg.get("same_street_comparable_count"),
+                "same_street_key": dbg.get("same_street_key"),
                 # Clustering
                 "cluster_count": dbg.get("cluster_count"),
                 "selected_cluster_id": dbg.get("selected_cluster_id"),
                 "n_in_cluster": dbg.get("n_in_selected_cluster"),
-                # Rate distribution of selected cluster (post-clustering)
+                # Rate distribution of selected cluster
                 "cluster_rate_min": dbg.get("cluster_rate_min"),
                 "cluster_rate_median": dbg.get("cluster_rate_median"),
                 "cluster_rate_max": dbg.get("cluster_rate_max"),
+                # Rate-distance diagnostics
+                "subject_implied_rate": dbg.get("subject_implied_zone_a_rate"),
+                "rate_distance_to_subject": dbg.get("rate_distance_to_subject"),
                 # Full-pool percentiles (pre-clustering, post-outlier)
                 "pool_rate_p25": dbg.get("cluster_rate_p25"),
                 "pool_rate_p75": dbg.get("cluster_rate_p75"),
-                # Tier split medians (basis-mismatch diagnostic)
+                # Tier split medians
                 "tier1_count": dbg.get("tier1_count"),
                 "tier1_rate_median": dbg.get("tier1_rate_median"),
                 "tier2_count": dbg.get("tier2_count"),
@@ -315,8 +321,8 @@ print()
 print("Done. Saved: quick_test_results.csv")
 print()
 print(out[["segment", "postcode", "voa_rv", "model_rv", "pct_diff",
-           "tone_rate", "voa_implied_rate", "cluster_count",
-           "selected_cluster_id", "n_in_cluster",
+           "tone_rate", "subject_implied_rate", "rate_distance_to_subject",
+           "same_street_count", "cluster_count", "selected_cluster_id",
            "cluster_rate_min", "cluster_rate_median", "cluster_rate_max",
            "comparable_count", "confidence", "signal", "error"]
           ].head(30).to_string(index=False))

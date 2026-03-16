@@ -14,6 +14,7 @@ Implements the rules defined in rules/csa.yaml:
 from __future__ import annotations
 
 import math
+import re
 import statistics
 from dataclasses import dataclass, field
 from typing import List, Optional
@@ -196,6 +197,84 @@ def _iqr_mean(values: list[float]) -> float:
 
 
 # ---------------------------------------------------------------------------
+# Same-street preference (retail only)
+# ---------------------------------------------------------------------------
+
+# Common UK street-type words used to extract a normalised street identifier
+# from a VOA full_property_identifier address string.
+# "MARKET", "ARCADE", "CENTRE", "MALL" are intentionally excluded: they are
+# typically part of a street name (e.g. "MARKET ROAD"), not a type suffix, and
+# including them causes the extractor to match them before the real suffix.
+_STREET_SUFFIXES: frozenset[str] = frozenset({
+    "STREET", "ROAD", "AVENUE", "LANE", "WAY", "CLOSE", "GROVE",
+    "PLACE", "GARDENS", "COURT", "DRIVE", "ROW", "TERRACE", "WALK",
+    "PARADE", "GATE", "BRIDGE", "HILL", "SQUARE", "MEWS", "YARD",
+    "QUAY", "WHARF", "BROADWAY", "CRESCENT", "APPROACH", "PRECINCT",
+})
+
+# Minimum same-street comparables required to use the same-street pool instead
+# of the full postcode-sector pool.
+_MIN_SAME_STREET_COMPS: int = 3
+
+
+def _extract_street_key(address: str) -> str | None:
+    """
+    Return a normalised street identifier from a VOA address string, or None.
+
+    Strips punctuation, uppercases the text, then finds the first token that
+    is a known UK street suffix and returns "PRECEDING_WORD SUFFIX" as the key.
+
+    Examples:
+        "SHOP, 15, HIGH STREET, LONDON"    → "HIGH STREET"
+        "UNIT 2, MARKET ROAD, BRISTOL"     → "MARKET ROAD"
+        "SHOP AND PREMISES, OXFORD STREET" → "OXFORD STREET"
+    """
+    clean = re.sub(r"['\-]", "", address.upper())
+    tokens = re.sub(r"[^A-Z0-9 ]", " ", clean).split()
+    for i, token in enumerate(tokens):
+        if token in _STREET_SUFFIXES and i > 0:
+            return f"{tokens[i - 1]} {token}"
+    return None
+
+
+def _same_street_pool(
+    rated: list[_ClusterItem],
+    min_comps: int = _MIN_SAME_STREET_COMPS,
+) -> tuple[list[_ClusterItem], str | None]:
+    """
+    Identify the dominant street in the comparable pool and return that street's
+    comparables when there are sufficient to be useful.
+
+    The dominant street is the one with the highest total comparable weight
+    (proximity × source quality).  Because nearby comparables carry the highest
+    proximity weights, this reliably identifies the street immediately around
+    the subject.
+
+    Returns:
+        (pool, street_key) — narrowed pool and its key if min_comps is met.
+        (rated, None)      — full pool when no street key can be extracted or
+                             the dominant street has fewer than min_comps comps.
+    """
+    buckets: dict[str, list[_ClusterItem]] = {}
+    for item in rated:
+        c, _d, _r, _w = item
+        key = _extract_street_key(c.address)
+        if key:
+            buckets.setdefault(key, []).append(item)
+
+    if not buckets:
+        return rated, None
+
+    dominant = max(buckets, key=lambda s: sum(w for _, _, _, w in buckets[s]))
+    same_street = buckets[dominant]
+
+    if len(same_street) >= min_comps:
+        return same_street, dominant
+
+    return rated, None
+
+
+# ---------------------------------------------------------------------------
 # Rate-band clustering (retail only)
 # ---------------------------------------------------------------------------
 
@@ -260,17 +339,31 @@ def _find_rate_clusters(
 def _select_rate_cluster(
     clusters: list[list[_ClusterItem]],
     subject_nia: float,
+    subject_implied_rate: float | None = None,
     min_comps: int = 4,
 ) -> tuple[list[_ClusterItem], int]:
     """
-    Choose the cluster most representative of the subject using physical
-    signals only — no reference to the subject's VOA RV.
+    Choose the cluster most representative of the subject.
 
-    Scoring per cluster:
-        density_fraction = cluster's total weight / total pool weight
-        nia_similarity   = min(subject_nia, cluster_median_nia)
-                           / max(subject_nia, cluster_median_nia)
-        score = density_fraction + nia_similarity
+    Scoring per cluster (all three terms are in [0, 1]; max total = 3.0):
+
+        density_fraction  = cluster weight / total pool weight
+                            → rewards clusters with more/closer comparables
+
+        nia_similarity    = min(subject_nia, cluster_median_nia)
+                            / max(subject_nia, cluster_median_nia)
+                            → rewards clusters with matching size profile
+
+        rate_proximity    = max(0, 1 − |cluster_median_rate − subject_implied|
+                                        / subject_implied)
+                            → soft preference for clusters near the subject's
+                              own implied rate; 0 when subject_implied_rate
+                              is unknown (preserves backward compatibility)
+
+        score = density_fraction + nia_similarity + rate_proximity
+
+    The rate_proximity term is a *soft penalty*, not a hard filter.  A cluster
+    distant in rate can still win if it is substantially denser and better-sized.
 
     Returns (cluster_items, cluster_index_0based).
     Falls back to the full flat pool (index -1) when:
@@ -286,14 +379,25 @@ def _select_rate_cluster(
 
     scores: list[float] = []
     for cluster in clusters:
+        # --- density ---
         density = sum(w for _, _, _, w in cluster) / total_weight
 
+        # --- size similarity ---
         nia_vals = sorted(c.nia_sqm for c, _, _, _ in cluster)
         med_nia = nia_vals[len(nia_vals) // 2]
         denom = max(subject_nia, med_nia)
         size_sim = min(subject_nia, med_nia) / denom if denom > 0 else 0.0
 
-        scores.append(density + size_sim)
+        # --- rate proximity (soft, requires subject_implied_rate) ---
+        if subject_implied_rate and subject_implied_rate > 0:
+            cluster_rates = sorted(r for _, _, r, _ in cluster)
+            cluster_med_rate = cluster_rates[len(cluster_rates) // 2]
+            rate_dist_frac = abs(cluster_med_rate - subject_implied_rate) / subject_implied_rate
+            rate_proximity = max(0.0, 1.0 - rate_dist_frac)
+        else:
+            rate_proximity = 0.0
+
+        scores.append(density + size_sim + rate_proximity)
 
     best = max(range(len(clusters)), key=lambda i: scores[i])
 
@@ -387,21 +491,41 @@ def run_csa(
 
     # --- Rate-band clustering (retail only) ---
     # Split the post-outlier pool into pitch clusters and pick the one whose
-    # size profile and local density best matches the subject.  This prevents
-    # prime-pitch comparables (high Zone A rates) from dominating the weighted
-    # median when the subject sits in the secondary market.
-    #
-    # Nursery and restaurant_cafe are deliberately excluded: nurseries have no
-    # pitch tiers; restaurants are already filtered by cuisine/SCAT.
+    # size profile, local density, and rate proximity best match the subject.
+    # Nursery and restaurant_cafe are deliberately excluded.
     n_after_outlier = len(rated)
     cluster_count = 1
     selected_cluster_id = 0
+    same_street_key: str | None = None
+    same_street_count = 0
 
     if _retail_like:
-        clusters = _find_rate_clusters(rated)
-        rated, selected_cluster_id = _select_rate_cluster(
-            clusters, subject_nia=nia_sqm, min_comps=4
+        # Pre-compute subject implied Zone A rate for use as a soft cluster
+        # selection signal.  Only available when a valid VOA RV is supplied.
+        subject_implied_rate: float | None = None
+        if voa_rv and voa_rv > 0:
+            _s_itza = itza_from_nia(nia_sqm, zone_depth)
+            if _s_itza > 0:
+                subject_implied_rate = voa_rv / _s_itza
+
+        # Step 1: narrow pool to same-street comparables when sufficient.
+        # The dominant street (highest total weight) is used as a proxy for the
+        # subject's street; proximity weights ensure that the nearest comparables
+        # define which street is dominant.
+        pool, same_street_key = _same_street_pool(rated, min_comps=_MIN_SAME_STREET_COMPS)
+        same_street_count = len(pool) if same_street_key else 0
+
+        # Step 2: cluster the (possibly narrowed) pool by rate distribution.
+        clusters = _find_rate_clusters(pool)
+
+        # Step 3: select the best cluster using density + size + rate proximity.
+        pool, selected_cluster_id = _select_rate_cluster(
+            clusters,
+            subject_nia=nia_sqm,
+            subject_implied_rate=subject_implied_rate,
+            min_comps=4,
         )
+        rated = pool
         cluster_count = len(clusters)
 
     if not rated:
@@ -415,18 +539,29 @@ def run_csa(
     except Exception:
         tone = _iqr_mean(rate_vals)
 
-    # --- Debug fields (retail / hair_beauty) ---
-    # Temporary diagnostics — exposes pitch-contamination evidence and cluster
-    # selection outcome.  Remove once tone accuracy is confirmed.
+    # --- Debug fields (retail / hair_beauty / restaurant_cafe) ---
+    # Temporary diagnostics — remove once tone accuracy is confirmed.
     _debug: dict = {}
     if _retail_like or business_type == "restaurant_cafe":
         sorted_rates = sorted(rate_vals)
         n_debug = len(sorted_rates)
+
+        # subject_implied_rate is already computed for retail; derive for
+        # restaurant_cafe here so the debug field is always populated.
+        _sir: float | None = None
+        if voa_rv and voa_rv > 0:
+            _s_itza = itza_from_nia(nia_sqm, zone_depth)
+            _sir = round(voa_rv / _s_itza, 1) if _s_itza > 0 else None
+
         _debug = {
             "n_initial_comps": len(comps),
             "n_after_size_and_launderette": len(filtered),
             "n_after_distance": len(with_dist),
             "n_after_outlier_removal": n_after_outlier,
+            # Same-street narrowing
+            "same_street_comparable_count": same_street_count,
+            "same_street_key": same_street_key,
+            # Clustering
             "cluster_count": cluster_count,
             "selected_cluster_id": selected_cluster_id,
             "n_in_selected_cluster": n_debug,
@@ -435,6 +570,12 @@ def run_csa(
             "cluster_rate_median": round(sorted_rates[n_debug // 2], 1) if sorted_rates else None,
             "cluster_rate_p75": round(sorted_rates[min(n_debug - 1, int(n_debug * 0.75))], 1) if sorted_rates else None,
             "cluster_rate_max": round(sorted_rates[-1], 1) if sorted_rates else None,
+            # Subject anchor (computed without VOA anchoring; purely diagnostic)
+            "subject_implied_zone_a_rate": _sir,
+            "rate_distance_to_subject": (
+                round(abs(tone - _sir), 1) if _sir is not None else None
+            ),
+            # Tier breakdown
             "tier1_count": tier_counts.get("unadjusted_psm", 0),
             "tier2_count": tier_counts.get("rv_over_nia", 0),
             "tier1_rate_median": None,
@@ -458,11 +599,6 @@ def run_csa(
             }
             for c, d, r, w in top5
         ]
-        if voa_rv and voa_rv > 0:
-            _subject_itza = itza_from_nia(nia_sqm, zone_depth)
-            _debug["subject_implied_zone_a_rate"] = (
-                round(voa_rv / _subject_itza, 1) if _subject_itza > 0 else None
-            )
 
     # --- Confidence ---
     n_comps = len(rated)

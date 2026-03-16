@@ -350,3 +350,159 @@ class TestRateClustering:
         assert result["tone_rate"] <= 500, (
             f"Expected secondary-cluster tone (≤500), got {result['tone_rate']}"
         )
+
+    def test_rate_proximity_overrides_denser_prime_cluster(self):
+        """
+        When subject_implied_rate sits clearly in the secondary band, the rate-
+        proximity signal must allow the secondary cluster to beat a denser prime
+        cluster that would otherwise win on density alone.
+
+        Prime (7 comps, density ≈ 0.58) vs secondary (5 comps, density ≈ 0.42).
+        Without rate proximity, prime would win on density.
+        With rate proximity (subject ≈ 500, secondary median ≈ 500), secondary wins.
+        """
+        from api.engine.csa import _find_rate_clusters, _select_rate_cluster
+        prime_items = self._rated([770, 780, 790, 800, 810, 820, 830], nia_sqm=100.0)
+        sec_items   = self._rated([460, 480, 500, 520, 540], nia_sqm=100.0)
+        all_items = prime_items + sec_items
+        clusters = _find_rate_clusters(all_items)
+        assert len(clusters) == 2, "Expected bimodal split"
+
+        # Without rate proximity: prime (denser) wins
+        selected_no_rp, _ = _select_rate_cluster(
+            clusters, subject_nia=100.0, subject_implied_rate=None, min_comps=4
+        )
+        rates_no_rp = [r for _, _, r, _ in selected_no_rp]
+        assert all(r > 600 for r in rates_no_rp), (
+            "Without rate proximity, dense prime cluster should be selected"
+        )
+
+        # With rate proximity near secondary: secondary wins
+        selected_rp, _ = _select_rate_cluster(
+            clusters, subject_nia=100.0, subject_implied_rate=500.0, min_comps=4
+        )
+        rates_rp = [r for _, _, r, _ in selected_rp]
+        assert all(r < 600 for r in rates_rp), (
+            f"With rate proximity at 500, secondary cluster should be selected; got {rates_rp}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# 5. Street extraction and same-street preference
+# ---------------------------------------------------------------------------
+
+class TestStreetExtraction:
+    """Tests for _extract_street_key() and _same_street_pool()."""
+
+    def test_high_street_extracted(self):
+        from api.engine.csa import _extract_street_key
+        assert _extract_street_key("SHOP, 15, HIGH STREET, LONDON") == "HIGH STREET"
+
+    def test_market_road_extracted(self):
+        from api.engine.csa import _extract_street_key
+        assert _extract_street_key("UNIT 2, MARKET ROAD, BRISTOL") == "MARKET ROAD"
+
+    def test_oxford_street_extracted(self):
+        from api.engine.csa import _extract_street_key
+        assert _extract_street_key("SHOP AND PREMISES, OXFORD STREET, W1") == "OXFORD STREET"
+
+    def test_no_suffix_returns_none(self):
+        from api.engine.csa import _extract_street_key
+        assert _extract_street_key("") is None
+        assert _extract_street_key("SHOP, UNIT 4, WESTFIELD") is None
+
+    def test_punctuation_stripped(self):
+        from api.engine.csa import _extract_street_key
+        # Apostrophes and hyphens should not break matching
+        result = _extract_street_key("SHOP, 3, KING'S ROAD, LONDON")
+        assert result == "KINGS ROAD"
+
+    def _rated_with_address(self, address: str, rate: float,
+                             dist: float = 50.0, weight: float = 1.0) -> tuple:
+        c = _comp("x", rv=rate * 100, nia_sqm=100.0,
+                  unadjusted_price_psm=rate, has_summary=True)
+        c.address = address
+        return (c, dist, rate, weight)
+
+    def test_same_street_pool_returns_dominant_street(self):
+        """Dominant street (highest total weight) is selected when ≥ min_comps."""
+        from api.engine.csa import _same_street_pool
+        high_st = [
+            self._rated_with_address("SHOP, 1, HIGH STREET, LONDON", 450.0, weight=1.3)
+            for _ in range(4)
+        ]
+        market_rd = [
+            self._rated_with_address("SHOP, 2, MARKET ROAD, LONDON", 800.0, weight=0.5)
+            for _ in range(2)
+        ]
+        pool, key = _same_street_pool(high_st + market_rd, min_comps=3)
+        assert key == "HIGH STREET"
+        assert len(pool) == 4
+
+    def test_same_street_pool_falls_back_when_thin(self):
+        """If dominant street has fewer than min_comps, full pool is returned."""
+        from api.engine.csa import _same_street_pool
+        items = [
+            self._rated_with_address("SHOP, 1, HIGH STREET, LONDON", 450.0)
+            for _ in range(2)  # only 2, below min_comps=3
+        ] + [
+            self._rated_with_address("SHOP, 1, MARKET ROAD, LONDON", 800.0)
+            for _ in range(2)
+        ]
+        pool, key = _same_street_pool(items, min_comps=3)
+        assert key is None
+        assert len(pool) == 4  # full pool returned
+
+    def test_same_street_pool_with_no_street_address(self):
+        """All comparables with empty addresses → full pool returned (no key)."""
+        from api.engine.csa import _same_street_pool
+        items = [(_comp(str(i), rv=500*100, nia_sqm=100,
+                        unadjusted_price_psm=500.0, has_summary=True),
+                  50.0, 500.0, 1.0)
+                 for i in range(5)]
+        pool, key = _same_street_pool(items, min_comps=3)
+        assert key is None
+        assert pool is items  # exact same object returned
+
+    def test_end_to_end_same_street_filters_out_prime_distant_street(self):
+        """
+        End-to-end: 4 secondary-rate comparables on HIGH STREET (80m, high weight)
+        and 4 prime-rate comparables on MARKET ROAD (600m, low weight).
+        Same-street filtering should narrow the pool to HIGH STREET, giving a
+        secondary-level tone.
+        """
+        from api.engine.csa import itza_from_nia
+
+        # HIGH STREET: 80m away (same_parade → proximity 1.0 × source 1.3 = 1.3)
+        hs_lat = 51.5 + 80 / 111_000
+        high_st = [
+            _comp(f"hs{i}", rv=r * 100, nia_sqm=100,
+                  unadjusted_price_psm=float(r), has_summary=True,
+                  lat=hs_lat, lon=-0.1)
+            for i, r in enumerate([440, 450, 460, 480])
+        ]
+        for c in high_st:
+            c.address = "SHOP, 1, HIGH STREET, LONDON"
+
+        # MARKET ROAD: 600m away (broader → proximity 0.5 × source 1.3 = 0.65)
+        mr_lat = 51.5 + 600 / 111_000
+        market_rd = [
+            _comp(f"mr{i}", rv=r * 100, nia_sqm=100,
+                  unadjusted_price_psm=float(r), has_summary=True,
+                  lat=mr_lat, lon=-0.1)
+            for i, r in enumerate([780, 800, 820, 840])
+        ]
+        for c in market_rd:
+            c.address = "SHOP, 1, MARKET ROAD, LONDON"
+
+        # voa_rv implies subject Zone A rate ≈ 450
+        voa_rv = round(450 * itza_from_nia(100.0))
+        result = _run(high_st + market_rd, nia_sqm=100.0, voa_rv=float(voa_rv))
+
+        assert result["signal"] != "Insufficient Data"
+        assert result["tone_rate"] < 600, (
+            f"Same-street filtering should give secondary tone (<600), got {result['tone_rate']}"
+        )
+        dbg = result.get("_debug", {})
+        assert dbg.get("same_street_comparable_count", 0) == 4
+        assert dbg.get("same_street_key") == "HIGH STREET"
