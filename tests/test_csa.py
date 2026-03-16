@@ -65,23 +65,26 @@ class TestToneIsRateBased:
 
     def test_different_size_same_rate_gives_stable_tone(self):
         """
-        A small shop and a large shop with the same £/m² should produce a tone
+        Three shops with different sizes but the same £/m² should produce a tone
         equal to that rate, regardless of their raw RVs.
 
         Small: 75 m², rate = £200/m², rv = £15,000
+        Mid:  100 m², rate = £200/m², rv = £20,000
         Large: 125 m², rate = £200/m², rv = £25,000
 
-        Both sizes sit within the ±30% primary size band (subject NIA = 100 m²),
-        so no fallback is required.  If tone were derived from raw RVs the
-        median would be influenced by the size difference; with normalisation,
-        tone = £200/m².
+        All three sizes sit within the ±30% primary size band (subject NIA = 100 m²).
+        Three comps are required to meet _MIN_COMPS_FOR_VALUATION.
+        If tone were derived from raw RVs the median would be influenced by the
+        size difference; with normalisation, tone = £200/m².
         """
         small = _comp("A", rv=15_000, nia_sqm=75,
+                      unadjusted_price_psm=200.0, has_summary=True)
+        mid   = _comp("C", rv=20_000, nia_sqm=100,
                       unadjusted_price_psm=200.0, has_summary=True)
         large = _comp("B", rv=25_000, nia_sqm=125,
                       unadjusted_price_psm=200.0, has_summary=True)
 
-        result = _run([small, large], nia_sqm=100.0)
+        result = _run([small, mid, large], nia_sqm=100.0)
 
         assert result["signal"] != "Insufficient Data"
         assert abs(result["tone_rate"] - 200.0) < 1.0, (
@@ -107,11 +110,15 @@ class TestToneIsRateBased:
         itza = itza_from_nia(nia)
         rv = zone_a_rate * itza  # what VOA would record: rate × ITZA
 
-        # Build a comparable whose unadjusted_price_psm IS the Zone A rate
+        # Build three comparables whose unadjusted_price_psm IS the Zone A rate
         # (not rv/nia — that would be an NIA rate, which is only correct for nurseries).
-        comp = _comp("A", rv=rv, nia_sqm=nia,
-                     unadjusted_price_psm=zone_a_rate, has_summary=True)
-        result = _run([comp], nia_sqm=nia, business_type="retail")
+        # Three comps are required to meet _MIN_COMPS_FOR_VALUATION.
+        comps = [
+            _comp(uarn, rv=rv, nia_sqm=nia,
+                  unadjusted_price_psm=zone_a_rate, has_summary=True)
+            for uarn in ("A", "B", "C")
+        ]
+        result = _run(comps, nia_sqm=nia, business_type="retail")
 
         assert result["signal"] != "Insufficient Data"
         expected = round(zone_a_rate * itza / 100) * 100
@@ -130,10 +137,14 @@ class TestToneIsRateBased:
         nia_rate = 120.0
         rv = nia_rate * nia  # nursery: rate × NIA = RV
 
-        comp = _comp("A", rv=rv, nia_sqm=nia,
-                     unadjusted_price_psm=nia_rate, has_summary=True,
-                     scat_code=85)
-        result = _run([comp], nia_sqm=nia, business_type="nursery")
+        # Three comps required to meet _MIN_COMPS_FOR_VALUATION.
+        comps = [
+            _comp(uarn, rv=rv, nia_sqm=nia,
+                  unadjusted_price_psm=nia_rate, has_summary=True,
+                  scat_code=85)
+            for uarn in ("A", "B", "C")
+        ]
+        result = _run(comps, nia_sqm=nia, business_type="nursery")
 
         assert result["signal"] != "Insufficient Data"
         expected = round(nia_rate * nia / 100) * 100
@@ -189,16 +200,22 @@ class TestNormalisedRate:
         which fails the rate > 0 guard and must appear in excluded_no_rate.
         (A comp with nia_sqm=0 is dropped earlier by the size-band filter
         and does not reach the rate extraction stage.)
+
+        Three valid comps are required to meet _MIN_COMPS_FOR_VALUATION.
         """
-        bad = _comp("BAD", rv=0, nia_sqm=100, has_summary=False)  # rate = 0 → excluded
-        good = _comp("OK",  rv=10_000, nia_sqm=100,
-                     unadjusted_price_psm=100.0, has_summary=True)
-        result = _run([bad, good], nia_sqm=100.0)
+        bad  = _comp("BAD", rv=0, nia_sqm=100, has_summary=False)  # rate = 0 → excluded
+        good1 = _comp("OK1", rv=10_000, nia_sqm=100,
+                      unadjusted_price_psm=100.0, has_summary=True)
+        good2 = _comp("OK2", rv=10_000, nia_sqm=100,
+                      unadjusted_price_psm=100.0, has_summary=True)
+        good3 = _comp("OK3", rv=10_000, nia_sqm=100,
+                      unadjusted_price_psm=100.0, has_summary=True)
+        result = _run([bad, good1, good2, good3], nia_sqm=100.0)
 
         rn = result.get("rate_normalisation")
         assert rn is not None
         assert rn["excluded_no_rate"] == 1
-        assert rn["tier_unadjusted_psm"] == 1
+        assert rn["tier_unadjusted_psm"] == 3
 
 
 # ---------------------------------------------------------------------------
@@ -249,7 +266,57 @@ class TestAllSegments:
 
 
 # ---------------------------------------------------------------------------
-# 4. Rate-band clustering
+# 4. Minimum comparable guardrail
+# ---------------------------------------------------------------------------
+
+class TestMinimumComparableGuardrail:
+    """run_csa must return Insufficient Data when fewer than 3 rated comps survive."""
+
+    def test_zero_comps_returns_insufficient_data(self):
+        result = _run([], nia_sqm=100.0)
+        assert result["signal"] == "Insufficient Data"
+
+    def test_one_comp_returns_insufficient_data(self):
+        """1 valid comparable — below _MIN_COMPS_FOR_VALUATION."""
+        comp = _comp("A", rv=10_000, nia_sqm=100,
+                     unadjusted_price_psm=100.0, has_summary=True)
+        result = _run([comp], nia_sqm=100.0)
+        assert result["signal"] == "Insufficient Data"
+
+    def test_two_comps_returns_insufficient_data(self):
+        """2 valid comparables — below _MIN_COMPS_FOR_VALUATION."""
+        comps = [
+            _comp("A", rv=10_000, nia_sqm=100, unadjusted_price_psm=100.0, has_summary=True),
+            _comp("B", rv=10_500, nia_sqm=100, unadjusted_price_psm=105.0, has_summary=True),
+        ]
+        result = _run(comps, nia_sqm=100.0)
+        assert result["signal"] == "Insufficient Data"
+
+    def test_three_comps_produces_valuation(self):
+        """Exactly 3 valid comparables meets the threshold — must not return Insufficient Data."""
+        comps = [
+            _comp("A", rv=10_000, nia_sqm=100, unadjusted_price_psm=100.0, has_summary=True),
+            _comp("B", rv=10_500, nia_sqm=100, unadjusted_price_psm=105.0, has_summary=True),
+            _comp("C", rv=10_000, nia_sqm=100, unadjusted_price_psm=100.0, has_summary=True),
+        ]
+        result = _run(comps, nia_sqm=100.0)
+        assert result["signal"] != "Insufficient Data"
+        assert result["estimated_rv"] is not None
+
+    def test_nursery_two_comps_returns_insufficient_data(self):
+        """Guardrail applies to nursery too (shared rule)."""
+        comps = [
+            _comp("A", rv=24_000, nia_sqm=200, unadjusted_price_psm=120.0,
+                  has_summary=True, scat_code=85),
+            _comp("B", rv=24_000, nia_sqm=200, unadjusted_price_psm=120.0,
+                  has_summary=True, scat_code=85),
+        ]
+        result = _run(comps, nia_sqm=200.0, business_type="nursery")
+        assert result["signal"] == "Insufficient Data"
+
+
+# ---------------------------------------------------------------------------
+# 5. Rate-band clustering
 # ---------------------------------------------------------------------------
 
 class TestRateClustering:
@@ -388,7 +455,7 @@ class TestRateClustering:
 
 
 # ---------------------------------------------------------------------------
-# 5. Street extraction and same-street preference
+# 6. Street extraction and same-street preference
 # ---------------------------------------------------------------------------
 
 class TestStreetExtraction:

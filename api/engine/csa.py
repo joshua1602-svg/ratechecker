@@ -216,6 +216,10 @@ _STREET_SUFFIXES: frozenset[str] = frozenset({
 # of the full postcode-sector pool.
 _MIN_SAME_STREET_COMPS: int = 3
 
+# Minimum comparables in the final rated pool required to produce a valuation.
+# Pools below this threshold return Insufficient Data regardless of confidence.
+_MIN_COMPS_FOR_VALUATION: int = 3
+
 
 def _extract_street_key(address: str) -> str | None:
     """
@@ -340,7 +344,7 @@ def _select_rate_cluster(
     clusters: list[list[_ClusterItem]],
     subject_nia: float,
     subject_implied_rate: float | None = None,
-    min_comps: int = 4,
+    min_comps: int = 3,
 ) -> tuple[list[_ClusterItem], int]:
     """
     Choose the cluster most representative of the subject.
@@ -355,9 +359,13 @@ def _select_rate_cluster(
                             → rewards clusters with matching size profile
 
         rate_proximity    = max(0, 1 − |cluster_median_rate − subject_implied|
-                                        / subject_implied)
-                            → soft preference for clusters near the subject's
-                              own implied rate; 0 when subject_implied_rate
+                                        / subject_implied) ** 2
+                            → squared soft preference for clusters near the
+                              subject's own implied rate; using a squared decay
+                              means clusters grossly inconsistent with the
+                              subject rate lose credit rapidly (e.g. 60% off →
+                              0.16 rather than 0.40 in a linear scheme) without
+                              ever being hard-excluded; 0 when subject_implied_rate
                               is unknown (preserves backward compatibility)
 
         score = density_fraction + nia_similarity + rate_proximity
@@ -388,12 +396,18 @@ def _select_rate_cluster(
         denom = max(subject_nia, med_nia)
         size_sim = min(subject_nia, med_nia) / denom if denom > 0 else 0.0
 
-        # --- rate proximity (soft, requires subject_implied_rate) ---
+        # --- rate proximity (soft squared decay, requires subject_implied_rate) ---
+        # Squaring the linear proximity score strongly penalises clusters that
+        # are far from the subject's implied rate while leaving clusters that
+        # are close largely unaffected.  A cluster 60% off the subject rate
+        # scores 0.16 (vs 0.40 with a linear formula); a cluster 10% off
+        # scores 0.81 (vs 0.90).  This prevents a grossly mismatched prime
+        # cluster from winning solely on density.
         if subject_implied_rate and subject_implied_rate > 0:
             cluster_rates = sorted(r for _, _, r, _ in cluster)
             cluster_med_rate = cluster_rates[len(cluster_rates) // 2]
             rate_dist_frac = abs(cluster_med_rate - subject_implied_rate) / subject_implied_rate
-            rate_proximity = max(0.0, 1.0 - rate_dist_frac)
+            rate_proximity = max(0.0, 1.0 - rate_dist_frac) ** 2
         else:
             rate_proximity = 0.0
 
@@ -523,12 +537,19 @@ def run_csa(
             clusters,
             subject_nia=nia_sqm,
             subject_implied_rate=subject_implied_rate,
-            min_comps=4,
+            min_comps=_MIN_COMPS_FOR_VALUATION,
         )
         rated = pool
         cluster_count = len(clusters)
 
     if not rated:
+        return _insufficient_data()
+
+    # --- Minimum evidence guardrail ---
+    # Valuations derived from fewer than _MIN_COMPS_FOR_VALUATION comparables
+    # are too unstable to surface, regardless of confidence band.  This applies
+    # to all business types: retail (post-cluster), nursery, restaurant_cafe.
+    if len(rated) < _MIN_COMPS_FOR_VALUATION:
         return _insufficient_data()
 
     # --- Tone derivation ---

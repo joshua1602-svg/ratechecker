@@ -326,3 +326,59 @@ print(out[["segment", "postcode", "voa_rv", "model_rv", "pct_diff",
            "cluster_rate_min", "cluster_rate_median", "cluster_rate_max",
            "comparable_count", "confidence", "signal", "error"]
           ].head(30).to_string(index=False))
+
+# ---------------------------------------------------------------------------
+# Performance summary
+# ---------------------------------------------------------------------------
+# pct_diff = ((model_rv - voa_rv) / voa_rv) * 100
+# Metrics are computed over rows where pct_diff is not null (successful valuations).
+# ---------------------------------------------------------------------------
+
+_SEG_LABELS = [
+    ("retail",          "Retail"),
+    ("restaurant_cafe", "Restaurant/Café"),
+    ("nursery",         "Nursery"),
+]
+
+print()
+print("=" * 66)
+print("  PERFORMANCE SUMMARY")
+print("=" * 66)
+
+_all_completed = []
+
+for seg_key, seg_label in _SEG_LABELS:
+    seg_df = out[out["segment"] == seg_key]
+    completed = seg_df[seg_df["pct_diff"].notna()]["pct_diff"]
+    n_total = len(seg_df)
+    n_completed = len(completed)
+    n_missing = n_total - n_completed
+
+    print(f"\n  {seg_label:<20}  n={n_total}  completed={n_completed}  "
+          f"insufficient/error={n_missing}")
+    if n_completed > 0:
+        abs_pct = completed.abs()
+        print(f"    median pct_diff      : {completed.median():+.1f}%   (+ = over-assessed)")
+        print(f"    median |pct_diff|    : {abs_pct.median():.1f}%")
+        print(f"    p75   |pct_diff|    : {abs_pct.quantile(0.75):.1f}%")
+        print(f"    p90   |pct_diff|    : {abs_pct.quantile(0.90):.1f}%")
+        _all_completed.append(completed)
+    else:
+        print("    (no completed valuations)")
+
+print()
+print(f"  {'ALL SEGMENTS':<20}  n={len(out)}  "
+      f"completed={sum(len(c) for c in _all_completed)}  "
+      f"insufficient/error={len(out) - sum(len(c) for c in _all_completed)}")
+if _all_completed:
+    _all = pd.concat(_all_completed)
+    _all_abs = _all.abs()
+    print(f"    median pct_diff      : {_all.median():+.1f}%")
+    print(f"    median |pct_diff|    : {_all_abs.median():.1f}%")
+    print(f"    p75   |pct_diff|    : {_all_abs.quantile(0.75):.1f}%")
+    print(f"    p90   |pct_diff|    : {_all_abs.quantile(0.90):.1f}%")
+else:
+    print("    (no completed valuations)")
+
+print()
+print("=" * 66)
