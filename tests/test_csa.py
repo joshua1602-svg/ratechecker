@@ -68,15 +68,17 @@ class TestToneIsRateBased:
         A small shop and a large shop with the same £/m² should produce a tone
         equal to that rate, regardless of their raw RVs.
 
-        Small: 50 m², rate = £200/m², rv = £10,000
-        Large: 200 m², rate = £200/m², rv = £40,000
+        Small: 75 m², rate = £200/m², rv = £15,000
+        Large: 125 m², rate = £200/m², rv = £25,000
 
-        If tone were derived from raw RVs the median would be influenced by
-        the size difference.  With normalisation, tone = £200/m².
+        Both sizes sit within the ±30% primary size band (subject NIA = 100 m²),
+        so no fallback is required.  If tone were derived from raw RVs the
+        median would be influenced by the size difference; with normalisation,
+        tone = £200/m².
         """
-        small = _comp("A", rv=10_000, nia_sqm=50,
+        small = _comp("A", rv=15_000, nia_sqm=75,
                       unadjusted_price_psm=200.0, has_summary=True)
-        large = _comp("B", rv=40_000, nia_sqm=200,
+        large = _comp("B", rv=25_000, nia_sqm=125,
                       unadjusted_price_psm=200.0, has_summary=True)
 
         result = _run([small, large], nia_sqm=100.0)
@@ -244,3 +246,107 @@ class TestAllSegments:
         comps = self._comps_for(segment)
         result = _run(comps, nia_sqm=100.0, business_type=segment)
         assert "rate_normalisation" in result
+
+
+# ---------------------------------------------------------------------------
+# 4. Rate-band clustering
+# ---------------------------------------------------------------------------
+
+class TestRateClustering:
+    """
+    Tests for _find_rate_clusters() and _select_rate_cluster(), and the
+    end-to-end effect of clustering on the retail tone.
+    """
+
+    from api.engine.csa import _find_rate_clusters, _select_rate_cluster
+
+    def _rated(self, rates, nia_sqm=100.0):
+        """Build minimal (comp, dist, rate, weight) tuples for cluster tests."""
+        from api.engine.csa import _find_rate_clusters, _select_rate_cluster
+        return [
+            (_comp(str(i), rv=r * nia_sqm, nia_sqm=nia_sqm,
+                   unadjusted_price_psm=r, has_summary=True),
+             50.0, float(r), 1.0)
+            for i, r in enumerate(rates)
+        ]
+
+    def test_uniform_rates_produce_one_cluster(self):
+        """When all rates are nearly equal there is only one cluster."""
+        from api.engine.csa import _find_rate_clusters
+        items = self._rated([200, 205, 198, 202, 201])
+        clusters = _find_rate_clusters(items)
+        assert len(clusters) == 1
+
+    def test_bimodal_rates_produce_two_clusters(self):
+        """A clear gap in the rate distribution must yield two clusters."""
+        from api.engine.csa import _find_rate_clusters
+        # Low group: 400-450, high group: 780-820 — gap of ~330 (>> 20% of range)
+        items = self._rated([400, 420, 440, 450, 780, 800, 810, 820])
+        clusters = _find_rate_clusters(items)
+        assert len(clusters) == 2
+        low_rates = [r for _, _, r, _ in clusters[0]]
+        high_rates = [r for _, _, r, _ in clusters[1]]
+        assert max(low_rates) < min(high_rates)
+
+    def test_small_pool_returns_single_cluster(self):
+        """Pools with fewer than 4 items must not be split."""
+        from api.engine.csa import _find_rate_clusters
+        items = self._rated([300, 800, 400])
+        clusters = _find_rate_clusters(items)
+        assert len(clusters) == 1
+
+    def test_cluster_selection_prefers_denser_nearby_cluster(self):
+        """
+        When two clusters exist, the one with more weight (= more/closer
+        comparables) should be selected when size similarity is equal.
+        """
+        from api.engine.csa import _find_rate_clusters, _select_rate_cluster
+        # Low cluster: 5 items near subject; high cluster: 2 items
+        low = self._rated([400, 410, 420, 430, 440], nia_sqm=100.0)
+        high = self._rated([800, 820], nia_sqm=100.0)
+        all_items = low + high
+        clusters = _find_rate_clusters(all_items)
+        selected, idx = _select_rate_cluster(clusters, subject_nia=100.0, min_comps=4)
+        selected_rates = [r for _, _, r, _ in selected]
+        assert all(r < 600 for r in selected_rates), (
+            f"Expected low cluster to be selected, got rates {selected_rates}"
+        )
+
+    def test_cluster_fallback_when_best_cluster_too_thin(self):
+        """
+        If the best cluster has fewer than min_comps, the full pool must be
+        returned (cluster_id = -1).
+        """
+        from api.engine.csa import _find_rate_clusters, _select_rate_cluster
+        # Only 2 items in each cluster
+        low = self._rated([400, 420], nia_sqm=100.0)
+        high = self._rated([800, 820], nia_sqm=100.0)
+        clusters = _find_rate_clusters(low + high)
+        _, idx = _select_rate_cluster(clusters, subject_nia=100.0, min_comps=4)
+        assert idx == -1, "Expected fallback (-1) when both clusters are thin"
+
+    def test_retail_tone_uses_lower_cluster_for_secondary_subject(self):
+        """
+        End-to-end: a retail pool with clear prime/secondary split should
+        produce a tone from the lower cluster when the lower cluster is
+        denser near the subject.
+
+        Pool: 6 secondary comps at £420–480 + 2 prime comps at £820–840.
+        Subject NIA matches all comps.  The secondary cluster has 6 items
+        so it wins; tone must be ≤ 500.
+        """
+        secondary = [
+            _comp(f"s{i}", rv=r * 100, nia_sqm=100,
+                  unadjusted_price_psm=float(r), has_summary=True)
+            for i, r in enumerate([420, 430, 440, 450, 460, 480])
+        ]
+        prime = [
+            _comp(f"p{i}", rv=r * 100, nia_sqm=100,
+                  unadjusted_price_psm=float(r), has_summary=True)
+            for i, r in enumerate([820, 840])
+        ]
+        result = _run(secondary + prime, nia_sqm=100.0, voa_rv=45_000.0)
+        assert result["signal"] != "Insufficient Data"
+        assert result["tone_rate"] <= 500, (
+            f"Expected secondary-cluster tone (≤500), got {result['tone_rate']}"
+        )

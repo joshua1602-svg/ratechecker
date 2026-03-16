@@ -196,6 +196,115 @@ def _iqr_mean(values: list[float]) -> float:
 
 
 # ---------------------------------------------------------------------------
+# Rate-band clustering (retail only)
+# ---------------------------------------------------------------------------
+
+_ClusterItem = tuple  # (Comparable, dist_m, rate, weight)
+
+
+def _find_rate_clusters(
+    rated: list[_ClusterItem],
+    min_gap_fraction: float = 0.20,
+    max_clusters: int = 3,
+) -> list[list[_ClusterItem]]:
+    """
+    Split rated-comparable tuples into up to max_clusters bands by finding
+    natural breaks in the sorted rate distribution.
+
+    A break is significant when the gap between two adjacent rates exceeds
+    min_gap_fraction × (max_rate − min_rate).  At most (max_clusters − 1)
+    breaks are used; the two largest qualifying gaps are chosen.
+
+    Returns a list of non-empty clusters ordered from low-rate to high-rate.
+    Falls back to a single-cluster list when the pool is too small (< 4) or
+    the rates are effectively uniform.
+    """
+    if len(rated) < 4:
+        return [list(rated)]
+
+    sorted_items = sorted(rated, key=lambda x: x[2])
+    rates = [r for _, _, r, _ in sorted_items]
+    rate_range = rates[-1] - rates[0]
+
+    if rate_range < 1.0:
+        return [sorted_items]
+
+    # A break must be at least 20% of the pool's rate range *and* at least
+    # £50/m² in absolute terms.  The absolute floor prevents splitting a
+    # near-uniform pool whose total spread happens to be narrow (e.g. a
+    # single-pitch sector where rates vary by only £20–£30/m²).
+    min_gap = max(min_gap_fraction * rate_range, 50.0)
+
+    # Find all significant inter-rate gaps, keep the (max_clusters-1) largest.
+    gaps = [(rates[i + 1] - rates[i], i) for i in range(len(rates) - 1)]
+    break_positions = sorted(
+        (i for gap, i in gaps if gap >= min_gap),
+        key=lambda i: -(rates[i + 1] - rates[i]),
+    )[: max_clusters - 1]
+
+    if not break_positions:
+        return [sorted_items]
+
+    # Re-order by position for slicing.
+    break_positions = sorted(break_positions)
+    clusters: list[list] = []
+    start = 0
+    for bp in break_positions:
+        clusters.append(sorted_items[start : bp + 1])
+        start = bp + 1
+    clusters.append(sorted_items[start:])
+
+    return [c for c in clusters if c]
+
+
+def _select_rate_cluster(
+    clusters: list[list[_ClusterItem]],
+    subject_nia: float,
+    min_comps: int = 4,
+) -> tuple[list[_ClusterItem], int]:
+    """
+    Choose the cluster most representative of the subject using physical
+    signals only — no reference to the subject's VOA RV.
+
+    Scoring per cluster:
+        density_fraction = cluster's total weight / total pool weight
+        nia_similarity   = min(subject_nia, cluster_median_nia)
+                           / max(subject_nia, cluster_median_nia)
+        score = density_fraction + nia_similarity
+
+    Returns (cluster_items, cluster_index_0based).
+    Falls back to the full flat pool (index -1) when:
+      - there is only one cluster, or
+      - the best-scoring cluster has fewer than min_comps comparables.
+    """
+    if len(clusters) <= 1:
+        return (clusters[0] if clusters else []), 0
+
+    total_weight = sum(w for cl in clusters for _, _, _, w in cl)
+    if total_weight <= 0:
+        return clusters[0], 0
+
+    scores: list[float] = []
+    for cluster in clusters:
+        density = sum(w for _, _, _, w in cluster) / total_weight
+
+        nia_vals = sorted(c.nia_sqm for c, _, _, _ in cluster)
+        med_nia = nia_vals[len(nia_vals) // 2]
+        denom = max(subject_nia, med_nia)
+        size_sim = min(subject_nia, med_nia) / denom if denom > 0 else 0.0
+
+        scores.append(density + size_sim)
+
+    best = max(range(len(clusters)), key=lambda i: scores[i])
+
+    if len(clusters[best]) >= min_comps:
+        return clusters[best], best
+
+    # Best cluster too thin — fall back to the full pool.
+    return [item for cl in clusters for item in cl], -1
+
+
+# ---------------------------------------------------------------------------
 # Main CSA entry point
 # ---------------------------------------------------------------------------
 
@@ -218,10 +327,16 @@ def run_csa(
     zone_depth = 6.1
 
     # --- Size-band filter ---
+    # Retail uses a tighter fallback band (±35%) than the general ±50% because
+    # retail micro-markets are more size-homogeneous; admitting very large or
+    # very small units adds noise rather than evidence.
+    _retail_like = business_type in ("retail", "hair_beauty")
+    size_fallback_pct = 35 if _retail_like else rules["filters"]["size_band_pct_fallback"]
+
     size_pct = rules["filters"]["size_band_pct"]
     filtered = _filter_size(comps, nia_sqm, size_pct)
     if len(filtered) < rules["confidence"]["low_if_min_comps"]:
-        size_pct = rules["filters"]["size_band_pct_fallback"]
+        size_pct = size_fallback_pct
         filtered = _filter_size(comps, nia_sqm, size_pct)
 
     # --- Launderette exclusion (modelling rule per INGEST_SPEC D4) ---
@@ -270,6 +385,28 @@ def run_csa(
     if not rated:
         return _insufficient_data()
 
+    # --- Rate-band clustering (retail only) ---
+    # Split the post-outlier pool into pitch clusters and pick the one whose
+    # size profile and local density best matches the subject.  This prevents
+    # prime-pitch comparables (high Zone A rates) from dominating the weighted
+    # median when the subject sits in the secondary market.
+    #
+    # Nursery and restaurant_cafe are deliberately excluded: nurseries have no
+    # pitch tiers; restaurants are already filtered by cuisine/SCAT.
+    n_after_outlier = len(rated)
+    cluster_count = 1
+    selected_cluster_id = 0
+
+    if _retail_like:
+        clusters = _find_rate_clusters(rated)
+        rated, selected_cluster_id = _select_rate_cluster(
+            clusters, subject_nia=nia_sqm, min_comps=4
+        )
+        cluster_count = len(clusters)
+
+    if not rated:
+        return _insufficient_data()
+
     # --- Tone derivation ---
     rate_vals = [r for _, _, r, _ in rated]
     weights = [w for _, _, _, w in rated]
@@ -278,38 +415,38 @@ def run_csa(
     except Exception:
         tone = _iqr_mean(rate_vals)
 
-    # --- Retail debug: rate distribution and stage counts ---
-    # Temporary diagnostic fields to expose pitch-contamination evidence.
-    # These fields are retail-only and can be removed once root cause is confirmed.
+    # --- Debug fields (retail / hair_beauty) ---
+    # Temporary diagnostics — exposes pitch-contamination evidence and cluster
+    # selection outcome.  Remove once tone accuracy is confirmed.
     _debug: dict = {}
-    if business_type in ("retail", "restaurant_cafe", "hair_beauty"):
+    if _retail_like or business_type == "restaurant_cafe":
         sorted_rates = sorted(rate_vals)
         n_debug = len(sorted_rates)
         _debug = {
             "n_initial_comps": len(comps),
             "n_after_size_and_launderette": len(filtered),
             "n_after_distance": len(with_dist),
-            "n_after_rate_extraction": len(rated) + (len(with_dist) - len(rated)),
-            "n_after_outlier_removal": n_debug,
-            "rate_min": round(sorted_rates[0], 1) if sorted_rates else None,
-            "rate_p25": round(sorted_rates[max(0, int(n_debug * 0.25))], 1) if sorted_rates else None,
-            "rate_median": round(sorted_rates[n_debug // 2], 1) if sorted_rates else None,
-            "rate_p75": round(sorted_rates[min(n_debug - 1, int(n_debug * 0.75))], 1) if sorted_rates else None,
-            "rate_max": round(sorted_rates[-1], 1) if sorted_rates else None,
+            "n_after_outlier_removal": n_after_outlier,
+            "cluster_count": cluster_count,
+            "selected_cluster_id": selected_cluster_id,
+            "n_in_selected_cluster": n_debug,
+            "cluster_rate_min": round(sorted_rates[0], 1) if sorted_rates else None,
+            "cluster_rate_p25": round(sorted_rates[max(0, int(n_debug * 0.25))], 1) if sorted_rates else None,
+            "cluster_rate_median": round(sorted_rates[n_debug // 2], 1) if sorted_rates else None,
+            "cluster_rate_p75": round(sorted_rates[min(n_debug - 1, int(n_debug * 0.75))], 1) if sorted_rates else None,
+            "cluster_rate_max": round(sorted_rates[-1], 1) if sorted_rates else None,
             "tier1_count": tier_counts.get("unadjusted_psm", 0),
             "tier2_count": tier_counts.get("rv_over_nia", 0),
             "tier1_rate_median": None,
             "tier2_rate_median": None,
             "top5_by_weight": [],
         }
-        # Tier-split rate medians (helps detect Tier 1 vs Tier 2 rate scale mismatch)
         t1_rates = sorted(r for c, _, r, _ in rated if c.rate_source == "voa_published")
         t2_rates = sorted(r for c, _, r, _ in rated if c.rate_source == "implied")
         if t1_rates:
             _debug["tier1_rate_median"] = round(t1_rates[len(t1_rates) // 2], 1)
         if t2_rates:
             _debug["tier2_rate_median"] = round(t2_rates[len(t2_rates) // 2], 1)
-        # Top 5 by weight — reveals which comparables drive the median
         top5 = sorted(rated, key=lambda x: x[3], reverse=True)[:5]
         _debug["top5_by_weight"] = [
             {
@@ -321,7 +458,6 @@ def run_csa(
             }
             for c, d, r, w in top5
         ]
-        # Subject implied rate on the same Zone A basis (only when voa_rv is known)
         if voa_rv and voa_rv > 0:
             _subject_itza = itza_from_nia(nia_sqm, zone_depth)
             _debug["subject_implied_zone_a_rate"] = (

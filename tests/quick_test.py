@@ -258,18 +258,23 @@ for sample in SAMPLES:
                 "confidence": result.get("confidence"),
                 "comparable_count": result.get("comparable_count"),
                 "signal": result.get("signal"),
-                # Debug: pipeline stage counts
+                # Pipeline stage counts
                 "n_initial": dbg.get("n_initial_comps"),
                 "n_after_size": dbg.get("n_after_size_and_launderette"),
                 "n_after_dist": dbg.get("n_after_distance"),
-                "n_final": dbg.get("n_after_outlier_removal"),
-                # Debug: rate distribution of final comparable pool
-                "pool_rate_min": dbg.get("rate_min"),
-                "pool_rate_p25": dbg.get("rate_p25"),
-                "pool_rate_median": dbg.get("rate_median"),
-                "pool_rate_p75": dbg.get("rate_p75"),
-                "pool_rate_max": dbg.get("rate_max"),
-                # Debug: Tier 1 vs Tier 2 rate medians (basis-mismatch diagnostic)
+                "n_after_outlier": dbg.get("n_after_outlier_removal"),
+                # Clustering
+                "cluster_count": dbg.get("cluster_count"),
+                "selected_cluster_id": dbg.get("selected_cluster_id"),
+                "n_in_cluster": dbg.get("n_in_selected_cluster"),
+                # Rate distribution of selected cluster (post-clustering)
+                "cluster_rate_min": dbg.get("cluster_rate_min"),
+                "cluster_rate_median": dbg.get("cluster_rate_median"),
+                "cluster_rate_max": dbg.get("cluster_rate_max"),
+                # Full-pool percentiles (pre-clustering, post-outlier)
+                "pool_rate_p25": dbg.get("cluster_rate_p25"),
+                "pool_rate_p75": dbg.get("cluster_rate_p75"),
+                # Tier split medians (basis-mismatch diagnostic)
                 "tier1_count": dbg.get("tier1_count"),
                 "tier1_rate_median": dbg.get("tier1_rate_median"),
                 "tier2_count": dbg.get("tier2_count"),
@@ -310,6 +315,8 @@ print()
 print("Done. Saved: quick_test_results.csv")
 print()
 print(out[["segment", "postcode", "voa_rv", "model_rv", "pct_diff",
-           "tone_rate", "voa_implied_rate", "basis", "subject_basis_sqm",
-           "tier_psm", "tier_rv_nia", "comparable_count", "confidence",
-           "signal", "error"]].head(30).to_string(index=False))
+           "tone_rate", "voa_implied_rate", "cluster_count",
+           "selected_cluster_id", "n_in_cluster",
+           "cluster_rate_min", "cluster_rate_median", "cluster_rate_max",
+           "comparable_count", "confidence", "signal", "error"]
+          ].head(30).to_string(index=False))
