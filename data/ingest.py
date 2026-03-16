@@ -104,8 +104,10 @@ VOA_DELIMITER = "*"
 VOA_ENCODING = "latin-1"  # pragmatic default; spec is ASCII, latin-1 is a superset
 
 # Rows per read/write cycle — tune down if still hitting memory limits
-READ_CHUNK = 50_000   # rows read from CSV at once
-FLUSH_EVERY = 50_000  # rows accumulated before flushing to DB (summary valuations)
+READ_CHUNK = 50_000        # rows read from CSV at once
+FLUSH_HEADERS = 50_000    # header rows per COPY batch (29 columns, moderate row width)
+FLUSH_LINES   = 20_000    # line rows per COPY batch — smaller so a dropped connection
+                          # mid-COPY has less work to retry
 
 
 # ─────────────────────────────────────────────
@@ -371,7 +373,7 @@ def ingest_summary_valuations(filepath: str) -> tuple[int, int]:
 
     Returns (headers_total, lines_total).
     """
-    print(f"Parsing summary valuations from {filepath} (flush every {FLUSH_EVERY:,})…")
+    print(f"Parsing summary valuations from {filepath} (headers flush={FLUSH_HEADERS:,}, lines flush={FLUSH_LINES:,})…")
 
     headers_batch: list[dict] = []
     lines_batch: list[dict] = []
@@ -384,7 +386,7 @@ def ingest_summary_valuations(filepath: str) -> tuple[int, int]:
 
     def _maybe_flush_headers(force: bool = False) -> None:
         nonlocal headers_batch, headers_total, first_headers
-        if headers_batch and (force or len(headers_batch) >= FLUSH_EVERY):
+        if headers_batch and (force or len(headers_batch) >= FLUSH_HEADERS):
             _flush_headers(headers_batch, first_headers)
             headers_total += len(headers_batch)
             headers_batch = []
@@ -393,7 +395,7 @@ def ingest_summary_valuations(filepath: str) -> tuple[int, int]:
 
     def _maybe_flush_lines(force: bool = False) -> None:
         nonlocal lines_batch, lines_total, first_lines
-        if lines_batch and (force or len(lines_batch) >= FLUSH_EVERY):
+        if lines_batch and (force or len(lines_batch) >= FLUSH_LINES):
             _flush_lines(lines_batch, first_lines)
             lines_total += len(lines_batch)
             lines_batch = []
