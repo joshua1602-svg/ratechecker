@@ -78,7 +78,7 @@ def get_comparables(
         JOIN postcode_coords pc ON le.postcode = pc.postcode
         WHERE
             le.scat_code IN :scat_codes
-            AND le.composite_indicator != 'C'
+            AND le.composite_indicator IS DISTINCT FROM 'C'
             AND le.rateable_value > 0
             AND pc.latitude  BETWEEN :lat_lo AND :lat_hi
             AND pc.longitude BETWEEN :lon_lo AND :lon_hi
