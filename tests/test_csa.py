@@ -573,3 +573,178 @@ class TestStreetExtraction:
         dbg = result.get("_debug", {})
         assert dbg.get("same_street_comparable_count", 0) == 4
         assert dbg.get("same_street_key") == "HIGH STREET"
+
+
+# ---------------------------------------------------------------------------
+# 7. Conservative retail cluster selection (_retail_select_cluster / run_csa)
+# ---------------------------------------------------------------------------
+
+class TestRetailConservativeSelection:
+    """
+    Tests for the hard plausibility gate, no-reblend policy, downward bias,
+    and confidence capping introduced by _retail_select_cluster and run_csa.
+    """
+
+    def _retail_comps(self, rates, nia_sqm=100.0, address=""):
+        """Build comps with addresses for street-key extraction."""
+        comps = []
+        for i, r in enumerate(rates):
+            c = _comp(str(i), rv=r * nia_sqm, nia_sqm=nia_sqm,
+                      unadjusted_price_psm=float(r), has_summary=True)
+            c.address = address
+            comps.append(c)
+        return comps
+
+    def test_hard_gate_rejects_prime_cluster(self):
+        """
+        TC1: subject implied ≈ 500, prime cluster at 770–830 (> 1.25×500=625).
+        Prime cluster must be rejected by the plausibility gate.
+        Secondary cluster (460–540) is selected; tone < 625.
+        """
+        from api.engine.csa import itza_from_nia
+        voa_rv = round(500 * itza_from_nia(100.0))   # implied ≈ 500
+        secondary = self._retail_comps([460, 480, 500, 520, 540])
+        prime     = self._retail_comps([770, 800, 820, 830, 840])
+        result = _run(secondary + prime, nia_sqm=100.0, voa_rv=float(voa_rv))
+
+        assert result["signal"] != "Insufficient Data", (
+            "Expected a result when secondary cluster is plausible"
+        )
+        assert result["tone_rate"] < 625, (
+            f"Prime cluster should be rejected; tone should be < 625, got {result['tone_rate']}"
+        )
+
+    def test_all_clusters_above_threshold_last_resort(self):
+        """
+        TC4: subject implied ≈ 300, all clusters in 600–900 range.
+        Last-resort exception: lowest cluster (600–700) admitted.
+        Confidence must be Low (gap > 30%).
+        """
+        from api.engine.csa import itza_from_nia
+        voa_rv = round(300 * itza_from_nia(100.0))   # implied ≈ 300
+        low_prime  = self._retail_comps([600, 620, 640, 660])
+        high_prime = self._retail_comps([780, 800, 820, 830])
+        result = _run(low_prime + high_prime, nia_sqm=100.0, voa_rv=float(voa_rv))
+
+        assert result["signal"] != "Insufficient Data", (
+            "Last-resort: should produce a result even when all clusters are above threshold"
+        )
+        assert result["tone_rate"] < 750, (
+            f"Last-resort should choose the lower cluster; tone should be < 750, got {result['tone_rate']}"
+        )
+        assert result["confidence"] == "Low", (
+            f"Rate gap > 30% must cap confidence to Low, got {result['confidence']}"
+        )
+
+    def test_confidence_capped_at_medium_when_gap_exceeds_20pct(self):
+        """
+        FR6/AC4: tone 20–30% above subject implied → confidence capped at Medium.
+        """
+        from api.engine.csa import itza_from_nia
+        # subject implied ≈ 500; construct pool that will produce tone ≈ 620 (24% gap)
+        voa_rv = round(500 * itza_from_nia(100.0))
+        comps = self._retail_comps([610, 615, 620, 625, 630, 635])  # one cluster ~620
+        result = _run(comps, nia_sqm=100.0, voa_rv=float(voa_rv))
+
+        assert result["signal"] != "Insufficient Data"
+        # Rate gap ≈ |620-500|/500 = 24% which is > 20% and < 30%
+        assert result["confidence"] in ("Medium", "Low"), (
+            f"Confidence must be capped at Medium (or lower) for 24% gap; got {result['confidence']}"
+        )
+        assert result["confidence"] != "High", (
+            "High confidence must not be awarded when tone is >20% above subject implied"
+        )
+
+    def test_confidence_capped_at_low_when_gap_exceeds_30pct(self):
+        """
+        FR6: tone > 30% above subject implied → confidence capped at Low.
+        """
+        from api.engine.csa import itza_from_nia
+        # subject implied ≈ 500; construct a pool that stays together (uniform rates)
+        # but is 40% above subject implied → tone ≈ 700
+        voa_rv = round(500 * itza_from_nia(100.0))
+        comps = self._retail_comps([690, 695, 700, 705, 710, 715])  # ~700 uniform
+        result = _run(comps, nia_sqm=100.0, voa_rv=float(voa_rv))
+
+        assert result["signal"] != "Insufficient Data"
+        assert result["confidence"] == "Low", (
+            f"Confidence must be Low when tone is >30% above subject implied; got {result['confidence']}"
+        )
+
+    def test_no_mixed_pool_after_clustering(self):
+        """
+        AC5: after clustering detects two distinct groups, the selected cluster
+        must not be the re-blended full pool (selected_cluster_id != -1).
+        """
+        from api.engine.csa import itza_from_nia
+        voa_rv = round(500 * itza_from_nia(100.0))
+        # Clear bimodal split — secondary will be plausible, prime rejected
+        secondary = self._retail_comps([450, 460, 470, 480, 490])
+        prime     = self._retail_comps([780, 800, 820, 830, 840])
+        result = _run(secondary + prime, nia_sqm=100.0, voa_rv=float(voa_rv))
+
+        assert result["signal"] != "Insufficient Data"
+        dbg = result.get("_debug", {})
+        assert dbg.get("cluster_count", 1) > 1, "Expected clustering to split the pool"
+        assert dbg.get("selected_cluster_id") != -1, (
+            "Must not fall back to re-blended full pool after clustering"
+        )
+
+    def test_true_prime_subject_allowed(self):
+        """
+        TC5: when subject's own implied rate is near 800, a prime cluster is
+        plausible and should be selected.  Confidence should not be capped.
+        """
+        from api.engine.csa import itza_from_nia
+        voa_rv = round(790 * itza_from_nia(100.0))   # implied ≈ 790
+        prime = self._retail_comps([760, 780, 790, 800, 810, 820])
+        result = _run(prime, nia_sqm=100.0, voa_rv=float(voa_rv))
+
+        assert result["signal"] != "Insufficient Data"
+        assert result["tone_rate"] > 700, (
+            f"True prime subject: tone should be near 800, got {result['tone_rate']}"
+        )
+        # Rate gap ≈ |790-790|/790 ≈ 0% — confidence should not be capped
+        assert result["confidence"] in ("High", "Medium"), (
+            f"No rate gap — confidence should not be capped; got {result['confidence']}"
+        )
+
+    def test_same_street_reverted_when_prime(self):
+        """
+        FR4: same-street pool whose median rate is > 1.25× subject implied
+        must be reverted to the full pool.
+        """
+        from api.engine.csa import itza_from_nia
+        voa_rv = round(450 * itza_from_nia(100.0))   # implied ≈ 450
+
+        # Same-street comps at prime rate (~800) — 4 comps, 80m away
+        hs_lat = 51.5 + 80 / 111_000
+        prime_ss = [
+            _comp(f"p{i}", rv=float(r) * 100, nia_sqm=100,
+                  unadjusted_price_psm=float(r), has_summary=True,
+                  lat=hs_lat, lon=-0.1)
+            for i, r in enumerate([780, 800, 810, 820])
+        ]
+        for c in prime_ss:
+            c.address = "SHOP, HIGH STREET, LONDON"
+
+        # Off-street secondary comps at 440–480, 600m away
+        sec_lat = 51.5 + 600 / 111_000
+        secondary = [
+            _comp(f"s{i}", rv=float(r) * 100, nia_sqm=100,
+                  unadjusted_price_psm=float(r), has_summary=True,
+                  lat=sec_lat, lon=-0.1)
+            for i, r in enumerate([440, 450, 460, 470, 480])
+        ]
+        for c in secondary:
+            c.address = "SHOP, MARKET ROAD, LONDON"
+
+        result = _run(prime_ss + secondary, nia_sqm=100.0, voa_rv=float(voa_rv))
+        dbg = result.get("_debug", {})
+
+        assert dbg.get("same_street_reverted") is True, (
+            "same_street_reverted must be True when same-street pool is materially prime"
+        )
+        assert result["tone_rate"] < 625, (
+            f"Reverted to full pool; secondary should influence tone (<625), got {result['tone_rate']}"
+        )
