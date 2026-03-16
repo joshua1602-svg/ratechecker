@@ -114,10 +114,21 @@ def get_comparables(
     try:
         with Session(engine) as session:
             rows = session.execute(sql, params).fetchall()
-        return [dict(r._mapping) for r in rows]
+        results = [dict(r._mapping) for r in rows]
     except Exception:
         # Database not yet populated — caller will return "Insufficient Data"
         return []
+
+    # Filter to comparables within ±30% of the median RV/sqm
+    rv_psm = [r["rv"] / r["nia_sqm"] for r in results if r["nia_sqm"] and r["nia_sqm"] > 0]
+    if rv_psm:
+        sorted_psm = sorted(rv_psm)
+        mid = len(sorted_psm) // 2
+        median = (sorted_psm[mid] + sorted_psm[~mid]) / 2
+        lo, hi = median * 0.70, median * 1.30
+        results = [r for r in results if r["nia_sqm"] and lo <= r["rv"] / r["nia_sqm"] <= hi]
+
+    return results
 
 
 def count_voa_rows() -> int:
