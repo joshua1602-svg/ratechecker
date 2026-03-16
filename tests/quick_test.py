@@ -4,6 +4,12 @@ Quick end-to-end test against the live Supabase VOA dataset.
 Samples 50 properties per segment, runs the full CSA pipeline, and writes
 results to quick_test_results.csv for manual inspection.
 
+Comparables are restricted to the same postcode sector as the subject
+property (e.g. "SW20 8" for "SW20 8AA").  This keeps the comparison pool
+tight to the same local market so tone-engine accuracy is meaningful.
+A fallback to full postcode-outward (e.g. "SW20") is used when fewer
+than MIN_COMPS are found in the sector alone.
+
 Usage (from project root):
     python tests/quick_test.py
 """
@@ -101,6 +107,23 @@ def get_coords(postcode: str):
     return float(row.latitude), float(row.longitude)
 
 
+MIN_COMPS = 3  # fall back to outward code if sector yields fewer than this
+
+
+def postcode_sector(postcode: str) -> str:
+    """Return the postcode sector, e.g. 'SW20 8' from 'SW20 8AA'.
+
+    UK inward codes are always 3 characters (digit + 2 letters), so stripping
+    the last 2 characters gives <outward> + space + <sector digit>.
+    """
+    return postcode.strip()[:-2]
+
+
+def postcode_outward(postcode: str) -> str:
+    """Return the outward code, e.g. 'SW20' from 'SW20 8AA'."""
+    return postcode.strip().split()[0]
+
+
 def dicts_to_comparables(rows: list[dict]) -> list[Comparable]:
     """Convert raw get_comparables() dicts to Comparable objects for run_csa()."""
     return [
@@ -142,6 +165,8 @@ for sample in SAMPLES:
                     "segment": sample["label"],
                     "uarn": uarn,
                     "postcode": postcode,
+                    "postcode_sector": postcode_sector(postcode),
+                    "comp_source": None,
                     "primary_description_text": desc,
                     "voa_rv": voa_rv,
                     "model_rv": None,
@@ -153,6 +178,7 @@ for sample in SAMPLES:
                 })
                 continue
 
+            sector = postcode_sector(postcode)
             raw_comps = get_comparables(
                 lat=lat,
                 lon=lon,
@@ -160,7 +186,23 @@ for sample in SAMPLES:
                 radius_m=2000,
                 nia_sqm=nia_sqm,
                 size_band_pct=50,
+                postcode_prefix=sector,
             )
+            comp_source = f"sector:{sector}"
+
+            # Fall back to outward code if the sector is too sparse
+            if len(raw_comps) < MIN_COMPS:
+                outward = postcode_outward(postcode)
+                raw_comps = get_comparables(
+                    lat=lat,
+                    lon=lon,
+                    scat_codes=sample["scat_codes"],
+                    radius_m=2000,
+                    nia_sqm=nia_sqm,
+                    size_band_pct=50,
+                    postcode_prefix=outward,
+                )
+                comp_source = f"outward:{outward}"
 
             # get_comparables() returns list[dict]; run_csa() requires list[Comparable]
             comps = dicts_to_comparables(raw_comps)
@@ -183,6 +225,8 @@ for sample in SAMPLES:
                 "segment": sample["label"],
                 "uarn": uarn,
                 "postcode": postcode,
+                "postcode_sector": sector,
+                "comp_source": comp_source,
                 "primary_description_text": desc,
                 "voa_rv": voa_rv,
                 "model_rv": model_rv,
@@ -198,6 +242,8 @@ for sample in SAMPLES:
                 "segment": sample["label"],
                 "uarn": uarn,
                 "postcode": postcode,
+                "postcode_sector": postcode_sector(postcode),
+                "comp_source": None,
                 "primary_description_text": desc,
                 "voa_rv": voa_rv,
                 "model_rv": None,
@@ -214,4 +260,4 @@ out.to_csv("quick_test_results.csv", index=False)
 print()
 print("Done. Saved: quick_test_results.csv")
 print()
-print(out[["segment", "postcode", "voa_rv", "model_rv", "pct_diff", "confidence", "comparable_count", "signal", "error"]].head(20).to_string(index=False))
+print(out[["segment", "postcode", "postcode_sector", "comp_source", "voa_rv", "model_rv", "pct_diff", "confidence", "comparable_count", "signal", "error"]].head(20).to_string(index=False))

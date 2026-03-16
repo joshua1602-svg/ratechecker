@@ -43,9 +43,14 @@ def get_comparables(
     radius_m: float = 2000,
     nia_sqm: float = 0,
     size_band_pct: float = 50,
+    postcode_prefix: str | None = None,
 ) -> list[dict]:
     """
     Return comparable properties within radius_m of (lat, lon) matching scat_codes.
+
+    When postcode_prefix is supplied (e.g. "SW20 8"), an additional filter
+    restricts comparables to postcodes starting with that string, tightening
+    the pool to the same local market area.
 
     Uses a bounding-box pre-filter for performance, then returns all columns
     needed by the CSA algorithm. Returns [] if the database is unavailable.
@@ -60,7 +65,13 @@ def get_comparables(
     lo_nia = nia_sqm * (1 - size_band_pct / 100)
     hi_nia = nia_sqm * (1 + size_band_pct / 100)
 
-    sql = text("""
+    postcode_clause = (
+        "AND le.postcode LIKE :postcode_prefix || '%'"
+        if postcode_prefix is not None
+        else ""
+    )
+
+    sql = text(f"""
         SELECT
             le.uarn,
             le.full_property_identifier           AS address,
@@ -84,23 +95,25 @@ def get_comparables(
             AND pc.longitude BETWEEN :lon_lo AND :lon_hi
             AND COALESCE(svh.total_area_or_units, :nia_fallback) BETWEEN :lo_nia AND :hi_nia
             AND (svh.unit_of_measurement IS NULL OR svh.unit_of_measurement = 'NIA')
+            {postcode_clause}
     """)
+
+    params: dict[str, Any] = {
+        "scat_codes": tuple(scat_codes),
+        "lat_lo": lat - lat_delta,
+        "lat_hi": lat + lat_delta,
+        "lon_lo": lon - lon_delta,
+        "lon_hi": lon + lon_delta,
+        "lo_nia": lo_nia,
+        "hi_nia": hi_nia,
+        "nia_fallback": nia_sqm,
+    }
+    if postcode_prefix is not None:
+        params["postcode_prefix"] = postcode_prefix
 
     try:
         with Session(engine) as session:
-            rows = session.execute(
-                sql,
-                {
-                    "scat_codes": tuple(scat_codes),
-                    "lat_lo": lat - lat_delta,
-                    "lat_hi": lat + lat_delta,
-                    "lon_lo": lon - lon_delta,
-                    "lon_hi": lon + lon_delta,
-                    "lo_nia": lo_nia,
-                    "hi_nia": hi_nia,
-                    "nia_fallback": nia_sqm,
-                },
-            ).fetchall()
+            rows = session.execute(sql, params).fetchall()
         return [dict(r._mapping) for r in rows]
     except Exception:
         # Database not yet populated — caller will return "Insufficient Data"
