@@ -22,6 +22,13 @@ engine = create_engine(
     connect_args={
         "sslmode": "require",       # Supabase requires SSL
         "options": "-c statement_timeout=0",  # disable per-statement timeout for bulk ingest
+        # TCP keepalives — prevent routers/Supabase from silently dropping long-running
+        # connections during bulk COPY operations (critical on Windows where the default
+        # OS keepalive fires only after 2 hours).
+        "keepalives": 1,
+        "keepalives_idle": 60,      # send first keepalive probe after 60s of silence
+        "keepalives_interval": 10,  # resend every 10s if no ACK
+        "keepalives_count": 5,      # give up after 5 unanswered probes
     },
 )
 

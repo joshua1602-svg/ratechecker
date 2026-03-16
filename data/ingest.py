@@ -7,6 +7,7 @@
 
 import os
 import sys
+import time
 import zipfile
 from contextlib import contextmanager
 from io import StringIO
@@ -54,20 +55,39 @@ def _write_df(df: pd.DataFrame, table_name: str, if_exists: str) -> None:
                 conn.commit()
 
         # Stream data via COPY FROM STDIN — no statement timeout, single round-trip.
+        # PostgreSQL COPY is atomic: if the connection drops mid-transfer the server
+        # rolls back the entire batch, so retrying is safe.
         buf = StringIO()
         df.to_csv(buf, index=False, header=True, na_rep="")
-        buf.seek(0)
 
-        raw = engine.raw_connection()
-        try:
-            with raw.cursor() as cur:
-                cur.copy_expert(
-                    f"COPY {table_name} FROM STDIN WITH (FORMAT CSV, HEADER TRUE, NULL '')",
-                    buf,
-                )
-            raw.commit()
-        finally:
-            raw.close()
+        last_exc: Exception | None = None
+        for attempt in range(1, 4):
+            buf.seek(0)
+            raw = engine.raw_connection()
+            try:
+                with raw.cursor() as cur:
+                    cur.copy_expert(
+                        f"COPY {table_name} FROM STDIN WITH (FORMAT CSV, HEADER TRUE, NULL '')",
+                        buf,
+                    )
+                raw.commit()
+                raw.close()
+                break  # success — exit retry loop
+            except Exception as exc:
+                last_exc = exc
+                try:
+                    raw.close()
+                except Exception:
+                    pass
+                wait = 2 ** attempt  # 2s, 4s, 8s
+                print(f"  ! COPY attempt {attempt}/3 failed: {exc}")
+                if attempt < 3:
+                    print(f"    Retrying in {wait}s with a fresh connection…")
+                    time.sleep(wait)
+        else:
+            raise RuntimeError(
+                f"COPY to {table_name} failed after 3 attempts"
+            ) from last_exc
 
     else:
         # SQLite fallback — executemany (method=None) is faster than multi-row INSERT for SQLite
