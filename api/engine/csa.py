@@ -278,6 +278,56 @@ def run_csa(
     except Exception:
         tone = _iqr_mean(rate_vals)
 
+    # --- Retail debug: rate distribution and stage counts ---
+    # Temporary diagnostic fields to expose pitch-contamination evidence.
+    # These fields are retail-only and can be removed once root cause is confirmed.
+    _debug: dict = {}
+    if business_type in ("retail", "restaurant_cafe", "hair_beauty"):
+        sorted_rates = sorted(rate_vals)
+        n_debug = len(sorted_rates)
+        _debug = {
+            "n_initial_comps": len(comps),
+            "n_after_size_and_launderette": len(filtered),
+            "n_after_distance": len(with_dist),
+            "n_after_rate_extraction": len(rated) + (len(with_dist) - len(rated)),
+            "n_after_outlier_removal": n_debug,
+            "rate_min": round(sorted_rates[0], 1) if sorted_rates else None,
+            "rate_p25": round(sorted_rates[max(0, int(n_debug * 0.25))], 1) if sorted_rates else None,
+            "rate_median": round(sorted_rates[n_debug // 2], 1) if sorted_rates else None,
+            "rate_p75": round(sorted_rates[min(n_debug - 1, int(n_debug * 0.75))], 1) if sorted_rates else None,
+            "rate_max": round(sorted_rates[-1], 1) if sorted_rates else None,
+            "tier1_count": tier_counts.get("unadjusted_psm", 0),
+            "tier2_count": tier_counts.get("rv_over_nia", 0),
+            "tier1_rate_median": None,
+            "tier2_rate_median": None,
+            "top5_by_weight": [],
+        }
+        # Tier-split rate medians (helps detect Tier 1 vs Tier 2 rate scale mismatch)
+        t1_rates = sorted(r for c, _, r, _ in rated if c.rate_source == "voa_published")
+        t2_rates = sorted(r for c, _, r, _ in rated if c.rate_source == "implied")
+        if t1_rates:
+            _debug["tier1_rate_median"] = round(t1_rates[len(t1_rates) // 2], 1)
+        if t2_rates:
+            _debug["tier2_rate_median"] = round(t2_rates[len(t2_rates) // 2], 1)
+        # Top 5 by weight — reveals which comparables drive the median
+        top5 = sorted(rated, key=lambda x: x[3], reverse=True)[:5]
+        _debug["top5_by_weight"] = [
+            {
+                "address": c.address[:60],
+                "rate": round(r, 1),
+                "tier": c.rate_source,
+                "distance_m": round(d, 0),
+                "weight": round(w, 3),
+            }
+            for c, d, r, w in top5
+        ]
+        # Subject implied rate on the same Zone A basis (only when voa_rv is known)
+        if voa_rv and voa_rv > 0:
+            _subject_itza = itza_from_nia(nia_sqm, zone_depth)
+            _debug["subject_implied_zone_a_rate"] = (
+                round(voa_rv / _subject_itza, 1) if _subject_itza > 0 else None
+            )
+
     # --- Confidence ---
     n_comps = len(rated)
     if n_comps >= rules["confidence"]["high_if_min_comps"]:
@@ -328,7 +378,7 @@ def run_csa(
 
     saving_str = f"£{saving:,.0f}" if saving and saving > 0 else None
 
-    return {
+    result = {
         "signal": signal,
         "explanation": _explanation(signal, confidence, tone, estimated_rv, voa_rv, n_comps, business_type),
         "comparable_count": n_comps,
@@ -344,6 +394,9 @@ def run_csa(
             "subject_basis_label": basis_label,
         },
     }
+    if _debug:
+        result["_debug"] = _debug
+    return result
 
 
 # ---------------------------------------------------------------------------

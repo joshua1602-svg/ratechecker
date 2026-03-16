@@ -236,6 +236,7 @@ for sample in SAMPLES:
                 else None
             )
 
+            dbg = result.get("_debug") or {}
             all_rows.append({
                 "segment": sample["label"],
                 "uarn": uarn,
@@ -248,6 +249,7 @@ for sample in SAMPLES:
                 "pct_diff": pct_diff,
                 "tone_rate": round(tone_rate, 2) if tone_rate else None,
                 "voa_implied_rate": round(voa_implied_rate, 2) if voa_implied_rate else None,
+                "subject_implied_zone_a": dbg.get("subject_implied_zone_a_rate"),
                 "basis": basis_label,
                 "subject_basis_sqm": subject_basis,
                 "tier_psm": rn.get("tier_unadjusted_psm"),
@@ -256,6 +258,22 @@ for sample in SAMPLES:
                 "confidence": result.get("confidence"),
                 "comparable_count": result.get("comparable_count"),
                 "signal": result.get("signal"),
+                # Debug: pipeline stage counts
+                "n_initial": dbg.get("n_initial_comps"),
+                "n_after_size": dbg.get("n_after_size_and_launderette"),
+                "n_after_dist": dbg.get("n_after_distance"),
+                "n_final": dbg.get("n_after_outlier_removal"),
+                # Debug: rate distribution of final comparable pool
+                "pool_rate_min": dbg.get("rate_min"),
+                "pool_rate_p25": dbg.get("rate_p25"),
+                "pool_rate_median": dbg.get("rate_median"),
+                "pool_rate_p75": dbg.get("rate_p75"),
+                "pool_rate_max": dbg.get("rate_max"),
+                # Debug: Tier 1 vs Tier 2 rate medians (basis-mismatch diagnostic)
+                "tier1_count": dbg.get("tier1_count"),
+                "tier1_rate_median": dbg.get("tier1_rate_median"),
+                "tier2_count": dbg.get("tier2_count"),
+                "tier2_rate_median": dbg.get("tier2_rate_median"),
                 "error": None,
             })
 
