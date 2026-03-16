@@ -85,7 +85,7 @@ VOA_ENCODING = "latin-1"  # pragmatic default; spec is ASCII, latin-1 is a super
 
 # Rows per read/write cycle — tune down if still hitting memory limits
 READ_CHUNK = 50_000   # rows read from CSV at once
-FLUSH_EVERY = 10_000  # rows accumulated before flushing to DB (summary valuations)
+FLUSH_EVERY = 50_000  # rows accumulated before flushing to DB (summary valuations)
 
 
 # ─────────────────────────────────────────────
@@ -378,6 +378,7 @@ def ingest_summary_valuations(filepath: str) -> tuple[int, int]:
             lines_total += len(lines_batch)
             lines_batch = []
             first_lines = False
+            print(f"  … {lines_total:,} line rows written")
 
     if filepath.endswith(".zip"):
         with zipfile.ZipFile(filepath) as z:
