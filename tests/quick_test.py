@@ -33,7 +33,7 @@ SAMPLES = [
                 svh.total_area_or_units AS nia_sqm
             FROM voa_list_entries le
             LEFT JOIN voa_sv_header svh ON le.uarn = svh.uarn
-            WHERE le.primary_description_text ILIKE '%SHOP%'
+            WHERE le.primary_description_text ILIKE '%%SHOP%%'
             AND le.rateable_value > 0
             AND svh.total_area_or_units IS NOT NULL
             AND svh.unit_of_measurement = 'NIA'
@@ -54,9 +54,9 @@ SAMPLES = [
             FROM voa_list_entries le
             LEFT JOIN voa_sv_header svh ON le.uarn = svh.uarn
             WHERE (
-                le.primary_description_text ILIKE '%CAFE%'
-                OR le.primary_description_text ILIKE '%RESTAURANT%'
-                OR le.primary_description_text ILIKE '%TAKEAWAY%'
+                le.primary_description_text ILIKE '%%CAFE%%'
+                OR le.primary_description_text ILIKE '%%RESTAURANT%%'
+                OR le.primary_description_text ILIKE '%%TAKEAWAY%%'
             )
             AND le.rateable_value > 0
             AND svh.total_area_or_units IS NOT NULL
@@ -76,7 +76,7 @@ SAMPLES = [
                 svh.total_area_or_units AS nia_sqm
             FROM voa_list_entries le
             LEFT JOIN voa_sv_header svh ON le.uarn = svh.uarn
-            WHERE le.primary_description_text ILIKE '%NURSERY%'
+            WHERE le.primary_description_text ILIKE '%%NURSERY%%'
             AND le.rateable_value > 0
             AND svh.total_area_or_units IS NOT NULL
             LIMIT 50
