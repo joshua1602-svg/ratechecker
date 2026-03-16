@@ -66,7 +66,7 @@ def get_comparables(
     hi_nia = nia_sqm * (1 + size_band_pct / 100)
 
     postcode_clause = (
-        "AND le.postcode LIKE :postcode_prefix || '%'"
+        "AND le.postcode LIKE :postcode_prefix"
         if postcode_prefix is not None
         else ""
     )
@@ -109,7 +109,9 @@ def get_comparables(
         "nia_fallback": nia_sqm,
     }
     if postcode_prefix is not None:
-        params["postcode_prefix"] = postcode_prefix
+        # Append % here so the SQL literal never contains %, avoiding psycopg2
+        # treating it as a parameter placeholder escape character.
+        params["postcode_prefix"] = postcode_prefix + "%"
 
     try:
         with Session(engine) as session:
