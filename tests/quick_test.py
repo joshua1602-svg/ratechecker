@@ -38,15 +38,15 @@ SAMPLES = [
                 le.rateable_value,
                 svh.total_area_or_units AS nia_sqm
             FROM voa_list_entries le
-            LEFT JOIN voa_sv_header svh ON le.uarn = svh.uarn
-            WHERE le.primary_description_text ILIKE '%%SHOP%%'
+            JOIN voa_sv_header svh ON le.uarn = svh.uarn
+            WHERE le.scat_code IN (249, 251)
             AND le.rateable_value > 0
-            AND svh.total_area_or_units IS NOT NULL
+            AND svh.total_area_or_units > 0
             AND svh.unit_of_measurement = 'NIA'
             LIMIT 50
         """,
         "business_type": "retail",
-        "scat_codes": [249],
+        "scat_codes": [249, 251],
     },
     {
         "label": "restaurant_cafe",
@@ -58,14 +58,11 @@ SAMPLES = [
                 le.rateable_value,
                 svh.total_area_or_units AS nia_sqm
             FROM voa_list_entries le
-            LEFT JOIN voa_sv_header svh ON le.uarn = svh.uarn
-            WHERE (
-                le.primary_description_text ILIKE '%%CAFE%%'
-                OR le.primary_description_text ILIKE '%%RESTAURANT%%'
-                OR le.primary_description_text ILIKE '%%TAKEAWAY%%'
-            )
+            JOIN voa_sv_header svh ON le.uarn = svh.uarn
+            WHERE le.scat_code IN (409, 234)
             AND le.rateable_value > 0
-            AND svh.total_area_or_units IS NOT NULL
+            AND svh.total_area_or_units > 0
+            AND svh.unit_of_measurement = 'NIA'
             LIMIT 50
         """,
         "business_type": "restaurant_cafe",
@@ -81,10 +78,11 @@ SAMPLES = [
                 le.rateable_value,
                 svh.total_area_or_units AS nia_sqm
             FROM voa_list_entries le
-            LEFT JOIN voa_sv_header svh ON le.uarn = svh.uarn
-            WHERE le.primary_description_text ILIKE '%%NURSERY%%'
+            JOIN voa_sv_header svh ON le.uarn = svh.uarn
+            WHERE le.scat_code = 85
             AND le.rateable_value > 0
-            AND svh.total_area_or_units IS NOT NULL
+            AND svh.total_area_or_units > 0
+            AND svh.unit_of_measurement = 'NIA'
             LIMIT 50
         """,
         "business_type": "nursery",
