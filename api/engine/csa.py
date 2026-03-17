@@ -230,6 +230,7 @@ _MIN_COMPS_FOR_VALUATION: int = 3
 # as high-street retail produces Insufficient Data for a large share of subjects.
 _NURSERY_RADIUS_M: int = 10_000
 _NURSERY_MIN_COMPS: int = 2
+_NURSERY_NEAREST_CAP: int = 10
 
 # Smooth distance decay: weight = 1 / (1 + alpha × distance_km).
 # alpha=0.5 → 0 km→1.0, 1 km→0.67, 2 km→0.5.
@@ -651,7 +652,7 @@ def run_csa(
     if _is_nursery:
         # Nursery pools are sparse and dispersed; use a materially wider size
         # tolerance than retail so evidence is not dropped too early.
-        size_fallback_pct = 100
+        size_fallback_pct = 75
 
     size_pct = rules["filters"]["size_band_pct"]
     filtered = _filter_size(comps, nia_sqm, size_pct)
@@ -709,9 +710,15 @@ def run_csa(
         return _insufficient_data()
 
     # --- Outlier removal ---
-    # Nursery path is intentionally recall-oriented: skip percentile trimming
-    # to avoid collapsing already-small pools below the evidence floor.
-    if not _is_nursery:
+    # Nursery: light-touch trimming only on larger pools.
+    if _is_nursery:
+        if len(rated) >= 5:
+            rates_sorted = sorted(r for _, _, r, _ in rated)
+            n = len(rates_sorted)
+            lo = rates_sorted[max(0, int(n * 0.05))]
+            hi = rates_sorted[min(n - 1, int(n * 0.95))]
+            rated = [(c, d, r, w) for c, d, r, w in rated if lo <= r <= hi]
+    else:
         rates_sorted = sorted(r for _, _, r, _ in rated)
         n = len(rates_sorted)
         lo = rates_sorted[max(0, int(n * 0.10))]
@@ -720,6 +727,16 @@ def run_csa(
 
     if not rated:
         return _insufficient_data()
+
+    # --- Nursery nearest-N cap ---
+    # Keep broad search radius but limit the final nursery pool to the closest
+    # comparables after all prior filtering steps.
+    pre_cap_comparable_count = len(rated)
+    if _is_nursery and len(rated) > _NURSERY_NEAREST_CAP:
+        rated = sorted(rated, key=lambda item: item[1])[:_NURSERY_NEAREST_CAP]
+    post_cap_comparable_count = len(rated)
+    min_distance_used = min((d for _, d, _, _ in rated), default=None)
+    max_distance_used = max((d for _, d, _, _ in rated), default=None)
 
     # --- Rate-band clustering (retail only) ---
     # Split the post-outlier pool into pitch clusters and pick the one whose
@@ -954,6 +971,13 @@ def run_csa(
             if confidence == "High":
                 _confidence_reason = f"capped_medium_gap_{_rate_gap_pct:.0%}_vs_implied"
                 confidence = "Medium"
+    if _is_nursery:
+        _debug = {
+            "pre_cap_comparable_count": pre_cap_comparable_count,
+            "post_cap_comparable_count": post_cap_comparable_count,
+            "min_distance_used": round(min_distance_used, 0) if min_distance_used is not None else None,
+            "max_distance_used": round(max_distance_used, 0) if max_distance_used is not None else None,
+        }
     if _debug:
         _debug["confidence_reason"] = _confidence_reason
 

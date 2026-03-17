@@ -277,6 +277,11 @@ for sample in SAMPLES:
                 "n_after_size": dbg.get("n_after_size_and_launderette"),
                 "n_after_dist": dbg.get("n_after_distance"),
                 "n_after_outlier": dbg.get("n_after_outlier_removal"),
+                # Nursery diagnostics
+                "pre_cap_comparable_count": dbg.get("pre_cap_comparable_count"),
+                "post_cap_comparable_count": dbg.get("post_cap_comparable_count"),
+                "min_distance_used": dbg.get("min_distance_used"),
+                "max_distance_used": dbg.get("max_distance_used"),
                 # Location tier
                 "location_tier": dbg.get("location_tier_used"),
                 "same_street_count": dbg.get("same_street_count"),
