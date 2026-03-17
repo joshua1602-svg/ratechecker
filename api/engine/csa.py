@@ -152,15 +152,10 @@ def itza_from_geometry(width_m: float, depth_m: float, zone_depth_m: float = 6.1
 # Weight helpers
 # ---------------------------------------------------------------------------
 
-def _proximity_weight(distance_m: float, rules: dict) -> float:
-    w = rules["normalisation"]["proximity_weighting"]
-    if distance_m <= 100:
-        return w["same_parade"]
-    if distance_m <= 500:
-        return w["close"]
-    if distance_m <= 1000:
-        return w["broader"]
-    return w["fallback"]
+def _proximity_weight(distance_m: float, rules: dict) -> float:  # noqa: ARG001
+    """Smooth inverse-distance weight: 1 / (1 + alpha × distance_km)."""
+    distance_km = distance_m / 1000.0
+    return 1.0 / (1.0 + _DISTANCE_DECAY_ALPHA * distance_km)
 
 
 def _source_weight(comp: Comparable, rules: dict) -> float:
@@ -219,6 +214,17 @@ _MIN_SAME_STREET_COMPS: int = 4
 # Minimum comparables in the final rated pool required to produce a valuation.
 # Pools below this threshold return Insufficient Data regardless of confidence.
 _MIN_COMPS_FOR_VALUATION: int = 3
+
+# Nursery-specific overrides: larger search radius and lower evidence floor.
+# Nurseries are sparse in most postcode sectors; using the same radius/threshold
+# as high-street retail produces Insufficient Data for a large share of subjects.
+_NURSERY_RADIUS_M: int = 10_000
+_NURSERY_MIN_COMPS: int = 2
+
+# Smooth distance decay: weight = 1 / (1 + alpha × distance_km).
+# alpha=0.5 → 0 km→1.0, 1 km→0.67, 2 km→0.5.
+# Replaces the old step-based proximity bands.
+_DISTANCE_DECAY_ALPHA: float = 0.5
 
 # ---------------------------------------------------------------------------
 # Retail basis classification
@@ -486,6 +492,7 @@ def _retail_select_cluster(
     subject_nia: float,
     subject_implied_rate: float | None,
     min_comps: int = _MIN_COMPS_FOR_VALUATION,
+    same_street_anchor: str | None = None,
 ) -> tuple[list[_ClusterItem], int, str]:
     """
     Conservative two-stage cluster selection for retail.
@@ -554,7 +561,17 @@ def _retail_select_cluster(
             rate_prox = max(0.0, 1.0 - rate_dist) ** 2
         else:
             rate_prox = 0.0
-        return density + size_sim + rate_prox
+        score = density + size_sim + rate_prox
+        # Same-street soft boost: 10% when cluster contains ≥2 comps from the
+        # dominant nearby street.  Bias only — does not override the gate.
+        if same_street_anchor:
+            ss_in_cluster = sum(
+                1 for c, _, _, _ in cl
+                if _extract_street_key(c.address) == same_street_anchor
+            )
+            if ss_in_cluster >= 2:
+                score *= 1.10
+        return score
 
     # Sort: highest score first; lower median rate breaks ties (downward bias)
     ranked = sorted(
@@ -617,7 +634,11 @@ def run_csa(
     ]
 
     # --- Distance filter ---
-    max_radius = rules["filters"]["distance_m"]["fallback"]
+    max_radius = (
+        _NURSERY_RADIUS_M
+        if business_type == "nursery"
+        else rules["filters"]["distance_m"]["fallback"]
+    )
     with_dist: list[tuple[Comparable, float]] = []
     for c in filtered:
         d = haversine_m(lat, lon, c.lat, c.lon)
@@ -701,6 +722,11 @@ def run_csa(
                 if _s_itza > 0:
                     subject_implied_rate = voa_rv / _s_itza
 
+        # Compute same-street anchor key for cluster-selection soft boost.
+        # Uses threshold=2 (lower than the narrowing threshold of 4) so that
+        # even a thin same-street presence can tip cluster selection.
+        _, _ss_anchor = _same_street_pool(rated, min_comps=2)
+
         # Step 1: narrow pool to same-street comparables when sufficient.
         # The dominant street (highest total weight) is the proxy for the
         # subject's street.  Two checks guard against a prime same-street
@@ -719,6 +745,7 @@ def run_csa(
                 same_street_key = None
                 same_street_count = 0
                 same_street_reverted = True
+                _ss_anchor = None  # don't boost prime same-street comps
 
         # Step 2: cluster the (possibly narrowed) pool by rate distribution.
         clusters = _find_rate_clusters(pool)
@@ -727,12 +754,14 @@ def run_csa(
         # Step 3: conservative retail cluster selection.
         # _retail_select_cluster applies a hard plausibility gate (rejects
         # clusters > 1.25× subject implied), never reblends across clusters,
-        # and biases downward on ties.
+        # and biases downward on ties.  The same-street anchor gives a soft
+        # 10% score boost to clusters that contain ≥2 same-street comparables.
         pool, selected_cluster_id, _selection_reason = _retail_select_cluster(
             clusters,
             subject_nia=nia_sqm,
             subject_implied_rate=subject_implied_rate,
             min_comps=_MIN_COMPS_FOR_VALUATION,
+            same_street_anchor=_ss_anchor,
         )
         rated = pool
 
@@ -740,10 +769,11 @@ def run_csa(
         return _insufficient_data()
 
     # --- Minimum evidence guardrail ---
-    # Valuations derived from fewer than _MIN_COMPS_FOR_VALUATION comparables
-    # are too unstable to surface, regardless of confidence band.  This applies
-    # to all business types: retail (post-cluster), nursery, restaurant_cafe.
-    if len(rated) < _MIN_COMPS_FOR_VALUATION:
+    # Nursery uses a lower floor (_NURSERY_MIN_COMPS=2) because nurseries are
+    # sparse in most sectors and the standard floor of 3 produces too many
+    # Insufficient Data results at reasonable radii.
+    _min_comps = _NURSERY_MIN_COMPS if business_type == "nursery" else _MIN_COMPS_FOR_VALUATION
+    if len(rated) < _min_comps:
         return _insufficient_data()
 
     # --- Tone derivation ---

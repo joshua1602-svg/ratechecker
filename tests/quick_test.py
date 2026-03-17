@@ -205,11 +205,12 @@ for sample in SAMPLES:
 
         try:
             sector = postcode_sector(postcode)
+            _radius = 10_000 if sample["business_type"] == "nursery" else 1_000
             raw_comps = get_comparables(
                 lat=lat,
                 lon=lon,
                 scat_codes=sample["scat_codes"],
-                radius_m=1000,
+                radius_m=_radius,
                 nia_sqm=nia_sqm,
                 size_band_pct=50,
                 postcode_prefix=sector,

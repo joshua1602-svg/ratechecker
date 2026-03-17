@@ -314,12 +314,22 @@ class TestMinimumComparableGuardrail:
         assert result["signal"] != "Insufficient Data"
         assert result["estimated_rv"] is not None
 
-    def test_nursery_two_comps_returns_insufficient_data(self):
-        """Guardrail applies to nursery too (shared rule)."""
+    def test_nursery_two_comps_produces_valuation(self):
+        """Nursery uses _NURSERY_MIN_COMPS=2; 2 valid comps must produce a valuation."""
         comps = [
             _comp("A", rv=24_000, nia_sqm=200, unadjusted_price_psm=120.0,
                   has_summary=True, scat_code=85),
             _comp("B", rv=24_000, nia_sqm=200, unadjusted_price_psm=120.0,
+                  has_summary=True, scat_code=85),
+        ]
+        result = _run(comps, nia_sqm=200.0, business_type="nursery")
+        assert result["signal"] != "Insufficient Data"
+        assert result["estimated_rv"] is not None and result["estimated_rv"] > 0
+
+    def test_nursery_one_comp_returns_insufficient_data(self):
+        """1 nursery comparable is still below _NURSERY_MIN_COMPS=2."""
+        comps = [
+            _comp("A", rv=24_000, nia_sqm=200, unadjusted_price_psm=120.0,
                   has_summary=True, scat_code=85),
         ]
         result = _run(comps, nia_sqm=200.0, business_type="nursery")
