@@ -17,6 +17,7 @@ from api.engine.valuation import (
     _apply_op,
     _eval_nursery_trigger,
     _eval_trigger,
+    apply_adjustments,
     calculate_rv,
 )
 from api.models import AreasInput, BusinessType, FlagsInput, NurseryInput, PropertyInput
@@ -250,3 +251,221 @@ class TestITZA:
         width = math.sqrt(nia / aspect)
         depth = nia / width
         assert abs(itza_from_nia(nia, zone) - itza_from_geometry(width, depth, zone)) < 0.001
+
+
+# ---------------------------------------------------------------------------
+# apply_adjustments() — post-CSA adjustment layer
+# ---------------------------------------------------------------------------
+
+class TestApplyAdjustments:
+    """
+    Verify the adjustment layer (apply_adjustments) for each segment.
+
+    Covers:
+      - base_rv is passed through unchanged
+      - adjusted_rv = round(base_rv * factor / 100) * 100
+      - triggered rules reduce/increase the factor
+      - missing optional fields skip (not fail) their triggers
+      - segment-specific rules fire correctly (retail, restaurant_cafe, nursery)
+      - source field names the correct YAML file
+    """
+
+    # --- Retail ---------------------------------------------------------------
+
+    def test_retail_no_triggers_returns_base_unchanged(self):
+        prop = PropertyInput(
+            postcode="X", business_type=BusinessType.retail, nia_sqm=100.0
+        )
+        result = apply_adjustments("retail", 20_000, prop)
+        assert result["base_estimated_rv"] == 20_000
+        assert result["adjusted_estimated_rv"] == 20_000
+        assert result["adjustments"]["total_adjustment_factor"] == 1.0
+
+    def test_retail_poor_frontage_reduces_rv(self):
+        prop = PropertyInput(
+            postcode="X", business_type=BusinessType.retail, nia_sqm=100.0,
+            frontage_m=2.5,  # triggers poor_frontage (<3.0): -5%
+        )
+        result = apply_adjustments("retail", 20_000, prop)
+        assert abs(result["adjustments"]["total_adjustment_factor"] - 0.95) < 0.001
+        assert result["adjusted_estimated_rv"] == round(20_000 * 0.95 / 100) * 100
+
+    def test_retail_awkward_layout_reduces_rv(self):
+        prop = PropertyInput(postcode="X", business_type=BusinessType.retail, nia_sqm=100.0)
+        flags = FlagsInput(consent_disclaimer=True, layout_flag=True)  # -8%
+        result = apply_adjustments("retail", 20_000, prop, flags=flags)
+        assert abs(result["adjustments"]["total_adjustment_factor"] - 0.92) < 0.001
+
+    def test_retail_excessive_depth_reduces_rv(self):
+        prop = PropertyInput(
+            postcode="X", business_type=BusinessType.retail, nia_sqm=100.0,
+            depth_m=25.0,  # triggers excessive_depth (>20m): -5%
+        )
+        result = apply_adjustments("retail", 20_000, prop)
+        assert abs(result["adjustments"]["total_adjustment_factor"] - 0.95) < 0.001
+
+    def test_retail_two_triggers_are_multiplicative(self):
+        """poor_frontage (-5%) AND awkward_layout (-8%) → 0.95 × 0.92 = 0.874"""
+        prop = PropertyInput(
+            postcode="X", business_type=BusinessType.retail, nia_sqm=100.0,
+            frontage_m=2.0,  # poor_frontage
+        )
+        flags = FlagsInput(consent_disclaimer=True, layout_flag=True)  # awkward_layout
+        result = apply_adjustments("retail", 20_000, prop, flags=flags)
+        expected_factor = 0.95 * 0.92
+        assert abs(result["adjustments"]["total_adjustment_factor"] - expected_factor) < 0.001
+        assert result["adjusted_estimated_rv"] == round(20_000 * expected_factor / 100) * 100
+
+    def test_retail_source_names_retail_yaml(self):
+        prop = PropertyInput(postcode="X", business_type=BusinessType.retail, nia_sqm=100.0)
+        result = apply_adjustments("retail", 20_000, prop)
+        sources = {item["source"] for item in result["adjustments"]["applied"]}
+        assert sources == {"retail.yaml"}
+
+    def test_retail_missing_frontage_skips_trigger(self):
+        """No frontage_m supplied → poor_frontage must not fire."""
+        prop = PropertyInput(postcode="X", business_type=BusinessType.retail, nia_sqm=100.0)
+        result = apply_adjustments("retail", 20_000, prop)
+        triggered = [i for i in result["adjustments"]["applied"] if i["triggered"]]
+        assert not any(i["name"] == "poor_frontage" for i in triggered)
+
+    def test_retail_all_rules_listed_including_not_triggered(self):
+        """Every rule in retail.yaml must appear in the applied list."""
+        prop = PropertyInput(postcode="X", business_type=BusinessType.retail, nia_sqm=100.0)
+        result = apply_adjustments("retail", 20_000, prop)
+        names = {i["name"] for i in result["adjustments"]["applied"]}
+        assert "poor_frontage" in names
+        assert "awkward_layout" in names
+        assert "excessive_depth" in names
+
+    # --- hair_beauty (shares retail.yaml) ------------------------------------
+
+    def test_hair_beauty_uses_retail_yaml(self):
+        prop = PropertyInput(postcode="X", business_type=BusinessType.hair_beauty, nia_sqm=60.0)
+        result = apply_adjustments("hair_beauty", 10_000, prop)
+        sources = {item["source"] for item in result["adjustments"]["applied"]}
+        assert sources == {"retail.yaml"}
+
+    # --- Restaurant/Café -----------------------------------------------------
+
+    def test_restaurant_outdoor_seating_increases_rv(self):
+        prop = PropertyInput(postcode="X", business_type=BusinessType.restaurant_cafe, nia_sqm=80.0)
+        areas = AreasInput(outdoor_seating=True)  # +5%
+        result = apply_adjustments("restaurant_cafe", 30_000, prop, areas=areas)
+        assert abs(result["adjustments"]["total_adjustment_factor"] - 1.05) < 0.001
+
+    def test_restaurant_cramped_layout_reduces_rv(self):
+        prop = PropertyInput(postcode="X", business_type=BusinessType.restaurant_cafe, nia_sqm=80.0)
+        flags = FlagsInput(consent_disclaimer=True, cramped_flag=True)  # -5%
+        result = apply_adjustments("restaurant_cafe", 30_000, prop, flags=flags)
+        assert abs(result["adjustments"]["total_adjustment_factor"] - 0.95) < 0.001
+
+    def test_restaurant_premium_fitout_increases_rv(self):
+        prop = PropertyInput(postcode="X", business_type=BusinessType.restaurant_cafe, nia_sqm=80.0)
+        flags = FlagsInput(consent_disclaimer=True, fitout_year=2022)  # ≥2020: +2%
+        result = apply_adjustments("restaurant_cafe", 30_000, prop, flags=flags)
+        assert abs(result["adjustments"]["total_adjustment_factor"] - 1.02) < 0.001
+
+    def test_restaurant_old_fitout_does_not_trigger(self):
+        prop = PropertyInput(postcode="X", business_type=BusinessType.restaurant_cafe, nia_sqm=80.0)
+        flags = FlagsInput(consent_disclaimer=True, fitout_year=2018)
+        result = apply_adjustments("restaurant_cafe", 30_000, prop, flags=flags)
+        triggered = [i for i in result["adjustments"]["applied"] if i["triggered"]]
+        assert not any(i["name"] == "premium_fitout" for i in triggered)
+
+    def test_restaurant_no_areas_skips_outdoor_seating(self):
+        """No areas object → outdoor_seating trigger must not fire."""
+        prop = PropertyInput(postcode="X", business_type=BusinessType.restaurant_cafe, nia_sqm=80.0)
+        result = apply_adjustments("restaurant_cafe", 30_000, prop)
+        triggered = [i for i in result["adjustments"]["applied"] if i["triggered"]]
+        assert not any(i["name"] == "outdoor_seating" for i in triggered)
+
+    def test_restaurant_source_names_restaurant_yaml(self):
+        prop = PropertyInput(postcode="X", business_type=BusinessType.restaurant_cafe, nia_sqm=80.0)
+        result = apply_adjustments("restaurant_cafe", 30_000, prop)
+        sources = {item["source"] for item in result["adjustments"]["applied"]}
+        assert sources == {"restaurant_cafe.yaml"}
+
+    # --- Nursery -------------------------------------------------------------
+
+    def test_nursery_purpose_built_increases_rv(self):
+        prop = PropertyInput(postcode="X", business_type=BusinessType.nursery, nia_sqm=200.0)
+        nursery = NurseryInput(purpose_built=True)  # +3%
+        result = apply_adjustments("nursery", 40_000, prop, nursery=nursery)
+        assert abs(result["adjustments"]["total_adjustment_factor"] - 1.03) < 0.001
+
+    def test_nursery_converted_building_reduces_rv(self):
+        prop = PropertyInput(postcode="X", business_type=BusinessType.nursery, nia_sqm=200.0)
+        nursery = NurseryInput(purpose_built=False)  # converted_building: -5%
+        result = apply_adjustments("nursery", 40_000, prop, nursery=nursery)
+        triggered = [i for i in result["adjustments"]["applied"] if i["triggered"]]
+        assert any(i["name"] == "converted_building" for i in triggered)
+        # purpose_built=True triggers +3%, purpose_built=False triggers converted_building -5%
+        # Only converted_building should be triggered (purpose_built trigger won't fire)
+        assert not any(i["name"] == "purpose_built" for i in triggered)
+
+    def test_nursery_outdoor_play_increases_rv(self):
+        prop = PropertyInput(postcode="X", business_type=BusinessType.nursery, nia_sqm=200.0)
+        nursery = NurseryInput(outdoor_play=True)  # +3%
+        result = apply_adjustments("nursery", 40_000, prop, nursery=nursery)
+        triggered = [i for i in result["adjustments"]["applied"] if i["triggered"]]
+        assert any(i["name"] == "outdoor_play_area" for i in triggered)
+
+    def test_nursery_awkward_layout_reduces_rv(self):
+        prop = PropertyInput(postcode="X", business_type=BusinessType.nursery, nia_sqm=200.0)
+        # purpose_built=True avoids the converted_building (-5%) trigger so only
+        # awkward_layout (-5%) fires; factor = 1.03 * 0.95 = 0.9785
+        nursery = NurseryInput(purpose_built=True)
+        flags = FlagsInput(consent_disclaimer=True, layout_flag=True)
+        result = apply_adjustments("nursery", 40_000, prop, nursery=nursery, flags=flags)
+        triggered = [i for i in result["adjustments"]["applied"] if i["triggered"]]
+        assert any(i["name"] == "awkward_layout" for i in triggered)
+        # purpose_built (+3%) × awkward_layout (-5%) = 1.03 × 0.95 = 0.9785
+        expected = 1.03 * 0.95
+        assert abs(result["adjustments"]["total_adjustment_factor"] - expected) < 0.001
+
+    def test_nursery_source_names_nursery_yaml(self):
+        prop = PropertyInput(postcode="X", business_type=BusinessType.nursery, nia_sqm=200.0)
+        result = apply_adjustments("nursery", 40_000, prop)
+        sources = {item["source"] for item in result["adjustments"]["applied"]}
+        assert sources == {"nursery.yaml"}
+
+    def test_nursery_purpose_built_and_outdoor_play_compound(self):
+        """purpose_built (+3%) × outdoor_play (+3%) = 1.03 × 1.03 = 1.0609"""
+        prop = PropertyInput(postcode="X", business_type=BusinessType.nursery, nia_sqm=200.0)
+        nursery = NurseryInput(purpose_built=True, outdoor_play=True)
+        result = apply_adjustments("nursery", 40_000, prop, nursery=nursery)
+        expected_factor = 1.03 * 1.03
+        assert abs(result["adjustments"]["total_adjustment_factor"] - expected_factor) < 0.001
+
+    # --- Output contract -----------------------------------------------------
+
+    def test_adjusted_rv_rounds_to_nearest_100(self):
+        """Adjusted RV must always be a multiple of £100."""
+        prop = PropertyInput(
+            postcode="X", business_type=BusinessType.retail, nia_sqm=100.0,
+            frontage_m=2.0,
+        )
+        result = apply_adjustments("retail", 19_750, prop)
+        assert result["adjusted_estimated_rv"] % 100 == 0
+
+    def test_adjustment_summary_present(self):
+        prop = PropertyInput(postcode="X", business_type=BusinessType.retail, nia_sqm=100.0)
+        result = apply_adjustments("retail", 20_000, prop)
+        assert "adjustment_summary" in result
+        assert isinstance(result["adjustment_summary"], str)
+        assert len(result["adjustment_summary"]) > 0
+
+    def test_adjustment_summary_no_triggers(self):
+        prop = PropertyInput(postcode="X", business_type=BusinessType.retail, nia_sqm=100.0)
+        result = apply_adjustments("retail", 20_000, prop)
+        assert "No adjustments applied" in result["adjustment_summary"]
+
+    def test_adjustment_factor_format(self):
+        """Factor field on each item is a float (signed decimal)."""
+        prop = PropertyInput(postcode="X", business_type=BusinessType.retail, nia_sqm=100.0)
+        result = apply_adjustments("retail", 20_000, prop)
+        for item in result["adjustments"]["applied"]:
+            assert isinstance(item["factor"], float)
+            # factors from retail.yaml are all negative or zero in this segment
+            assert -1.0 < item["factor"] <= 0.0

@@ -8,7 +8,8 @@ from api.db import get_comparables
 from api.engine.csa import Comparable, run_csa
 from api.engine.geocoding import postcode_to_coords
 from api.engine.rules import csa_rules
-from api.models import AssessRequest, AssessResponse
+from api.engine.valuation import apply_adjustments
+from api.models import AdjustmentBreakdown, AdjustmentItem, AssessRequest, AssessResponse
 
 router = APIRouter()
 
@@ -85,9 +86,39 @@ async def assess(req: AssessRequest) -> AssessResponse:
         voa_rv=req.property.voa_rv,
     )
 
+    # 6. Apply adjustment layer
+    # Runs only when the CSA produced a valid estimate (base_rv is not None).
+    # Missing optional fields (areas, nursery) are handled inside apply_adjustments
+    # by substituting safe empty defaults, so absent triggers simply don't fire.
+    base_rv: int | None = result.get("estimated_rv")
+    adj_breakdown: AdjustmentBreakdown | None = None
+    adj_rv: int | None = None
+    adj_summary: str | None = None
+
+    if base_rv is not None:
+        adj = apply_adjustments(
+            business_type=btype,
+            base_rv=int(base_rv),
+            property=req.property,
+            areas=req.areas,
+            nursery=req.nursery,
+            flags=req.flags,
+        )
+        adj_rv = adj["adjusted_estimated_rv"]
+        adj_summary = adj["adjustment_summary"]
+        adj_breakdown = AdjustmentBreakdown(
+            applied=[AdjustmentItem(**item) for item in adj["adjustments"]["applied"]],
+            total_adjustment_factor=adj["adjustments"]["total_adjustment_factor"],
+        )
+
     return AssessResponse(
         signal=result["signal"],
         explanation=result["explanation"],
         comparable_count=result.get("comparable_count"),
         saving_estimate=result.get("saving_estimate"),
+        tone_rate=result.get("tone_rate"),
+        base_estimated_rv=base_rv,
+        adjusted_estimated_rv=adj_rv,
+        adjustments=adj_breakdown,
+        adjustment_summary=adj_summary,
     )

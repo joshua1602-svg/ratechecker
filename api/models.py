@@ -64,11 +64,30 @@ class AssessRequest(BaseModel):
     captcha_token: Optional[str] = None
 
 
+class AdjustmentItem(BaseModel):
+    """A single rule from the sector YAML, with its trigger outcome."""
+    name: str
+    source: str          # e.g. "retail.yaml", "restaurant_cafe.yaml"
+    factor: float        # signed decimal, e.g. -0.08 for -8%
+    triggered: bool      # True when the rule fired against the subject inputs
+
+
+class AdjustmentBreakdown(BaseModel):
+    """Full adjustment-layer result for a single valuation."""
+    applied: list[AdjustmentItem]
+    total_adjustment_factor: float   # cumulative multiplier, e.g. 0.874
+
+
 class AssessResponse(BaseModel):
     signal: str  # "High", "Medium", "Low", "Insufficient Data"
     explanation: str
     comparable_count: Optional[int] = None
     saving_estimate: Optional[str] = None
+    tone_rate: Optional[float] = None
+    base_estimated_rv: Optional[int] = None
+    adjusted_estimated_rv: Optional[int] = None
+    adjustments: Optional[AdjustmentBreakdown] = None
+    adjustment_summary: Optional[str] = None
 
 
 class PurchaseFormData(BaseModel):

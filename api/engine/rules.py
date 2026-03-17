@@ -49,3 +49,8 @@ def general_rules() -> dict:
 def business_rules(business_type: str) -> dict:
     rule_file = _RULE_FILE.get(business_type, "retail")
     return _load(rule_file)
+
+
+def rule_file_name(business_type: str) -> str:
+    """Return the base YAML filename (e.g. 'retail.yaml') for a business type."""
+    return _RULE_FILE.get(business_type, "retail") + ".yaml"

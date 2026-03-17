@@ -10,7 +10,7 @@ import re
 from typing import Optional
 
 from api.engine.csa import itza_from_geometry, itza_from_nia
-from api.engine.rules import business_rules
+from api.engine.rules import business_rules, rule_file_name
 from api.models import AreasInput, FlagsInput, NurseryInput, PropertyInput
 
 
@@ -235,3 +235,101 @@ def _eval_nursery_trigger(
         return False
     op, coerced_actual, target = parsed
     return _apply_op(op, coerced_actual, target)
+
+
+# ---------------------------------------------------------------------------
+# Adjustment layer (post-CSA)
+# ---------------------------------------------------------------------------
+
+def apply_adjustments(
+    business_type: str,
+    base_rv: int,
+    property: PropertyInput,
+    areas: Optional[AreasInput] = None,
+    nursery: Optional[NurseryInput] = None,
+    flags: Optional[FlagsInput] = None,
+) -> dict:
+    """
+    Apply the sector-specific adjustment layer to a CSA-derived base RV.
+
+    Loads the relevant YAML rule file, evaluates every applicable rule trigger
+    against the supplied inputs, and chains triggered adjustments multiplicatively.
+
+    Parameters
+    ----------
+    business_type : str
+        One of "retail", "hair_beauty", "restaurant_cafe", "nursery", "pub".
+    base_rv : int
+        The CSA-derived base rateable value (already rounded to nearest £100).
+    property, areas, nursery, flags : input models
+        Form inputs used to evaluate rule triggers.  Any that are None are
+        replaced with safe empty defaults so that missing fields skip (not fail)
+        their associated adjustment triggers.
+
+    Returns
+    -------
+    dict with keys:
+        base_estimated_rv       – same as base_rv (passed through unchanged)
+        adjusted_estimated_rv   – base_rv × total_factor, rounded to £100
+        adjustments             – breakdown dict:
+            applied             – list of all applicable rules with triggered flag
+            total_adjustment_factor – cumulative multiplicative factor
+        adjustment_summary      – human-readable one-line summary
+    """
+    rules = business_rules(business_type)
+    source = rule_file_name(business_type)
+
+    _flags = flags or FlagsInput(consent_disclaimer=True)
+    _areas = areas or AreasInput()
+    _nursery = nursery or NurseryInput()
+
+    # Nurseries declare adjustments under "adjustments"; all zoning segments
+    # use "allowances".  The trigger evaluators differ accordingly.
+    is_nursery = rules.get("valuation_method") == "nia_only"
+    rule_section = rules.get("adjustments" if is_nursery else "allowances", {})
+
+    adj_multiplier = 1.0
+    applied: list[dict] = []
+
+    for name, rule in rule_section.items():
+        adj = float(rule.get("adjustment", 0))
+        if is_nursery:
+            triggered = _eval_nursery_trigger(rule.get("trigger", ""), _nursery, _flags)
+        else:
+            triggered = _eval_trigger(rule.get("trigger", ""), property, _areas, _flags)
+
+        if triggered:
+            adj_multiplier *= (1.0 + adj)
+
+        applied.append({
+            "name": name,
+            "source": source,
+            "factor": round(adj, 4),
+            "triggered": triggered,
+        })
+
+    adjusted_rv = round(base_rv * adj_multiplier / 100) * 100
+    total_factor = round(adj_multiplier, 4)
+
+    n_triggered = sum(1 for item in applied if item["triggered"])
+    if n_triggered == 0:
+        summary = "No adjustments applied — base RV unchanged."
+    else:
+        pct = round((total_factor - 1) * 100, 1)
+        direction = "upward" if pct > 0 else "downward"
+        names = ", ".join(item["name"] for item in applied if item["triggered"])
+        summary = (
+            f"{n_triggered} adjustment(s) applied ({names}): "
+            f"{pct:+.1f}% {direction} (factor {total_factor:.4f}). "
+            f"Adjusted RV £{adjusted_rv:,}."
+        )
+
+    return {
+        "base_estimated_rv": base_rv,
+        "adjusted_estimated_rv": adjusted_rv,
+        "adjustments": {
+            "applied": applied,
+            "total_adjustment_factor": total_factor,
+        },
+        "adjustment_summary": summary,
+    }
