@@ -19,7 +19,7 @@ import pandas as pd
 from dotenv import load_dotenv
 from sqlalchemy import create_engine, text
 
-from api.db import get_comparables
+from api.db import get_comparables, get_sv_line_descs_batch
 from api.engine.csa import Comparable, run_csa
 
 load_dotenv()
@@ -166,6 +166,13 @@ for sample in SAMPLES:
 
     coords_map = get_coords_batch(df["postcode"].dropna().astype(str).tolist())
 
+    # Batch-fetch VOA SV line descriptions for all subject UARNs.
+    # These identify whether the subject was valued on a Zone A / ITZA basis
+    # (e.g. "Retail Zone A" lines) or an area basis, enabling the correct
+    # rate-basis classification in run_csa().
+    subject_uarns = df["uarn"].astype(str).tolist()
+    sv_lines_map = get_sv_line_descs_batch(subject_uarns)
+
     for i, (_, row) in enumerate(df.iterrows(), 1):
         uarn = row["uarn"]
         postcode = row["postcode"]
@@ -218,6 +225,8 @@ for sample in SAMPLES:
                 business_type=sample["business_type"],
                 nia_sqm=nia_sqm,
                 voa_rv=voa_rv,
+                subject_description=str(desc) if desc else "",
+                subject_sv_line_descs=sv_lines_map.get(str(uarn), ()),
             )
 
             model_rv = result.get("estimated_rv")
@@ -275,6 +284,7 @@ for sample in SAMPLES:
                 "cluster_rate_median": dbg.get("cluster_rate_median"),
                 "cluster_rate_max": dbg.get("cluster_rate_max"),
                 # Rate-distance diagnostics
+                "retail_method": dbg.get("retail_method"),
                 "subject_implied_rate": dbg.get("subject_implied_zone_a_rate"),
                 "rate_distance_to_subject": dbg.get("rate_distance_to_subject"),
                 # Full-pool percentiles (pre-clustering, post-outlier)

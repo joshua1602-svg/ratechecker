@@ -70,6 +70,10 @@ async def assess(req: AssessRequest) -> AssessResponse:
     ]
 
     # 5. Run CSA
+    # subject_description and subject_sv_line_descs are not available from the
+    # web form request — they would require a UARN lookup.  The defaults
+    # ("" and ()) resolve to itza_retail, which is correct for standard
+    # high-street retail and restaurant subjects.
     result = run_csa(
         comps=comps,
         lat=lat,

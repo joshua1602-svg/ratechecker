@@ -133,6 +133,36 @@ def get_comparables(
     return results
 
 
+def get_sv_line_descs_batch(uarns: list[str]) -> dict[str, tuple[str, ...]]:
+    """
+    Return SV line descriptions keyed by UARN for a batch of subject properties.
+
+    The descriptions (e.g. 'Retail Zone A', 'Zone B', 'Remainder') come from
+    the voa_sv_lines table and are used by _classify_retail_method() to
+    distinguish ITZA-zoned high-street retail from area-based methods.
+
+    Returns an empty dict if the table is unavailable or uarns is empty.
+    """
+    if not uarns:
+        return {}
+    sql = text("""
+        SELECT uarn, description
+        FROM voa_sv_lines
+        WHERE uarn = ANY(:uarns)
+          AND description IS NOT NULL
+        ORDER BY uarn, line_number
+    """)
+    try:
+        with Session(engine) as session:
+            rows = session.execute(sql, {"uarns": list(uarns)}).fetchall()
+        result: dict[str, list[str]] = {}
+        for r in rows:
+            result.setdefault(r.uarn, []).append(r.description)
+        return {k: tuple(v) for k, v in result.items()}
+    except Exception:
+        return {}
+
+
 def count_voa_rows() -> int:
     """
     Return the number of rows in voa_list_entries.
