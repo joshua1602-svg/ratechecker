@@ -235,8 +235,8 @@ _RESTAURANT_RADIUS_M: int = 3_000
 _RESTAURANT_SIZE_BAND_PCT: int = 75
 _RESTAURANT_MAX_DISTANCE_M: int = 1_500
 _RESTAURANT_MEDIAN_DISTANCE_M_MAX: int = 1_000
-_RESTAURANT_RATE_GAP_LIMIT_SOFT_MEDIUM: float = 15.0
-_RESTAURANT_RATE_GAP_LIMIT_SOFT_LOW: float = 30.0
+_RESTAURANT_RATE_GAP_LIMIT_SOFT_MEDIUM: float = 20.0
+_RESTAURANT_RATE_GAP_LIMIT_SOFT_LOW: float = 35.0
 _RESTAURANT_RATE_GAP_LIMIT_HARD: float = 50.0
 
 # Smooth distance decay: weight = 1 / (1 + alpha × distance_km).
@@ -1048,44 +1048,40 @@ def run_csa(
         else:
             _rate_distance_to_subject = abs(tone - _restaurant_implied_rate)
             if _rate_distance_to_subject <= _RESTAURANT_RATE_GAP_LIMIT_SOFT_MEDIUM:
-                rate_distance_band = "0_15"
+                rate_distance_band = "0_20"
             elif _rate_distance_to_subject <= _RESTAURANT_RATE_GAP_LIMIT_SOFT_LOW:
-                rate_distance_band = "15_30"
+                rate_distance_band = "20_35"
                 if confidence == "High":
                     confidence = "Medium"
-                    _confidence_reason = "restaurant_rate_distance_15_30_cap_medium"
+                    _confidence_reason = "restaurant_rate_distance_20_35_cap_medium"
             elif _rate_distance_to_subject <= _RESTAURANT_RATE_GAP_LIMIT_HARD:
-                rate_distance_band = "30_50"
-                _rate_spread = (max(rate_vals) - min(rate_vals)) if rate_vals else 0.0
-                _strong_pool = (
-                    len(rated) >= 4
-                    and (_median_distance_m is not None and _median_distance_m <= 750)
-                    and _rate_spread <= 120
-                )
+                rate_distance_band = "35_50"
                 _weak_broad_pool = (
-                    len(rated) <= 3
-                    or (_median_distance_m is not None and _median_distance_m > 750)
-                    or (max_distance_used is not None and max_distance_used > 1200)
+                    len(rated) < 3
+                    or (_median_distance_m is not None and _median_distance_m > 900)
+                    or (max_distance_used is not None and max_distance_used > 1300)
+                    or _location_tier == "full_pool"
                 )
-                if _weak_broad_pool or not _strong_pool:
-                    restaurant_rejection_reason = "weak_pool_with_rate_distance_gt30"
+                if _weak_broad_pool:
+                    restaurant_rejection_reason = "weak_pool_with_rate_distance_gt35"
                     restaurant_quality_gate_passed = False
                 else:
                     confidence = "Low"
-                    _confidence_reason = "restaurant_rate_distance_30_50_cap_low"
+                    _confidence_reason = "restaurant_rate_distance_35_50_cap_low"
             else:
                 rate_distance_band = "gt_50"
                 restaurant_rejection_reason = "rate_distance_gt_50"
                 restaurant_quality_gate_passed = False
 
-        if len(rated) == 2 and _rate_distance_to_subject is not None and _rate_distance_to_subject > 30:
-            restaurant_rejection_reason = "two_comp_rate_distance_gt30"
+        if len(rated) == 2 and _rate_distance_to_subject is not None and _rate_distance_to_subject > 35:
+            restaurant_rejection_reason = "two_comp_rate_distance_gt35"
             restaurant_quality_gate_passed = False
 
         if _debug:
             _debug["rate_distance_to_subject"] = (
                 round(_rate_distance_to_subject, 1) if _rate_distance_to_subject is not None else None
             )
+            _debug["restaurant_rate_distance_band"] = rate_distance_band
             _debug["rate_distance_band"] = rate_distance_band
             _debug["restaurant_rejection_reason"] = restaurant_rejection_reason
             _debug["restaurant_quality_gate_passed"] = restaurant_quality_gate_passed
