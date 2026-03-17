@@ -669,6 +669,9 @@ def run_csa(
         size_fallback_pct = _RESTAURANT_SIZE_BAND_PCT
     else:
         size_pct = rules["filters"]["size_band_pct"]
+        
+        if business_type == "restaurant_cafe":
+            size_pct = size_pct * 1.25
 
     filtered = _filter_size(comps, nia_sqm, size_pct)
     if len(filtered) < rules["confidence"]["low_if_min_comps"]:
@@ -682,10 +685,10 @@ def run_csa(
     ]
 
     # --- Distance filter ---
-    if _is_nursery:
+    if business_type == "nursery":
         max_radius = _NURSERY_RADIUS_M
-    elif _is_restaurant:
-        max_radius = _RESTAURANT_RADIUS_M
+    elif business_type == "restaurant_cafe":
+        max_radius = rules["filters"]["distance_m"]["fallback"] * 1.25
     else:
         max_radius = rules["filters"]["distance_m"]["fallback"]
     with_dist: list[tuple[Comparable, float]] = []
@@ -1056,18 +1059,40 @@ def run_csa(
                     _confidence_reason = "restaurant_rate_distance_20_35_cap_medium"
             elif _rate_distance_to_subject <= _RESTAURANT_RATE_GAP_LIMIT_HARD:
                 rate_distance_band = "35_50"
-                _weak_broad_pool = (
-                    len(rated) < 3
-                    or (_median_distance_m is not None and _median_distance_m > 900)
-                    or (max_distance_used is not None and max_distance_used > 1300)
-                    or _location_tier == "full_pool"
+                _high_quality_cluster = (
+                    len(rated) >= 4
+                )
+
+                _moderate_quality_cluster = (
+                    len(rated) >= 3
+                    and (_median_distance_m is not None and _median_distance_m <= 1100)
+                )
+
+                _location_support = (
+                    _location_tier in ["same_street","postcode_sector"]
+                )
+
+                _weak_broad_pool = not (
+                    _high_quality_cluster
+                    or _moderate_quality_cluster
+                    or _location_support
                 )
                 if _weak_broad_pool:
                     restaurant_rejection_reason = "weak_pool_with_rate_distance_gt35"
                     restaurant_quality_gate_passed = False
                 else:
-                    confidence = "Low"
-                    _confidence_reason = "restaurant_rate_distance_35_50_cap_low"
+                    # NEW: downward bias check
+                    _downward_bias = (
+                        _restaurant_implied_rate is not None
+                        and tone < (_restaurant_implied_rate * 0.85)
+                    )
+
+                    if _downward_bias and _rate_distance_to_subject > 25:
+                        restaurant_rejection_reason = "downward_biased_cluster"
+                        restaurant_quality_gate_passed = False
+                    else:
+                        confidence = "Low"
+                        _confidence_reason = "restaurant_rate_distance_35_50_cap_low"
             else:
                 rate_distance_band = "gt_50"
                 restaurant_rejection_reason = "rate_distance_gt_50"
