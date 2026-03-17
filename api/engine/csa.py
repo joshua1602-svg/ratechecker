@@ -211,6 +211,16 @@ _STREET_SUFFIXES: frozenset[str] = frozenset({
 # of the full postcode-sector pool.
 _MIN_SAME_STREET_COMPS: int = 4
 
+# Location-tier pool selection thresholds (retail only).
+# Tier 1 — same street  : use if dominant street has ≥ this many comps.
+# Tier 2 — same sector  : use if same postcode sector has ≥ this many comps.
+# Tier 3 — full pool    : fallback when neither threshold is met.
+_RETAIL_SAME_STREET_TIER_MIN: int = 3
+_RETAIL_SECTOR_TIER_MIN: int = 6
+
+# UK postcode regex: matches "SW4 9JN", "EC1A 1BB", "M1 1AA" etc.
+_POSTCODE_RE = re.compile(r"[A-Z]{1,2}[0-9][0-9A-Z]?\s[0-9][A-Z]{2}")
+
 # Minimum comparables in the final rated pool required to produce a valuation.
 # Pools below this threshold return Insufficient Data regardless of confidence.
 _MIN_COMPS_FOR_VALUATION: int = 3
@@ -297,6 +307,22 @@ def _extract_street_key(address: str) -> str | None:
     for i, token in enumerate(tokens):
         if token in _STREET_SUFFIXES and i > 0:
             return f"{tokens[i - 1]} {token}"
+    return None
+
+
+def _extract_postcode_sector(text: str) -> str | None:
+    """
+    Return the postcode sector from a VOA address string, or None.
+
+    The sector is the outward code plus the first digit of the inward code,
+    e.g. "SW4 9JN" → "SW4 9", "EC1A 1BB" → "EC1A 1", "M1 1AA" → "M1 1".
+    """
+    m = _POSTCODE_RE.search(text.upper())
+    if m:
+        pc = m.group(0)          # e.g. "SW4 9JN"
+        parts = pc.split()       # ["SW4", "9JN"]
+        if len(parts) == 2:
+            return f"{parts[0]} {parts[1][0]}"
     return None
 
 
@@ -603,6 +629,7 @@ def run_csa(
     voa_rv: float,
     subject_description: str = "",
     subject_sv_line_descs: tuple[str, ...] = (),
+    subject_postcode_sector: str = "",
 ) -> dict:
     """
     Run the CSA on a list of pre-fetched Comparable objects.
@@ -703,6 +730,9 @@ def run_csa(
     _selection_reason = "not_retail"
     subject_implied_rate: float | None = None  # computed for retail; used for confidence cap
     subject_retail_method: str = "itza_retail"  # overridden inside retail block
+    _location_tier: str = "not_retail"          # set inside retail block; used for debug
+    _raw_same_street_count: int = 0             # dominant-street count in post-outlier pool
+    same_postcode_sector_count: int = 0         # same-sector count in post-outlier pool
 
     if _retail_like:
         # Classify the subject's valuation basis.
@@ -722,40 +752,81 @@ def run_csa(
                 if _s_itza > 0:
                     subject_implied_rate = voa_rv / _s_itza
 
-        # Compute same-street anchor key for cluster-selection soft boost.
-        # Uses threshold=2 (lower than the narrowing threshold of 4) so that
-        # even a thin same-street presence can tip cluster selection.
-        _, _ss_anchor = _same_street_pool(rated, min_comps=2)
+        # --- Location-tier pool selection (retail only) ---
+        # Preference order: same-street → same-postcode-sector → full pool.
+        # Pool selection happens before clustering; clustering operates on
+        # the selected pool unchanged.
 
-        # Step 1: narrow pool to same-street comparables when sufficient.
-        # The dominant street (highest total weight) is the proxy for the
-        # subject's street.  Two checks guard against a prime same-street
-        # forcing an inappropriate outcome (FR4):
-        #   a) require _MIN_SAME_STREET_COMPS (4) same-street comps
-        #   b) revert to the full pool if the same-street median rate is
-        #      materially above the subject's implied rate
-        pool, same_street_key = _same_street_pool(rated, min_comps=_MIN_SAME_STREET_COMPS)
-        same_street_count = len(pool) if same_street_key else 0
+        # Build dominant-street bucket from post-outlier rated pool.
+        _street_buckets: dict[str, list] = {}
+        for _item in rated:
+            _c, _, _, _ = _item
+            _sk = _extract_street_key(_c.address)
+            if _sk:
+                _street_buckets.setdefault(_sk, []).append(_item)
 
-        if same_street_key and subject_implied_rate and subject_implied_rate > 0:
-            ss_median = _cluster_median_rate(pool)
-            if ss_median > subject_implied_rate * _PRIME_PLAUSIBILITY_THRESHOLD:
-                # Same-street evidence is materially prime; revert.
-                pool = rated
-                same_street_key = None
-                same_street_count = 0
-                same_street_reverted = True
-                _ss_anchor = None  # don't boost prime same-street comps
+        if _street_buckets:
+            _dominant_street = max(
+                _street_buckets,
+                key=lambda s: sum(w for _, _, _, w in _street_buckets[s]),
+            )
+            _raw_same_street_count = len(_street_buckets[_dominant_street])
+        else:
+            _dominant_street = None
+            _raw_same_street_count = 0
 
-        # Step 2: cluster the (possibly narrowed) pool by rate distribution.
+        # Soft boost anchor: dominant street if ≥ 2 comps (for _retail_select_cluster).
+        _ss_anchor: str | None = (
+            _dominant_street if _raw_same_street_count >= 2 else None
+        )
+
+        # Same-postcode-sector comparables (using subject_postcode_sector param).
+        if subject_postcode_sector:
+            _sector_pool = [
+                _item for _item in rated
+                if _extract_postcode_sector(_item[0].address) == subject_postcode_sector
+            ]
+            same_postcode_sector_count = len(_sector_pool)
+        else:
+            _sector_pool = []
+            same_postcode_sector_count = 0
+
+        # Tier selection.
+        if _raw_same_street_count >= _RETAIL_SAME_STREET_TIER_MIN and _dominant_street:
+            pool = _street_buckets[_dominant_street]
+            same_street_key = _dominant_street
+            same_street_count = _raw_same_street_count
+            # Prime-rate safety: if same-street pool is materially above subject
+            # implied rate, revert to full pool (preserves existing FR4 behaviour).
+            if subject_implied_rate and subject_implied_rate > 0:
+                if _cluster_median_rate(pool) > subject_implied_rate * _PRIME_PLAUSIBILITY_THRESHOLD:
+                    pool = rated
+                    same_street_key = None
+                    same_street_count = 0
+                    same_street_reverted = True
+                    _ss_anchor = None
+                    _location_tier = "full_pool"
+                else:
+                    _location_tier = "same_street"
+            else:
+                _location_tier = "same_street"
+
+        elif same_postcode_sector_count >= _RETAIL_SECTOR_TIER_MIN:
+            pool = _sector_pool
+            same_street_key = None
+            same_street_count = 0
+            _location_tier = "same_postcode_sector"
+
+        else:
+            pool = rated
+            same_street_key = None
+            same_street_count = 0
+            _location_tier = "full_pool"
+
+        # Cluster the selected pool and apply conservative retail cluster selection.
         clusters = _find_rate_clusters(pool)
         cluster_count = len(clusters)
 
-        # Step 3: conservative retail cluster selection.
-        # _retail_select_cluster applies a hard plausibility gate (rejects
-        # clusters > 1.25× subject implied), never reblends across clusters,
-        # and biases downward on ties.  The same-street anchor gives a soft
-        # 10% score boost to clusters that contain ≥2 same-street comparables.
         pool, selected_cluster_id, _selection_reason = _retail_select_cluster(
             clusters,
             subject_nia=nia_sqm,
@@ -803,7 +874,11 @@ def run_csa(
             "n_after_size_and_launderette": len(filtered),
             "n_after_distance": len(with_dist),
             "n_after_outlier_removal": n_after_outlier,
-            # Same-street narrowing
+            # Location-tier pool selection
+            "location_tier_used": _location_tier,
+            "same_street_count": _raw_same_street_count,
+            "same_postcode_sector_count": same_postcode_sector_count,
+            # Same-street narrowing (pool-level counts)
             "same_street_comparable_count": same_street_count,
             "same_street_key": same_street_key,
             "same_street_reverted": same_street_reverted,

@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import pytest
 
-from api.engine.csa import Comparable, itza_from_nia, run_csa
+from api.engine.csa import Comparable, itza_from_nia, run_csa, _extract_postcode_sector
 
 
 # ---------------------------------------------------------------------------
@@ -901,3 +901,176 @@ class TestRetailMethodClassification:
 
         assert result["signal"] != "Insufficient Data"
         assert result["rate_normalisation"]["subject_basis_label"] == "NIA"
+
+
+# ---------------------------------------------------------------------------
+# 9. Location-tier pool selection (retail only)
+# ---------------------------------------------------------------------------
+
+class TestLocationTierSelection:
+    """
+    Tests for _extract_postcode_sector() and the tiered pool-selection logic
+    introduced in run_csa() for retail.
+
+    Tier priority:
+        1. Same street  : dominant-street count ≥ _RETAIL_SAME_STREET_TIER_MIN (3)
+        2. Same sector  : same-postcode-sector count ≥ _RETAIL_SECTOR_TIER_MIN (6)
+        3. Full pool    : fallback
+
+    Key design constraint: "dominant street" is the street with the highest
+    total comparable weight in the post-outlier pool.  Tests are constructed
+    so that the intended dominant street genuinely has more weight than any
+    competing street.
+    """
+
+    # --- unit tests for _extract_postcode_sector ---
+
+    def test_sector_extraction_standard(self):
+        assert _extract_postcode_sector("SHOP, 1, HIGH STREET, LONDON, SW4 9JN") == "SW4 9"
+
+    def test_sector_extraction_central(self):
+        assert _extract_postcode_sector("UNIT 2, OXFORD STREET, W1B 2AA") == "W1B 2"
+
+    def test_sector_extraction_single_digit_outward(self):
+        assert _extract_postcode_sector("SHOP, DEANSGATE, MANCHESTER, M1 1AA") == "M1 1"
+
+    def test_sector_extraction_not_found(self):
+        assert _extract_postcode_sector("SHOP AND PREMISES") is None
+
+    # --- helpers ---
+
+    def _retail_comp(self, uarn, rate, nia=100.0, address="", lat=51.5, lon=-0.1):
+        """Build a retail comp with rv = rate × itza_from_nia(nia)."""
+        c = _comp(
+            uarn,
+            rv=round(rate * itza_from_nia(nia)),
+            nia_sqm=nia,
+            unadjusted_price_psm=rate,
+            has_summary=True,
+            lat=lat,
+            lon=lon,
+        )
+        c.address = address
+        return c
+
+    def _run_retail(self, comps, sector="", voa_rv=None, nia=100.0):
+        implied_rate = 450.0
+        rv = voa_rv if voa_rv is not None else round(implied_rate * itza_from_nia(nia))
+        return run_csa(
+            comps=comps,
+            lat=51.5, lon=-0.1,
+            business_type="retail",
+            nia_sqm=nia,
+            voa_rv=float(rv),
+            subject_postcode_sector=sector,
+        )
+
+    # --- end-to-end tier selection tests ---
+
+    def test_same_street_tier_used_when_dominant_street_has_three_or_more_comps(self):
+        """
+        Dominant street (HIGH STREET) has 3 comps and outweighs MARKET ROAD (2 comps).
+        3 ≥ _RETAIL_SAME_STREET_TIER_MIN → same_street tier.
+        """
+        # 3 HIGH STREET comps (dominant: 3 × weight > 2 × weight)
+        hs = [
+            self._retail_comp(f"hs{i}", rate, address="SHOP, HIGH STREET, LONDON, SW4 9JN")
+            for i, rate in enumerate([420.0, 430.0, 440.0])
+        ]
+        # 2 MARKET ROAD comps (non-dominant)
+        mr = [
+            self._retail_comp(f"mr{i}", rate, address="SHOP, MARKET ROAD, LONDON, SW4 9AB")
+            for i, rate in enumerate([455.0, 465.0])
+        ]
+        result = self._run_retail(hs + mr, sector="SW4 9",
+                                  voa_rv=round(430 * itza_from_nia(100.0)))
+        assert result["signal"] != "Insufficient Data"
+        dbg = result.get("_debug", {})
+        assert dbg.get("location_tier_used") == "same_street", (
+            f"Expected same_street tier, got {dbg.get('location_tier_used')}"
+        )
+        assert dbg.get("same_street_count") == 3
+        # Tone from HIGH STREET pool (420–440)
+        assert result["tone_rate"] <= 450, (
+            f"Tone should be in same-street band (≤450), got {result['tone_rate']}"
+        )
+
+    def test_sector_tier_used_when_dominant_street_below_threshold(self):
+        """
+        Dominant street (HIGH STREET) has only 2 comps — below threshold of 3.
+        6 same-sector comps exist across different streets → same_postcode_sector tier.
+
+        All comps stay within the outlier filter (close rates, no extremes), so
+        sector_count in the post-outlier pool = 6 ≥ _RETAIL_SECTOR_TIER_MIN.
+        """
+        sector = "EC1A 1"
+        # 6 comps all in EC1A 1; HIGH STREET dominant with 2, others 1 each
+        comps = [
+            self._retail_comp("hs0", 460.0, address="SHOP, HIGH STREET, LONDON, EC1A 1AA"),
+            self._retail_comp("hs1", 465.0, address="SHOP, HIGH STREET, LONDON, EC1A 1AA"),
+            self._retail_comp("sc0", 450.0, address="UNIT 1, LONG ROAD, LONDON, EC1A 1BB"),
+            self._retail_comp("sc1", 452.0, address="UNIT 2, SHORT AVENUE, LONDON, EC1A 1CC"),
+            self._retail_comp("sc2", 458.0, address="UNIT 3, OLD LANE, LONDON, EC1A 1DD"),
+            self._retail_comp("sc3", 462.0, address="UNIT 4, NEW DRIVE, LONDON, EC1A 1EE"),
+        ]
+        result = self._run_retail(comps, sector=sector,
+                                  voa_rv=round(460 * itza_from_nia(100.0)))
+        assert result["signal"] != "Insufficient Data"
+        dbg = result.get("_debug", {})
+        assert dbg.get("location_tier_used") == "same_postcode_sector", (
+            f"Expected same_postcode_sector tier, got {dbg.get('location_tier_used')}"
+        )
+        assert dbg.get("same_postcode_sector_count") == 6
+
+    def test_full_pool_used_when_neither_threshold_met(self):
+        """
+        Dominant street (HIGH STREET) has 2 comps; 5 same-sector comps total.
+        Both thresholds unmet → full_pool tier.
+        """
+        sector = "SW1A 1"
+        # 2 HIGH STREET + 3 distinct-street sector comps = 5 sector, dominant has 2
+        comps = [
+            self._retail_comp("hs0", 440.0, address="SHOP, HIGH STREET, LONDON, SW1A 1AA"),
+            self._retail_comp("hs1", 450.0, address="SHOP, HIGH STREET, LONDON, SW1A 1AA"),
+            self._retail_comp("sc0", 445.0, address="UNIT, LONG ROAD, LONDON, SW1A 1BB"),
+            self._retail_comp("sc1", 452.0, address="UNIT, SHORT AVENUE, LONDON, SW1A 1CC"),
+            self._retail_comp("sc2", 458.0, address="UNIT, OLD LANE, LONDON, SW1A 1DD"),
+        ]
+        result = self._run_retail(comps, sector=sector)
+        assert result["signal"] != "Insufficient Data"
+        dbg = result.get("_debug", {})
+        assert dbg.get("location_tier_used") == "full_pool", (
+            f"Expected full_pool tier, got {dbg.get('location_tier_used')}"
+        )
+
+    def test_same_street_prime_revert_falls_to_full_pool(self):
+        """
+        Dominant street (HIGH STREET) has 3 comps, selected as Tier 1.
+        Median same-street rate (~800) > 1.25× subject implied (450) → prime revert.
+        Falls back to full_pool; secondary comps drive the tone.
+        """
+        # HIGH STREET prime (dominant: 3 × weight > 2 × weight each other street)
+        hs = [
+            self._retail_comp(f"hs{i}", rate, address="SHOP, HIGH STREET, LONDON, SW4 9JN")
+            for i, rate in enumerate([790.0, 800.0, 810.0])
+        ]
+        # Secondary comps on two other streets (2 each — neither dominates HIGH STREET)
+        sec = [
+            self._retail_comp("s0", 420.0, address="UNIT, MARKET ROAD, LONDON, SW4 9AB"),
+            self._retail_comp("s1", 440.0, address="UNIT, MARKET ROAD, LONDON, SW4 9AB"),
+            self._retail_comp("s2", 450.0, address="UNIT, OLD LANE, LONDON, SW4 9CD"),
+            self._retail_comp("s3", 460.0, address="UNIT, OLD LANE, LONDON, SW4 9CD"),
+        ]
+        # voa_rv implies subject Zone A rate ≈ 450 → plausibility threshold = 562.5
+        result = self._run_retail(hs + sec, sector="SW4 9",
+                                  voa_rv=round(450 * itza_from_nia(100.0)))
+        assert result["signal"] != "Insufficient Data"
+        dbg = result.get("_debug", {})
+        assert dbg.get("location_tier_used") == "full_pool", (
+            "Prime same-street revert must fall back to full_pool"
+        )
+        assert dbg.get("same_street_reverted") is True
+        # After prime revert, secondary comps dominate → tone below threshold
+        assert result["tone_rate"] < 625, (
+            f"After prime revert, secondary comps should drive tone; got {result['tone_rate']}"
+        )

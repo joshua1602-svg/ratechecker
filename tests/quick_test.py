@@ -228,6 +228,7 @@ for sample in SAMPLES:
                 voa_rv=voa_rv,
                 subject_description=str(desc) if desc else "",
                 subject_sv_line_descs=sv_lines_map.get(str(uarn), ()),
+                subject_postcode_sector=sector,
             )
 
             model_rv = result.get("estimated_rv")
@@ -273,8 +274,10 @@ for sample in SAMPLES:
                 "n_after_size": dbg.get("n_after_size_and_launderette"),
                 "n_after_dist": dbg.get("n_after_distance"),
                 "n_after_outlier": dbg.get("n_after_outlier_removal"),
-                # Same-street narrowing
-                "same_street_count": dbg.get("same_street_comparable_count"),
+                # Location tier
+                "location_tier": dbg.get("location_tier_used"),
+                "same_street_count": dbg.get("same_street_count"),
+                "same_postcode_sector_count": dbg.get("same_postcode_sector_count"),
                 "same_street_key": dbg.get("same_street_key"),
                 # Clustering
                 "cluster_count": dbg.get("cluster_count"),
@@ -333,7 +336,8 @@ print("Done. Saved: quick_test_results.csv")
 print()
 print(out[["segment", "postcode", "voa_rv", "model_rv", "pct_diff",
            "tone_rate", "subject_implied_rate", "rate_distance_to_subject",
-           "same_street_count", "cluster_count", "selected_cluster_id",
+           "location_tier", "same_street_count", "same_postcode_sector_count",
+           "cluster_count", "selected_cluster_id",
            "cluster_rate_min", "cluster_rate_median", "cluster_rate_max",
            "comparable_count", "confidence", "signal", "error"]
           ].head(30).to_string(index=False))
