@@ -233,6 +233,9 @@ _NURSERY_MIN_COMPS: int = 2
 _NURSERY_NEAREST_CAP: int = 10
 _RESTAURANT_RADIUS_M: int = 3_000
 _RESTAURANT_SIZE_BAND_PCT: int = 75
+_RESTAURANT_MAX_DISTANCE_M: int = 1_500
+_RESTAURANT_MEDIAN_DISTANCE_M_MAX: int = 1_000
+_RESTAURANT_RATE_GAP_LIMIT: float = 150.0
 
 # Smooth distance decay: weight = 1 / (1 + alpha × distance_km).
 # alpha=0.5 → 0 km→1.0, 1 km→0.67, 2 km→0.5.
@@ -689,6 +692,10 @@ def run_csa(
         if d <= max_radius:
             with_dist.append((c, d))
 
+    if _is_restaurant:
+        # Hard local guardrail for restaurants: keep only comparables within 1.5 km.
+        with_dist = [(c, d) for c, d in with_dist if d <= _RESTAURANT_MAX_DISTANCE_M]
+
     if not with_dist:
         return _insufficient_data()
 
@@ -722,6 +729,10 @@ def run_csa(
         rated.append((c, d, rate, w_prox * w_src))
 
     if not rated:
+        return _insufficient_data()
+
+    # Restaurant path is strict: do not broaden/fallback when evidence is thin.
+    if _is_restaurant and len(rated) < _MIN_COMPS_FOR_VALUATION:
         return _insufficient_data()
 
     pre_trim_comparable_count = len(rated)
@@ -758,6 +769,16 @@ def run_csa(
 
     if not rated:
         return _insufficient_data()
+
+    if _is_restaurant:
+        _restaurant_distances = sorted(d for _, d, _, _ in rated)
+        _mid = len(_restaurant_distances) // 2
+        if len(_restaurant_distances) % 2:
+            _median_distance_m = _restaurant_distances[_mid]
+        else:
+            _median_distance_m = (_restaurant_distances[_mid - 1] + _restaurant_distances[_mid]) / 2
+        if _median_distance_m > _RESTAURANT_MEDIAN_DISTANCE_M_MAX:
+            return _insufficient_data()
 
     # --- Nursery nearest-N cap ---
     # Keep broad search radius but limit the final nursery pool to the closest
@@ -1009,6 +1030,14 @@ def run_csa(
             if confidence == "High":
                 _confidence_reason = f"capped_medium_gap_{_rate_gap_pct:.0%}_vs_implied"
                 confidence = "Medium"
+    if _is_restaurant and voa_rv and voa_rv > 0:
+        _s_itza = itza_from_nia(nia_sqm, zone_depth)
+        _restaurant_implied_rate = (voa_rv / _s_itza) if _s_itza > 0 else None
+        if _restaurant_implied_rate is not None:
+            _rate_distance_to_subject = abs(tone - _restaurant_implied_rate)
+            if _rate_distance_to_subject > _RESTAURANT_RATE_GAP_LIMIT:
+                return _insufficient_data()
+
     if _is_nursery:
         _debug = {
             "pre_cap_comparable_count": pre_cap_comparable_count,

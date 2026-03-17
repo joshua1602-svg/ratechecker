@@ -258,7 +258,8 @@ class TestAllSegments:
     @pytest.mark.parametrize("segment", ["retail", "restaurant_cafe", "nursery"])
     def test_estimated_rv_positive(self, segment):
         comps = self._comps_for(segment)
-        result = _run(comps, nia_sqm=100.0, voa_rv=20_000.0,
+        voa_rv = 9_000.0 if segment == "restaurant_cafe" else 20_000.0
+        result = _run(comps, nia_sqm=100.0, voa_rv=voa_rv,
                       business_type=segment)
         assert result["signal"] != "Insufficient Data", (
             f"{segment}: got Insufficient Data"
@@ -411,9 +412,9 @@ class TestNurserySpecificPath:
 
 class TestRestaurantSpecificPath:
 
-    def test_restaurant_uses_wider_radius_than_retail(self):
-        """Restaurant/cafe should keep comps around ~2.5km that retail would drop."""
-        comps = [
+    def test_restaurant_hard_distance_guardrail_applies(self):
+        """Restaurant/cafe rejects pools where all comps are beyond 1.5km."""
+        far_comps = [
             _comp("A", rv=15_000, nia_sqm=100, unadjusted_price_psm=150.0, has_summary=True, scat_code=409,
                   lat=51.5225, lon=-0.1),
             _comp("B", rv=16_000, nia_sqm=100, unadjusted_price_psm=152.0, has_summary=True, scat_code=409,
@@ -421,11 +422,20 @@ class TestRestaurantSpecificPath:
             _comp("C", rv=14_000, nia_sqm=100, unadjusted_price_psm=148.0, has_summary=True, scat_code=409,
                   lat=51.5227, lon=-0.1),
         ]
-        r_result = _run(comps, nia_sqm=100.0, business_type="restaurant_cafe")
-        retail_result = _run(comps, nia_sqm=100.0, business_type="retail")
+        near_comps = [
+            _comp("N1", rv=15_000, nia_sqm=100, unadjusted_price_psm=150.0, has_summary=True, scat_code=409,
+                  lat=51.5035, lon=-0.1),
+            _comp("N2", rv=16_000, nia_sqm=100, unadjusted_price_psm=152.0, has_summary=True, scat_code=409,
+                  lat=51.5037, lon=-0.1),
+            _comp("N3", rv=14_000, nia_sqm=100, unadjusted_price_psm=148.0, has_summary=True, scat_code=409,
+                  lat=51.5039, lon=-0.1),
+        ]
 
-        assert r_result["signal"] != "Insufficient Data"
-        assert retail_result["signal"] == "Insufficient Data"
+        far_result = _run(far_comps, nia_sqm=100.0, business_type="restaurant_cafe")
+        near_result = _run(near_comps, nia_sqm=100.0, business_type="restaurant_cafe")
+
+        assert far_result["signal"] == "Insufficient Data"
+        assert near_result["signal"] != "Insufficient Data"
 
     def test_restaurant_uses_75pct_size_band(self):
         """Restaurant/cafe should include materially larger units via ±75% size band."""
@@ -437,6 +447,32 @@ class TestRestaurantSpecificPath:
         result = _run(comps, nia_sqm=100.0, business_type="restaurant_cafe")
         assert result["signal"] != "Insufficient Data"
 
+
+    def test_restaurant_median_distance_quality_gate(self):
+        """Restaurant/cafe returns Insufficient Data when median distance exceeds 1.0km."""
+        comps = [
+            _comp("A", rv=15_000, nia_sqm=100, unadjusted_price_psm=150.0, has_summary=True, scat_code=409,
+                  lat=51.5100, lon=-0.1),
+            _comp("B", rv=16_000, nia_sqm=100, unadjusted_price_psm=151.0, has_summary=True, scat_code=409,
+                  lat=51.5105, lon=-0.1),
+            _comp("C", rv=14_000, nia_sqm=100, unadjusted_price_psm=149.0, has_summary=True, scat_code=409,
+                  lat=51.5110, lon=-0.1),
+        ]
+        result = _run(comps, nia_sqm=100.0, business_type="restaurant_cafe")
+        assert result["signal"] == "Insufficient Data"
+
+    def test_restaurant_rate_sanity_gate_blocks_large_divergence(self):
+        """Restaurant/cafe rejects tones with >£150/m² distance from implied subject rate."""
+        comps = [
+            _comp("A", rv=15_000, nia_sqm=100, unadjusted_price_psm=400.0, has_summary=True, scat_code=409,
+                  lat=51.5005, lon=-0.1),
+            _comp("B", rv=16_000, nia_sqm=100, unadjusted_price_psm=410.0, has_summary=True, scat_code=409,
+                  lat=51.5006, lon=-0.1),
+            _comp("C", rv=14_000, nia_sqm=100, unadjusted_price_psm=420.0, has_summary=True, scat_code=409,
+                  lat=51.5007, lon=-0.1),
+        ]
+        result = _run(comps, nia_sqm=100.0, voa_rv=10_000.0, business_type="restaurant_cafe")
+        assert result["signal"] == "Insufficient Data"
     def test_restaurant_conditional_trim_and_debug_fields(self):
         """Restaurant/cafe exposes trim and distance diagnostics and trims only on larger pools."""
         core = [
