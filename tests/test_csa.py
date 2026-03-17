@@ -336,6 +336,34 @@ class TestMinimumComparableGuardrail:
         assert result["signal"] == "Insufficient Data"
 
 
+
+
+class TestNurserySpecificPath:
+
+    def test_nursery_skips_outlier_trimming(self):
+        """Nursery keeps sparse evidence; extreme but valid rates are not percentile-trimmed."""
+        comps = [
+            _comp("A", rv=10_000, nia_sqm=100, unadjusted_price_psm=100.0, has_summary=True, scat_code=85),
+            _comp("B", rv=10_000, nia_sqm=100, unadjusted_price_psm=101.0, has_summary=True, scat_code=85),
+            _comp("C", rv=10_000, nia_sqm=100, unadjusted_price_psm=500.0, has_summary=True, scat_code=85),
+        ]
+        result = _run(comps, nia_sqm=100.0, business_type="nursery")
+
+        assert result["signal"] != "Insufficient Data"
+        assert result["comparable_count"] == 3
+        assert result["tone_rate"] == pytest.approx(101.0)
+
+    def test_nursery_uses_wide_size_band(self):
+        """Nursery admits materially different sizes (±100% fallback band)."""
+        comps = [
+            _comp("A", rv=10_000, nia_sqm=200, unadjusted_price_psm=120.0, has_summary=True, scat_code=85),
+            _comp("B", rv=10_000, nia_sqm=200, unadjusted_price_psm=118.0, has_summary=True, scat_code=85),
+        ]
+        result = _run(comps, nia_sqm=100.0, business_type="nursery")
+
+        assert result["signal"] != "Insufficient Data"
+        assert result["comparable_count"] == 2
+
 # ---------------------------------------------------------------------------
 # 5. Rate-band clustering
 # ---------------------------------------------------------------------------

@@ -640,6 +640,7 @@ def run_csa(
     """
     rules = csa_rules()
     zone_depth = 6.1
+    _is_nursery = business_type == "nursery"
 
     # --- Size-band filter ---
     # Retail uses a tighter fallback band (±35%) than the general ±50% because
@@ -647,6 +648,10 @@ def run_csa(
     # very small units adds noise rather than evidence.
     _retail_like = business_type in ("retail", "hair_beauty")
     size_fallback_pct = 35 if _retail_like else rules["filters"]["size_band_pct_fallback"]
+    if _is_nursery:
+        # Nursery pools are sparse and dispersed; use a materially wider size
+        # tolerance than retail so evidence is not dropped too early.
+        size_fallback_pct = 100
 
     size_pct = rules["filters"]["size_band_pct"]
     filtered = _filter_size(comps, nia_sqm, size_pct)
@@ -661,11 +666,7 @@ def run_csa(
     ]
 
     # --- Distance filter ---
-    max_radius = (
-        _NURSERY_RADIUS_M
-        if business_type == "nursery"
-        else rules["filters"]["distance_m"]["fallback"]
-    )
+    max_radius = _NURSERY_RADIUS_M if _is_nursery else rules["filters"]["distance_m"]["fallback"]
     with_dist: list[tuple[Comparable, float]] = []
     for c in filtered:
         d = haversine_m(lat, lon, c.lat, c.lon)
@@ -707,12 +708,15 @@ def run_csa(
     if not rated:
         return _insufficient_data()
 
-    # --- Outlier removal (10th–90th percentile) ---
-    rates_sorted = sorted(r for _, _, r, _ in rated)
-    n = len(rates_sorted)
-    lo = rates_sorted[max(0, int(n * 0.10))]
-    hi = rates_sorted[min(n - 1, int(n * 0.90))]
-    rated = [(c, d, r, w) for c, d, r, w in rated if lo <= r <= hi]
+    # --- Outlier removal ---
+    # Nursery path is intentionally recall-oriented: skip percentile trimming
+    # to avoid collapsing already-small pools below the evidence floor.
+    if not _is_nursery:
+        rates_sorted = sorted(r for _, _, r, _ in rated)
+        n = len(rates_sorted)
+        lo = rates_sorted[max(0, int(n * 0.10))]
+        hi = rates_sorted[min(n - 1, int(n * 0.90))]
+        rated = [(c, d, r, w) for c, d, r, w in rated if lo <= r <= hi]
 
     if not rated:
         return _insufficient_data()
@@ -843,7 +847,7 @@ def run_csa(
     # Nursery uses a lower floor (_NURSERY_MIN_COMPS=2) because nurseries are
     # sparse in most sectors and the standard floor of 3 produces too many
     # Insufficient Data results at reasonable radii.
-    _min_comps = _NURSERY_MIN_COMPS if business_type == "nursery" else _MIN_COMPS_FOR_VALUATION
+    _min_comps = _NURSERY_MIN_COMPS if _is_nursery else _MIN_COMPS_FOR_VALUATION
     if len(rated) < _min_comps:
         return _insufficient_data()
 
@@ -968,7 +972,7 @@ def run_csa(
     #
     # Using NIA reconstruction for retail produces a ~1.75× uplift because
     # NIA / ITZA ≈ 1.75 for a typical rectangular shop (1:3 aspect ratio).
-    if business_type == "nursery":
+    if _is_nursery:
         estimated_rv = round(tone * nia_sqm / 100) * 100
         subject_basis = nia_sqm
         basis_label = "NIA"
