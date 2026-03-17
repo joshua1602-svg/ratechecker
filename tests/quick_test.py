@@ -205,7 +205,15 @@ for sample in SAMPLES:
 
         try:
             sector = postcode_sector(postcode)
-            _radius = 10_000 if sample["business_type"] == "nursery" else 1_000
+            if sample["business_type"] == "nursery":
+                _radius = 10_000
+                _postcode_prefix = None
+            elif sample["business_type"] == "restaurant_cafe":
+                _radius = 1_500
+                _postcode_prefix = None
+            else:
+                _radius = 1_000
+                _postcode_prefix = sector
             raw_comps = get_comparables(
                 lat=lat,
                 lon=lon,
@@ -213,9 +221,12 @@ for sample in SAMPLES:
                 radius_m=_radius,
                 nia_sqm=nia_sqm,
                 size_band_pct=50,
-                postcode_prefix=sector,
+                postcode_prefix=_postcode_prefix,
             )
-            comp_source = f"sector:{sector}"
+            if _postcode_prefix:
+                comp_source = f"sector:{_postcode_prefix}"
+            else:
+                comp_source = f"radius:{_radius}m"
 
             comps = dicts_to_comparables(raw_comps)
 

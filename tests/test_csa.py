@@ -1074,3 +1074,123 @@ class TestLocationTierSelection:
         assert result["tone_rate"] < 625, (
             f"After prime revert, secondary comps should drive tone; got {result['tone_rate']}"
         )
+
+
+# ---------------------------------------------------------------------------
+# 11. Nursery-specific CSA path
+# ---------------------------------------------------------------------------
+
+class TestNurseryPath:
+    """
+    Verify that the nursery segment uses the simplified path:
+      - no size-band attrition (all comps survive regardless of NIA variance)
+      - no outlier removal (small pools are not trimmed)
+      - minimum floor = 2 comps (_NURSERY_MIN_COMPS)
+      - RV is reconstructed on NIA basis, not ITZA
+    """
+
+    NURSERY_SCAT = 85
+
+    def _nursery_comp(
+        self,
+        uarn: str,
+        rv: float,
+        nia_sqm: float,
+        unadjusted_price_psm: float | None = None,
+        lat: float = 51.5,
+        lon: float = -0.1,
+    ) -> Comparable:
+        return Comparable(
+            uarn=uarn,
+            address="123 NURSERY LANE, LONDON",
+            scat_code=self.NURSERY_SCAT,
+            rv=rv,
+            nia_sqm=nia_sqm,
+            unadjusted_price_psm=unadjusted_price_psm,
+            unit_of_measurement="NIA",
+            has_summary=True,
+            lat=lat,
+            lon=lon,
+        )
+
+    def _run_nursery(self, comps, nia_sqm=200.0, voa_rv=30_000.0):
+        return run_csa(
+            comps=comps,
+            lat=51.5,
+            lon=-0.1,
+            business_type="nursery",
+            nia_sqm=nia_sqm,
+            voa_rv=voa_rv,
+        )
+
+    def test_nursery_succeeds_with_two_comps(self):
+        """Nursery path should produce a result with only 2 comparables."""
+        comps = [
+            self._nursery_comp("n1", rv=30_000, nia_sqm=200,
+                               unadjusted_price_psm=150.0),
+            self._nursery_comp("n2", rv=28_000, nia_sqm=190,
+                               unadjusted_price_psm=147.0),
+        ]
+        result = self._run_nursery(comps, nia_sqm=200.0, voa_rv=30_000.0)
+        assert result["signal"] != "Insufficient Data", (
+            "Nursery with 2 comps must not return Insufficient Data"
+        )
+        assert result["estimated_rv"] is not None and result["estimated_rv"] > 0
+
+    def test_nursery_skips_size_band_filter(self):
+        """
+        Nursery comps with very different NIA from the subject must still survive.
+        A subject NIA of 200 m² with ±50 % would normally exclude a 50 m² or 500 m²
+        comp; the nursery path must admit them all.
+        """
+        # 200 m² subject; comps range 50–600 m² — all outside any normal band
+        comps = [
+            self._nursery_comp("n1", rv=10_000, nia_sqm=50,
+                               unadjusted_price_psm=200.0),
+            self._nursery_comp("n2", rv=120_000, nia_sqm=600,
+                               unadjusted_price_psm=200.0),
+            self._nursery_comp("n3", rv=60_000, nia_sqm=300,
+                               unadjusted_price_psm=200.0),
+        ]
+        result = self._run_nursery(comps, nia_sqm=200.0, voa_rv=40_000.0)
+        assert result["signal"] != "Insufficient Data", (
+            "Nursery must not size-filter out comps with extreme NIA variance"
+        )
+        assert result["comparable_count"] == 3
+
+    def test_nursery_skips_outlier_removal(self):
+        """
+        With 2 comps, 10th–90th percentile trimming would collapse to 0 or 1 comp.
+        The nursery path must skip this step and retain both.
+        """
+        comps = [
+            self._nursery_comp("n1", rv=20_000, nia_sqm=200,
+                               unadjusted_price_psm=100.0),
+            self._nursery_comp("n2", rv=40_000, nia_sqm=200,
+                               unadjusted_price_psm=200.0),
+        ]
+        result = self._run_nursery(comps, nia_sqm=200.0, voa_rv=30_000.0)
+        assert result["signal"] != "Insufficient Data", (
+            "Nursery must not apply outlier removal and should use both comps"
+        )
+        assert result["comparable_count"] == 2
+
+    def test_nursery_rv_reconstructed_on_nia(self):
+        """
+        Nursery estimated_rv must equal round(tone × nia_sqm / 100) × 100,
+        confirming NIA-basis reconstruction rather than ITZA.
+        """
+        nia = 200.0
+        rate = 150.0  # £/m² NIA
+        comps = [
+            self._nursery_comp("n1", rv=round(rate * nia), nia_sqm=nia,
+                               unadjusted_price_psm=rate),
+            self._nursery_comp("n2", rv=round(rate * nia), nia_sqm=nia,
+                               unadjusted_price_psm=rate),
+        ]
+        result = self._run_nursery(comps, nia_sqm=nia, voa_rv=50_000.0)
+        assert result["signal"] != "Insufficient Data"
+        assert result["rate_normalisation"]["subject_basis_label"] == "NIA"
+        # tone should be ~150; estimated_rv should be ~30 000
+        expected_rv = round(result["tone_rate"] * nia / 100) * 100
+        assert result["estimated_rv"] == expected_rv

@@ -645,14 +645,19 @@ def run_csa(
     # Retail uses a tighter fallback band (±35%) than the general ±50% because
     # retail micro-markets are more size-homogeneous; admitting very large or
     # very small units adds noise rather than evidence.
+    # Nursery: skip size filtering entirely — nurseries are too sparse to afford
+    # any size-band attrition, and size variance doesn't distort the NIA rate.
     _retail_like = business_type in ("retail", "hair_beauty")
-    size_fallback_pct = 35 if _retail_like else rules["filters"]["size_band_pct_fallback"]
 
-    size_pct = rules["filters"]["size_band_pct"]
-    filtered = _filter_size(comps, nia_sqm, size_pct)
-    if len(filtered) < rules["confidence"]["low_if_min_comps"]:
-        size_pct = size_fallback_pct
+    if business_type == "nursery":
+        filtered = list(comps)
+    else:
+        size_fallback_pct = 35 if _retail_like else rules["filters"]["size_band_pct_fallback"]
+        size_pct = rules["filters"]["size_band_pct"]
         filtered = _filter_size(comps, nia_sqm, size_pct)
+        if len(filtered) < rules["confidence"]["low_if_min_comps"]:
+            size_pct = size_fallback_pct
+            filtered = _filter_size(comps, nia_sqm, size_pct)
 
     # --- Launderette exclusion (modelling rule per INGEST_SPEC D4) ---
     filtered = [
@@ -708,14 +713,18 @@ def run_csa(
         return _insufficient_data()
 
     # --- Outlier removal (10th–90th percentile) ---
-    rates_sorted = sorted(r for _, _, r, _ in rated)
-    n = len(rates_sorted)
-    lo = rates_sorted[max(0, int(n * 0.10))]
-    hi = rates_sorted[min(n - 1, int(n * 0.90))]
-    rated = [(c, d, r, w) for c, d, r, w in rated if lo <= r <= hi]
+    # Nursery: skip entirely — pools are too small for percentile trimming to be
+    # meaningful, and it causes systematic Insufficient Data by collapsing pools
+    # of 2–5 comps below the minimum threshold.
+    if business_type != "nursery":
+        rates_sorted = sorted(r for _, _, r, _ in rated)
+        n = len(rates_sorted)
+        lo = rates_sorted[max(0, int(n * 0.10))]
+        hi = rates_sorted[min(n - 1, int(n * 0.90))]
+        rated = [(c, d, r, w) for c, d, r, w in rated if lo <= r <= hi]
 
-    if not rated:
-        return _insufficient_data()
+        if not rated:
+            return _insufficient_data()
 
     # --- Rate-band clustering (retail only) ---
     # Split the post-outlier pool into pitch clusters and pick the one whose
