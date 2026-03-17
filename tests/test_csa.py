@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import pytest
 
-from api.engine.csa import Comparable, run_csa
+from api.engine.csa import Comparable, itza_from_nia, run_csa
 
 
 # ---------------------------------------------------------------------------
@@ -67,24 +67,23 @@ class TestToneIsRateBased:
 
     def test_different_size_same_rate_gives_stable_tone(self):
         """
-        Three shops with different sizes but the same £/m² should produce a tone
-        equal to that rate, regardless of their raw RVs.
+        Three shops with different sizes but the same Zone A rate should produce
+        a tone equal to that rate, regardless of raw RVs.
 
-        Small: 75 m², rate = £200/m², rv = £15,000
-        Mid:  100 m², rate = £200/m², rv = £20,000
-        Large: 125 m², rate = £200/m², rv = £25,000
-
-        All three sizes sit within the ±30% primary size band (subject NIA = 100 m²).
+        Zone A rate = £200/m².  RV = Zone_A_rate × ITZA (not rate × NIA).
+        All three sizes sit within the ±30% primary size band (subject NIA=100 m²).
         Three comps are required to meet _MIN_COMPS_FOR_VALUATION.
-        If tone were derived from raw RVs the median would be influenced by the
-        size difference; with normalisation, tone = £200/m².
+
+        The rate extraction uses rv/itza_from_nia(nia_sqm) for itza_retail, so
+        rv must be set as zone_a_rate × itza_from_nia(nia_sqm) for tone = 200.
         """
-        small = _comp("A", rv=15_000, nia_sqm=75,
-                      unadjusted_price_psm=200.0, has_summary=True)
-        mid   = _comp("C", rv=20_000, nia_sqm=100,
-                      unadjusted_price_psm=200.0, has_summary=True)
-        large = _comp("B", rv=25_000, nia_sqm=125,
-                      unadjusted_price_psm=200.0, has_summary=True)
+        rate = 200.0
+        small = _comp("A", rv=round(rate * itza_from_nia(75)), nia_sqm=75,
+                      unadjusted_price_psm=rate, has_summary=True)
+        mid   = _comp("C", rv=round(rate * itza_from_nia(100)), nia_sqm=100,
+                      unadjusted_price_psm=rate, has_summary=True)
+        large = _comp("B", rv=round(rate * itza_from_nia(125)), nia_sqm=125,
+                      unadjusted_price_psm=rate, has_summary=True)
 
         result = _run([small, mid, large], nia_sqm=100.0)
 
@@ -235,6 +234,16 @@ class TestAllSegments:
 
     def _comps_for(self, segment: str) -> list[Comparable]:
         scat = self.SCAT_BY_SEGMENT[segment]
+        if segment == "retail":
+            # Retail: rv = zone_a_rate × itza_from_nia(nia) so that rv/itza = rate.
+            return [
+                _comp(f"retail_1", rv=round(150.0 * itza_from_nia(100)), nia_sqm=100,
+                      unadjusted_price_psm=150.0, has_summary=True, scat_code=scat),
+                _comp(f"retail_2", rv=round(150.0 * itza_from_nia(80)), nia_sqm=80,
+                      has_summary=False, scat_code=scat),
+                _comp(f"retail_3", rv=round(155.0 * itza_from_nia(120)), nia_sqm=120,
+                      unadjusted_price_psm=155.0, has_summary=True, scat_code=scat),
+            ]
         return [
             _comp(f"{segment}_1", rv=15_000, nia_sqm=100,
                   unadjusted_price_psm=150.0, has_summary=True,
@@ -400,21 +409,23 @@ class TestRateClustering:
         produce a tone from the lower cluster when the lower cluster is
         denser near the subject.
 
-        Pool: 6 secondary comps at £420–480 + 2 prime comps at £820–840.
-        Subject NIA matches all comps.  The secondary cluster has 6 items
-        so it wins; tone must be ≤ 500.
+        Pool: 6 secondary comps at Zone A rate £420–480 + 2 prime at £820–840.
+        rv = zone_a_rate × itza_from_nia(100) so that rv/itza = rate.
+        Subject NIA = 100. Secondary cluster wins; tone must be in secondary band.
         """
         secondary = [
-            _comp(f"s{i}", rv=r * 100, nia_sqm=100,
+            _comp(f"s{i}", rv=round(float(r) * itza_from_nia(100)), nia_sqm=100,
                   unadjusted_price_psm=float(r), has_summary=True)
             for i, r in enumerate([420, 430, 440, 450, 460, 480])
         ]
         prime = [
-            _comp(f"p{i}", rv=r * 100, nia_sqm=100,
+            _comp(f"p{i}", rv=round(float(r) * itza_from_nia(100)), nia_sqm=100,
                   unadjusted_price_psm=float(r), has_summary=True)
             for i, r in enumerate([820, 840])
         ]
-        result = _run(secondary + prime, nia_sqm=100.0, voa_rv=45_000.0)
+        # voa_rv implies secondary-level Zone A rate ≈ 450
+        voa_rv = round(450 * itza_from_nia(100.0))
+        result = _run(secondary + prime, nia_sqm=100.0, voa_rv=float(voa_rv))
         assert result["signal"] != "Insufficient Data"
         assert result["tone_rate"] <= 500, (
             f"Expected secondary-cluster tone (≤500), got {result['tone_rate']}"
@@ -543,9 +554,10 @@ class TestStreetExtraction:
         from api.engine.csa import itza_from_nia
 
         # HIGH STREET: 80m away (same_parade → proximity 1.0 × source 1.3 = 1.3)
+        # rv = zone_a_rate × itza so that rv/itza = zone_a_rate after the override.
         hs_lat = 51.5 + 80 / 111_000
         high_st = [
-            _comp(f"hs{i}", rv=r * 100, nia_sqm=100,
+            _comp(f"hs{i}", rv=round(float(r) * itza_from_nia(100)), nia_sqm=100,
                   unadjusted_price_psm=float(r), has_summary=True,
                   lat=hs_lat, lon=-0.1)
             for i, r in enumerate([440, 450, 460, 480])
@@ -556,7 +568,7 @@ class TestStreetExtraction:
         # MARKET ROAD: 600m away (broader → proximity 0.5 × source 1.3 = 0.65)
         mr_lat = 51.5 + 600 / 111_000
         market_rd = [
-            _comp(f"mr{i}", rv=r * 100, nia_sqm=100,
+            _comp(f"mr{i}", rv=round(float(r) * itza_from_nia(100)), nia_sqm=100,
                   unadjusted_price_psm=float(r), has_summary=True,
                   lat=mr_lat, lon=-0.1)
             for i, r in enumerate([780, 800, 820, 840])
@@ -588,10 +600,15 @@ class TestRetailConservativeSelection:
     """
 
     def _retail_comps(self, rates, nia_sqm=100.0, address=""):
-        """Build comps with addresses for street-key extraction."""
+        """Build retail comps with rv = zone_a_rate × itza_from_nia(nia_sqm).
+
+        This ensures rv/itza = zone_a_rate after the effective-rate override in
+        run_csa(), so tone ends up equal to the intended Zone A rates.
+        """
         comps = []
         for i, r in enumerate(rates):
-            c = _comp(str(i), rv=r * nia_sqm, nia_sqm=nia_sqm,
+            c = _comp(str(i), rv=round(float(r) * itza_from_nia(nia_sqm)),
+                      nia_sqm=nia_sqm,
                       unadjusted_price_psm=float(r), has_summary=True)
             c.address = address
             comps.append(c)
@@ -722,7 +739,7 @@ class TestRetailConservativeSelection:
         # Same-street comps at prime rate (~800) — 4 comps, 80m away
         hs_lat = 51.5 + 80 / 111_000
         prime_ss = [
-            _comp(f"p{i}", rv=float(r) * 100, nia_sqm=100,
+            _comp(f"p{i}", rv=round(float(r) * itza_from_nia(100)), nia_sqm=100,
                   unadjusted_price_psm=float(r), has_summary=True,
                   lat=hs_lat, lon=-0.1)
             for i, r in enumerate([780, 800, 810, 820])
@@ -733,7 +750,7 @@ class TestRetailConservativeSelection:
         # Off-street secondary comps at 440–480, 600m away
         sec_lat = 51.5 + 600 / 111_000
         secondary = [
-            _comp(f"s{i}", rv=float(r) * 100, nia_sqm=100,
+            _comp(f"s{i}", rv=round(float(r) * itza_from_nia(100)), nia_sqm=100,
                   unadjusted_price_psm=float(r), has_summary=True,
                   lat=sec_lat, lon=-0.1)
             for i, r in enumerate([440, 450, 460, 470, 480])

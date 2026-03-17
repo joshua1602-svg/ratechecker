@@ -627,27 +627,30 @@ def run_csa(
     if not with_dist:
         return _insufficient_data()
 
-    # --- Extract normalised Zone A rates and combined weights ---
-    # Tier 1 (unadjusted_psm): already a Zone A rate — no adjustment needed.
-    # Tier 2 (rv_over_nia): rv/nia_sqm yields an NIA rate, which is inconsistent
-    # with the Zone A tier-1 rate for itza_retail properties.  Correct by
-    # converting to rv/itza for comparables classified as itza_retail.
-    # area_retail tier-2 comparables keep the rv/nia_sqm rate (area basis).
+    # --- Extract effective Zone A rates and combined weights ---
+    # For itza_retail comparables we ALWAYS use rv / itza_from_nia(nia_sqm)
+    # (the effective rate), NOT unadjusted_price_psm (the matrix rate).
+    # The VOA "unadjusted" field is the primary survey unit rate before quantity
+    # allowances (e.g. ~15-25% deductions applied to large or irregular shops).
+    # Using the matrix rate systematically over-states tone by ~20%.
+    # Using rv/itza gives the effective rate actually used to set the RV, and
+    # also self-corrects for any aspect-ratio error in itza_from_nia because
+    # the same formula is applied to both comparable and subject.
+    # For area_retail and non-retail segments, unadjusted_price_psm (or
+    # rv/nia_sqm) is used as-is via normalised_rate().
     rated: list[tuple[Comparable, float, float, float]] = []  # (comp, dist, rate, weight)
     tier_counts: dict[str, int] = {"unadjusted_psm": 0, "rv_over_nia": 0}
     excluded_no_rate = 0
     for c, d in with_dist:
         rate, tier = c.normalised_rate()
+        # Effective-rate override for itza_retail (both tier-1 and tier-2).
+        if _retail_like and _classify_retail_method(c.description) == "itza_retail":
+            _c_itza = itza_from_nia(c.nia_sqm, zone_depth)
+            if _c_itza > 0 and c.rv > 0:
+                rate = c.rv / _c_itza
         if rate is None or rate <= 0:
             excluded_no_rate += 1
             continue
-        # For itza_retail tier-2 comparables, correct rv/nia → rv/itza so the
-        # rate is on the same Zone A basis as tier-1 (unadjusted_price_psm).
-        if _retail_like and tier == "rv_over_nia":
-            if _classify_retail_method(c.description) == "itza_retail":
-                _c_itza = itza_from_nia(c.nia_sqm, zone_depth)
-                if _c_itza > 0:
-                    rate = c.rv / _c_itza
         tier_counts[tier] = tier_counts.get(tier, 0) + 1
         w_prox = _proximity_weight(d, rules)
         w_src = _source_weight(c, rules)
