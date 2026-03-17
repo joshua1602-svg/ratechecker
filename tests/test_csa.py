@@ -336,6 +336,79 @@ class TestMinimumComparableGuardrail:
         assert result["signal"] == "Insufficient Data"
 
 
+
+
+class TestNurserySpecificPath:
+
+    def test_nursery_skips_outlier_trimming(self):
+        """Nursery keeps sparse evidence; extreme but valid rates are not percentile-trimmed."""
+        comps = [
+            _comp("A", rv=10_000, nia_sqm=100, unadjusted_price_psm=100.0, has_summary=True, scat_code=85),
+            _comp("B", rv=10_000, nia_sqm=100, unadjusted_price_psm=101.0, has_summary=True, scat_code=85),
+            _comp("C", rv=10_000, nia_sqm=100, unadjusted_price_psm=500.0, has_summary=True, scat_code=85),
+        ]
+        result = _run(comps, nia_sqm=100.0, business_type="nursery")
+
+        assert result["signal"] != "Insufficient Data"
+        assert result["comparable_count"] == 3
+        assert result["tone_rate"] == pytest.approx(101.0)
+
+    def test_nursery_uses_wide_size_band(self):
+        """Nursery admits moderately wider sizes (±75% fallback band)."""
+        comps = [
+            _comp("A", rv=10_000, nia_sqm=170, unadjusted_price_psm=120.0, has_summary=True, scat_code=85),
+            _comp("B", rv=10_000, nia_sqm=170, unadjusted_price_psm=118.0, has_summary=True, scat_code=85),
+        ]
+        result = _run(comps, nia_sqm=100.0, business_type="nursery")
+
+        assert result["signal"] != "Insufficient Data"
+        assert result["comparable_count"] == 2
+
+
+    def test_nursery_size_band_not_unbounded(self):
+        """Comp sizes beyond ±75% are excluded for nursery."""
+        comps = [
+            _comp("A", rv=10_000, nia_sqm=180, unadjusted_price_psm=120.0, has_summary=True, scat_code=85),
+            _comp("B", rv=10_000, nia_sqm=180, unadjusted_price_psm=118.0, has_summary=True, scat_code=85),
+        ]
+        result = _run(comps, nia_sqm=100.0, business_type="nursery")
+        assert result["signal"] == "Insufficient Data"
+
+    def test_nursery_large_pool_uses_light_outlier_trim(self):
+        """Nursery uses 5th–95th trimming only when pool size is at least five."""
+        core = [
+            _comp(str(i), rv=10_000, nia_sqm=100, unadjusted_price_psm=100.0 + i, has_summary=True, scat_code=85)
+            for i in range(19)
+        ]
+        tails = [
+            _comp("LOW", rv=10_000, nia_sqm=100, unadjusted_price_psm=10.0, has_summary=True, scat_code=85),
+            _comp("HIGH", rv=10_000, nia_sqm=100, unadjusted_price_psm=500.0, has_summary=True, scat_code=85),
+        ]
+        result = _run(core + tails, nia_sqm=100.0, business_type="nursery")
+        assert result["signal"] != "Insufficient Data"
+        assert result["comparable_count"] == 10
+        dbg = result.get("_debug", {})
+        assert dbg.get("pre_cap_comparable_count") == 19
+        assert dbg.get("post_cap_comparable_count") == 10
+        assert 100.0 <= result["tone_rate"] <= 118.0
+
+    def test_nursery_nearest_n_cap_and_debug_fields(self):
+        """Nursery pool is capped to nearest N and exposes cap/distance diagnostics."""
+        comps = [
+            _comp(str(i), rv=10_000, nia_sqm=100, unadjusted_price_psm=100.0 + i, has_summary=True,
+                  scat_code=85, lat=51.5 + (i * 0.0001), lon=-0.1)
+            for i in range(12)
+        ]
+        result = _run(comps, nia_sqm=100.0, business_type="nursery")
+        assert result["signal"] != "Insufficient Data"
+        assert result["comparable_count"] == 10
+        dbg = result.get("_debug", {})
+        assert dbg.get("pre_cap_comparable_count") == 12
+        assert dbg.get("post_cap_comparable_count") == 10
+        assert dbg.get("min_distance_used") is not None
+        assert dbg.get("max_distance_used") is not None
+        assert dbg.get("max_distance_used") >= dbg.get("min_distance_used")
+
 # ---------------------------------------------------------------------------
 # 5. Rate-band clustering
 # ---------------------------------------------------------------------------
