@@ -231,6 +231,8 @@ _MIN_COMPS_FOR_VALUATION: int = 3
 _NURSERY_RADIUS_M: int = 10_000
 _NURSERY_MIN_COMPS: int = 2
 _NURSERY_NEAREST_CAP: int = 10
+_RESTAURANT_RADIUS_M: int = 3_000
+_RESTAURANT_SIZE_BAND_PCT: int = 75
 
 # Smooth distance decay: weight = 1 / (1 + alpha × distance_km).
 # alpha=0.5 → 0 km→1.0, 1 km→0.67, 2 km→0.5.
@@ -642,6 +644,7 @@ def run_csa(
     rules = csa_rules()
     zone_depth = 6.1
     _is_nursery = business_type == "nursery"
+    _is_restaurant = business_type == "restaurant_cafe"
 
     # --- Size-band filter ---
     # Retail uses a tighter fallback band (±35%) than the general ±50% because
@@ -654,7 +657,14 @@ def run_csa(
         # tolerance than retail so evidence is not dropped too early.
         size_fallback_pct = 75
 
-    size_pct = rules["filters"]["size_band_pct"]
+    if _is_restaurant:
+        # Restaurant/cafe units vary more by layout and use; use a broader
+        # fixed size band to preserve enough catchment evidence.
+        size_pct = _RESTAURANT_SIZE_BAND_PCT
+        size_fallback_pct = _RESTAURANT_SIZE_BAND_PCT
+    else:
+        size_pct = rules["filters"]["size_band_pct"]
+
     filtered = _filter_size(comps, nia_sqm, size_pct)
     if len(filtered) < rules["confidence"]["low_if_min_comps"]:
         size_pct = size_fallback_pct
@@ -667,7 +677,12 @@ def run_csa(
     ]
 
     # --- Distance filter ---
-    max_radius = _NURSERY_RADIUS_M if _is_nursery else rules["filters"]["distance_m"]["fallback"]
+    if _is_nursery:
+        max_radius = _NURSERY_RADIUS_M
+    elif _is_restaurant:
+        max_radius = _RESTAURANT_RADIUS_M
+    else:
+        max_radius = rules["filters"]["distance_m"]["fallback"]
     with_dist: list[tuple[Comparable, float]] = []
     for c in filtered:
         d = haversine_m(lat, lon, c.lat, c.lon)
@@ -709,10 +724,26 @@ def run_csa(
     if not rated:
         return _insufficient_data()
 
+    pre_trim_comparable_count = len(rated)
+
     # --- Outlier removal ---
     # Nursery: light-touch trimming only on larger pools.
     if _is_nursery:
         if len(rated) >= 5:
+            rates_sorted = sorted(r for _, _, r, _ in rated)
+            n = len(rates_sorted)
+            lo = rates_sorted[max(0, int(n * 0.05))]
+            hi = rates_sorted[min(n - 1, int(n * 0.95))]
+            rated = [(c, d, r, w) for c, d, r, w in rated if lo <= r <= hi]
+    elif _is_restaurant:
+        _n_rest = len(rated)
+        if _n_rest >= 6:
+            rates_sorted = sorted(r for _, _, r, _ in rated)
+            n = len(rates_sorted)
+            lo = rates_sorted[max(0, int(n * 0.10))]
+            hi = rates_sorted[min(n - 1, int(n * 0.90))]
+            rated = [(c, d, r, w) for c, d, r, w in rated if lo <= r <= hi]
+        elif _n_rest >= 4:
             rates_sorted = sorted(r for _, _, r, _ in rated)
             n = len(rates_sorted)
             lo = rates_sorted[max(0, int(n * 0.05))]
@@ -735,6 +766,7 @@ def run_csa(
     if _is_nursery and len(rated) > _NURSERY_NEAREST_CAP:
         rated = sorted(rated, key=lambda item: item[1])[:_NURSERY_NEAREST_CAP]
     post_cap_comparable_count = len(rated)
+    post_trim_comparable_count = len(rated)
     min_distance_used = min((d for _, d, _, _ in rated), default=None)
     max_distance_used = max((d for _, d, _, _ in rated), default=None)
 
@@ -929,6 +961,12 @@ def run_csa(
             "tier2_rate_median": None,
             "top5_by_weight": [],
         }
+        if _is_restaurant:
+            _debug["pre_trim_comparable_count"] = pre_trim_comparable_count
+            _debug["post_trim_comparable_count"] = post_trim_comparable_count
+            _debug["min_distance_used"] = round(min_distance_used, 0) if min_distance_used is not None else None
+            _debug["max_distance_used"] = round(max_distance_used, 0) if max_distance_used is not None else None
+            _debug["size_band_pct_used"] = size_pct
         t1_rates = sorted(r for c, _, r, _ in rated if c.rate_source == "voa_published")
         t2_rates = sorted(r for c, _, r, _ in rated if c.rate_source == "implied")
         if t1_rates:

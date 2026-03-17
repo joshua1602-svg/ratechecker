@@ -409,6 +409,56 @@ class TestNurserySpecificPath:
         assert dbg.get("max_distance_used") is not None
         assert dbg.get("max_distance_used") >= dbg.get("min_distance_used")
 
+class TestRestaurantSpecificPath:
+
+    def test_restaurant_uses_wider_radius_than_retail(self):
+        """Restaurant/cafe should keep comps around ~2.5km that retail would drop."""
+        comps = [
+            _comp("A", rv=15_000, nia_sqm=100, unadjusted_price_psm=150.0, has_summary=True, scat_code=409,
+                  lat=51.5225, lon=-0.1),
+            _comp("B", rv=16_000, nia_sqm=100, unadjusted_price_psm=152.0, has_summary=True, scat_code=409,
+                  lat=51.5226, lon=-0.1),
+            _comp("C", rv=14_000, nia_sqm=100, unadjusted_price_psm=148.0, has_summary=True, scat_code=409,
+                  lat=51.5227, lon=-0.1),
+        ]
+        r_result = _run(comps, nia_sqm=100.0, business_type="restaurant_cafe")
+        retail_result = _run(comps, nia_sqm=100.0, business_type="retail")
+
+        assert r_result["signal"] != "Insufficient Data"
+        assert retail_result["signal"] == "Insufficient Data"
+
+    def test_restaurant_uses_75pct_size_band(self):
+        """Restaurant/cafe should include materially larger units via ±75% size band."""
+        comps = [
+            _comp("A", rv=20_000, nia_sqm=170, unadjusted_price_psm=120.0, has_summary=True, scat_code=409),
+            _comp("B", rv=20_000, nia_sqm=170, unadjusted_price_psm=121.0, has_summary=True, scat_code=409),
+            _comp("C", rv=20_000, nia_sqm=170, unadjusted_price_psm=122.0, has_summary=True, scat_code=409),
+        ]
+        result = _run(comps, nia_sqm=100.0, business_type="restaurant_cafe")
+        assert result["signal"] != "Insufficient Data"
+
+    def test_restaurant_conditional_trim_and_debug_fields(self):
+        """Restaurant/cafe exposes trim and distance diagnostics and trims only on larger pools."""
+        core = [
+            _comp(str(i), rv=15_000, nia_sqm=100, unadjusted_price_psm=100.0 + i, has_summary=True,
+                  scat_code=409, lat=51.5 + i * 0.0001, lon=-0.1)
+            for i in range(19)
+        ]
+        tails = [
+            _comp("LOW", rv=15_000, nia_sqm=100, unadjusted_price_psm=1.0, has_summary=True,
+                  scat_code=409, lat=51.5001, lon=-0.1),
+            _comp("HIGH", rv=15_000, nia_sqm=100, unadjusted_price_psm=500.0, has_summary=True,
+                  scat_code=409, lat=51.5019, lon=-0.1),
+        ]
+        result = _run(core + tails, nia_sqm=100.0, business_type="restaurant_cafe")
+        assert result["signal"] != "Insufficient Data"
+        dbg = result.get("_debug", {})
+        assert dbg.get("pre_trim_comparable_count") == 21
+        assert dbg.get("post_trim_comparable_count") < 21
+        assert dbg.get("size_band_pct_used") == 75
+        assert dbg.get("min_distance_used") is not None
+        assert dbg.get("max_distance_used") is not None
+
 # ---------------------------------------------------------------------------
 # 5. Rate-band clustering
 # ---------------------------------------------------------------------------
