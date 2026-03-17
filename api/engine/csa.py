@@ -230,6 +230,12 @@ _MIN_COMPS_FOR_VALUATION: int = 3
 # as high-street retail produces Insufficient Data for a large share of subjects.
 _NURSERY_RADIUS_M: int = 10_000
 _NURSERY_MIN_COMPS: int = 2
+_NURSERY_NEAREST_CAP: int = 10
+_RESTAURANT_RADIUS_M: int = 3_000
+_RESTAURANT_SIZE_BAND_PCT: int = 75
+_RESTAURANT_MAX_DISTANCE_M: int = 1_500
+_RESTAURANT_MEDIAN_DISTANCE_M_MAX: int = 1_000
+_RESTAURANT_RATE_GAP_LIMIT: float = 150.0
 
 # Smooth distance decay: weight = 1 / (1 + alpha × distance_km).
 # alpha=0.5 → 0 km→1.0, 1 km→0.67, 2 km→0.5.
@@ -640,6 +646,8 @@ def run_csa(
     """
     rules = csa_rules()
     zone_depth = 6.1
+    _is_nursery = business_type == "nursery"
+    _is_restaurant = business_type == "restaurant_cafe"
 
     # --- Size-band filter ---
     # Retail uses a tighter fallback band (±35%) than the general ±50% because
@@ -647,8 +655,19 @@ def run_csa(
     # very small units adds noise rather than evidence.
     _retail_like = business_type in ("retail", "hair_beauty")
     size_fallback_pct = 35 if _retail_like else rules["filters"]["size_band_pct_fallback"]
+    if _is_nursery:
+        # Nursery pools are sparse and dispersed; use a materially wider size
+        # tolerance than retail so evidence is not dropped too early.
+        size_fallback_pct = 75
 
-    size_pct = rules["filters"]["size_band_pct"]
+    if _is_restaurant:
+        # Restaurant/cafe units vary more by layout and use; use a broader
+        # fixed size band to preserve enough catchment evidence.
+        size_pct = _RESTAURANT_SIZE_BAND_PCT
+        size_fallback_pct = _RESTAURANT_SIZE_BAND_PCT
+    else:
+        size_pct = rules["filters"]["size_band_pct"]
+
     filtered = _filter_size(comps, nia_sqm, size_pct)
     if len(filtered) < rules["confidence"]["low_if_min_comps"]:
         size_pct = size_fallback_pct
@@ -661,16 +680,21 @@ def run_csa(
     ]
 
     # --- Distance filter ---
-    max_radius = (
-        _NURSERY_RADIUS_M
-        if business_type == "nursery"
-        else rules["filters"]["distance_m"]["fallback"]
-    )
+    if _is_nursery:
+        max_radius = _NURSERY_RADIUS_M
+    elif _is_restaurant:
+        max_radius = _RESTAURANT_RADIUS_M
+    else:
+        max_radius = rules["filters"]["distance_m"]["fallback"]
     with_dist: list[tuple[Comparable, float]] = []
     for c in filtered:
         d = haversine_m(lat, lon, c.lat, c.lon)
         if d <= max_radius:
             with_dist.append((c, d))
+
+    if _is_restaurant:
+        # Hard local guardrail for restaurants: keep only comparables within 1.5 km.
+        with_dist = [(c, d) for c, d in with_dist if d <= _RESTAURANT_MAX_DISTANCE_M]
 
     if not with_dist:
         return _insufficient_data()
@@ -707,15 +731,65 @@ def run_csa(
     if not rated:
         return _insufficient_data()
 
-    # --- Outlier removal (10th–90th percentile) ---
-    rates_sorted = sorted(r for _, _, r, _ in rated)
-    n = len(rates_sorted)
-    lo = rates_sorted[max(0, int(n * 0.10))]
-    hi = rates_sorted[min(n - 1, int(n * 0.90))]
-    rated = [(c, d, r, w) for c, d, r, w in rated if lo <= r <= hi]
+    # Restaurant path is strict: do not broaden/fallback when evidence is thin.
+    if _is_restaurant and len(rated) < _MIN_COMPS_FOR_VALUATION:
+        return _insufficient_data()
+
+    pre_trim_comparable_count = len(rated)
+
+    # --- Outlier removal ---
+    # Nursery: light-touch trimming only on larger pools.
+    if _is_nursery:
+        if len(rated) >= 5:
+            rates_sorted = sorted(r for _, _, r, _ in rated)
+            n = len(rates_sorted)
+            lo = rates_sorted[max(0, int(n * 0.05))]
+            hi = rates_sorted[min(n - 1, int(n * 0.95))]
+            rated = [(c, d, r, w) for c, d, r, w in rated if lo <= r <= hi]
+    elif _is_restaurant:
+        _n_rest = len(rated)
+        if _n_rest >= 6:
+            rates_sorted = sorted(r for _, _, r, _ in rated)
+            n = len(rates_sorted)
+            lo = rates_sorted[max(0, int(n * 0.10))]
+            hi = rates_sorted[min(n - 1, int(n * 0.90))]
+            rated = [(c, d, r, w) for c, d, r, w in rated if lo <= r <= hi]
+        elif _n_rest >= 4:
+            rates_sorted = sorted(r for _, _, r, _ in rated)
+            n = len(rates_sorted)
+            lo = rates_sorted[max(0, int(n * 0.05))]
+            hi = rates_sorted[min(n - 1, int(n * 0.95))]
+            rated = [(c, d, r, w) for c, d, r, w in rated if lo <= r <= hi]
+    else:
+        rates_sorted = sorted(r for _, _, r, _ in rated)
+        n = len(rates_sorted)
+        lo = rates_sorted[max(0, int(n * 0.10))]
+        hi = rates_sorted[min(n - 1, int(n * 0.90))]
+        rated = [(c, d, r, w) for c, d, r, w in rated if lo <= r <= hi]
 
     if not rated:
         return _insufficient_data()
+
+    if _is_restaurant:
+        _restaurant_distances = sorted(d for _, d, _, _ in rated)
+        _mid = len(_restaurant_distances) // 2
+        if len(_restaurant_distances) % 2:
+            _median_distance_m = _restaurant_distances[_mid]
+        else:
+            _median_distance_m = (_restaurant_distances[_mid - 1] + _restaurant_distances[_mid]) / 2
+        if _median_distance_m > _RESTAURANT_MEDIAN_DISTANCE_M_MAX:
+            return _insufficient_data()
+
+    # --- Nursery nearest-N cap ---
+    # Keep broad search radius but limit the final nursery pool to the closest
+    # comparables after all prior filtering steps.
+    pre_cap_comparable_count = len(rated)
+    if _is_nursery and len(rated) > _NURSERY_NEAREST_CAP:
+        rated = sorted(rated, key=lambda item: item[1])[:_NURSERY_NEAREST_CAP]
+    post_cap_comparable_count = len(rated)
+    post_trim_comparable_count = len(rated)
+    min_distance_used = min((d for _, d, _, _ in rated), default=None)
+    max_distance_used = max((d for _, d, _, _ in rated), default=None)
 
     # --- Rate-band clustering (retail only) ---
     # Split the post-outlier pool into pitch clusters and pick the one whose
@@ -843,7 +917,7 @@ def run_csa(
     # Nursery uses a lower floor (_NURSERY_MIN_COMPS=2) because nurseries are
     # sparse in most sectors and the standard floor of 3 produces too many
     # Insufficient Data results at reasonable radii.
-    _min_comps = _NURSERY_MIN_COMPS if business_type == "nursery" else _MIN_COMPS_FOR_VALUATION
+    _min_comps = _NURSERY_MIN_COMPS if _is_nursery else _MIN_COMPS_FOR_VALUATION
     if len(rated) < _min_comps:
         return _insufficient_data()
 
@@ -908,6 +982,12 @@ def run_csa(
             "tier2_rate_median": None,
             "top5_by_weight": [],
         }
+        if _is_restaurant:
+            _debug["pre_trim_comparable_count"] = pre_trim_comparable_count
+            _debug["post_trim_comparable_count"] = post_trim_comparable_count
+            _debug["min_distance_used"] = round(min_distance_used, 0) if min_distance_used is not None else None
+            _debug["max_distance_used"] = round(max_distance_used, 0) if max_distance_used is not None else None
+            _debug["size_band_pct_used"] = size_pct
         t1_rates = sorted(r for c, _, r, _ in rated if c.rate_source == "voa_published")
         t2_rates = sorted(r for c, _, r, _ in rated if c.rate_source == "implied")
         if t1_rates:
@@ -950,6 +1030,21 @@ def run_csa(
             if confidence == "High":
                 _confidence_reason = f"capped_medium_gap_{_rate_gap_pct:.0%}_vs_implied"
                 confidence = "Medium"
+    if _is_restaurant and voa_rv and voa_rv > 0:
+        _s_itza = itza_from_nia(nia_sqm, zone_depth)
+        _restaurant_implied_rate = (voa_rv / _s_itza) if _s_itza > 0 else None
+        if _restaurant_implied_rate is not None:
+            _rate_distance_to_subject = abs(tone - _restaurant_implied_rate)
+            if _rate_distance_to_subject > _RESTAURANT_RATE_GAP_LIMIT:
+                return _insufficient_data()
+
+    if _is_nursery:
+        _debug = {
+            "pre_cap_comparable_count": pre_cap_comparable_count,
+            "post_cap_comparable_count": post_cap_comparable_count,
+            "min_distance_used": round(min_distance_used, 0) if min_distance_used is not None else None,
+            "max_distance_used": round(max_distance_used, 0) if max_distance_used is not None else None,
+        }
     if _debug:
         _debug["confidence_reason"] = _confidence_reason
 
@@ -968,7 +1063,7 @@ def run_csa(
     #
     # Using NIA reconstruction for retail produces a ~1.75× uplift because
     # NIA / ITZA ≈ 1.75 for a typical rectangular shop (1:3 aspect ratio).
-    if business_type == "nursery":
+    if _is_nursery:
         estimated_rv = round(tone * nia_sqm / 100) * 100
         subject_basis = nia_sqm
         basis_label = "NIA"
