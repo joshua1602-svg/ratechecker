@@ -4,9 +4,10 @@ Quick end-to-end test against the live Supabase VOA dataset.
 Samples 25 properties per segment, runs the full CSA pipeline, and writes
 results to quick_test_results.csv for manual inspection.
 
-Comparables are restricted to the same postcode sector as the subject
-property (e.g. "SW20 8" for "SW20 8AA"). This keeps the comparison pool
-tight to the same local market so tone-engine accuracy is meaningful.
+Retail and restaurant/cafe comparables are restricted to the same
+postcode sector as the subject property (e.g. "SW20 8" for "SW20 8AA").
+Nursery comparables deliberately use a wider catchment without postcode-sector
+anchoring to reflect production nursery behaviour.
 
 Usage (from project root):
     python tests/quick_test.py
@@ -205,7 +206,9 @@ for sample in SAMPLES:
 
         try:
             sector = postcode_sector(postcode)
-            _radius = 10_000 if sample["business_type"] == "nursery" else 1_000
+            _is_nursery = sample["business_type"] == "nursery"
+            _radius = 10_000 if _is_nursery else 1_000
+            _postcode_prefix = None if _is_nursery else sector
             raw_comps = get_comparables(
                 lat=lat,
                 lon=lon,
@@ -213,9 +216,9 @@ for sample in SAMPLES:
                 radius_m=_radius,
                 nia_sqm=nia_sqm,
                 size_band_pct=50,
-                postcode_prefix=sector,
+                postcode_prefix=_postcode_prefix,
             )
-            comp_source = f"sector:{sector}"
+            comp_source = "radius_only" if _is_nursery else f"sector:{sector}"
 
             comps = dicts_to_comparables(raw_comps)
 
@@ -228,7 +231,7 @@ for sample in SAMPLES:
                 voa_rv=voa_rv,
                 subject_description=str(desc) if desc else "",
                 subject_sv_line_descs=sv_lines_map.get(str(uarn), ()),
-                subject_postcode_sector=sector,
+                subject_postcode_sector="" if _is_nursery else sector,
             )
 
             model_rv = result.get("estimated_rv")
