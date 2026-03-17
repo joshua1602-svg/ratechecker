@@ -235,7 +235,9 @@ _RESTAURANT_RADIUS_M: int = 3_000
 _RESTAURANT_SIZE_BAND_PCT: int = 75
 _RESTAURANT_MAX_DISTANCE_M: int = 1_500
 _RESTAURANT_MEDIAN_DISTANCE_M_MAX: int = 1_000
-_RESTAURANT_RATE_GAP_LIMIT: float = 150.0
+_RESTAURANT_RATE_GAP_LIMIT_SOFT_MEDIUM: float = 15.0
+_RESTAURANT_RATE_GAP_LIMIT_SOFT_LOW: float = 30.0
+_RESTAURANT_RATE_GAP_LIMIT_HARD: float = 50.0
 
 # Smooth distance decay: weight = 1 / (1 + alpha × distance_km).
 # alpha=0.5 → 0 km→1.0, 1 km→0.67, 2 km→0.5.
@@ -770,6 +772,7 @@ def run_csa(
     if not rated:
         return _insufficient_data()
 
+    _median_distance_m: float | None = None
     if _is_restaurant:
         _restaurant_distances = sorted(d for _, d, _, _ in rated)
         _mid = len(_restaurant_distances) // 2
@@ -1030,13 +1033,68 @@ def run_csa(
             if confidence == "High":
                 _confidence_reason = f"capped_medium_gap_{_rate_gap_pct:.0%}_vs_implied"
                 confidence = "Medium"
-    if _is_restaurant and voa_rv and voa_rv > 0:
+    restaurant_rejection_reason: str | None = None
+    restaurant_quality_gate_passed = True
+    rate_distance_band: str | None = None
+    _rate_distance_to_subject: float | None = None
+
+    if _is_restaurant:
         _s_itza = itza_from_nia(nia_sqm, zone_depth)
-        _restaurant_implied_rate = (voa_rv / _s_itza) if _s_itza > 0 else None
-        if _restaurant_implied_rate is not None:
+        _restaurant_implied_rate = (voa_rv / _s_itza) if (voa_rv and voa_rv > 0 and _s_itza > 0) else None
+
+        if _restaurant_implied_rate is None:
+            restaurant_rejection_reason = "missing_subject_implied_rate"
+            restaurant_quality_gate_passed = False
+        else:
             _rate_distance_to_subject = abs(tone - _restaurant_implied_rate)
-            if _rate_distance_to_subject > _RESTAURANT_RATE_GAP_LIMIT:
-                return _insufficient_data()
+            if _rate_distance_to_subject <= _RESTAURANT_RATE_GAP_LIMIT_SOFT_MEDIUM:
+                rate_distance_band = "0_15"
+            elif _rate_distance_to_subject <= _RESTAURANT_RATE_GAP_LIMIT_SOFT_LOW:
+                rate_distance_band = "15_30"
+                if confidence == "High":
+                    confidence = "Medium"
+                    _confidence_reason = "restaurant_rate_distance_15_30_cap_medium"
+            elif _rate_distance_to_subject <= _RESTAURANT_RATE_GAP_LIMIT_HARD:
+                rate_distance_band = "30_50"
+                _rate_spread = (max(rate_vals) - min(rate_vals)) if rate_vals else 0.0
+                _strong_pool = (
+                    len(rated) >= 4
+                    and (_median_distance_m is not None and _median_distance_m <= 750)
+                    and _rate_spread <= 120
+                )
+                _weak_broad_pool = (
+                    len(rated) <= 3
+                    or (_median_distance_m is not None and _median_distance_m > 750)
+                    or (max_distance_used is not None and max_distance_used > 1200)
+                )
+                if _weak_broad_pool or not _strong_pool:
+                    restaurant_rejection_reason = "weak_pool_with_rate_distance_gt30"
+                    restaurant_quality_gate_passed = False
+                else:
+                    confidence = "Low"
+                    _confidence_reason = "restaurant_rate_distance_30_50_cap_low"
+            else:
+                rate_distance_band = "gt_50"
+                restaurant_rejection_reason = "rate_distance_gt_50"
+                restaurant_quality_gate_passed = False
+
+        if len(rated) == 2 and _rate_distance_to_subject is not None and _rate_distance_to_subject > 30:
+            restaurant_rejection_reason = "two_comp_rate_distance_gt30"
+            restaurant_quality_gate_passed = False
+
+        if _debug:
+            _debug["rate_distance_to_subject"] = (
+                round(_rate_distance_to_subject, 1) if _rate_distance_to_subject is not None else None
+            )
+            _debug["rate_distance_band"] = rate_distance_band
+            _debug["restaurant_rejection_reason"] = restaurant_rejection_reason
+            _debug["restaurant_quality_gate_passed"] = restaurant_quality_gate_passed
+
+        if not restaurant_quality_gate_passed:
+            _ins = _insufficient_data()
+            if _debug:
+                _ins["_debug"] = _debug
+            return _ins
 
     if _is_nursery:
         _debug = {

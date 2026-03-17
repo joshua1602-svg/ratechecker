@@ -444,7 +444,7 @@ class TestRestaurantSpecificPath:
             _comp("B", rv=20_000, nia_sqm=170, unadjusted_price_psm=121.0, has_summary=True, scat_code=409),
             _comp("C", rv=20_000, nia_sqm=170, unadjusted_price_psm=122.0, has_summary=True, scat_code=409),
         ]
-        result = _run(comps, nia_sqm=100.0, business_type="restaurant_cafe")
+        result = _run(comps, nia_sqm=100.0, voa_rv=6_900.0, business_type="restaurant_cafe")
         assert result["signal"] != "Insufficient Data"
 
 
@@ -452,17 +452,17 @@ class TestRestaurantSpecificPath:
         """Restaurant/cafe returns Insufficient Data when median distance exceeds 1.0km."""
         comps = [
             _comp("A", rv=15_000, nia_sqm=100, unadjusted_price_psm=150.0, has_summary=True, scat_code=409,
-                  lat=51.5100, lon=-0.1),
+                  lat=51.5120, lon=-0.1),
             _comp("B", rv=16_000, nia_sqm=100, unadjusted_price_psm=151.0, has_summary=True, scat_code=409,
-                  lat=51.5105, lon=-0.1),
+                  lat=51.5130, lon=-0.1),
             _comp("C", rv=14_000, nia_sqm=100, unadjusted_price_psm=149.0, has_summary=True, scat_code=409,
-                  lat=51.5110, lon=-0.1),
+                  lat=51.5140, lon=-0.1),
         ]
         result = _run(comps, nia_sqm=100.0, business_type="restaurant_cafe")
         assert result["signal"] == "Insufficient Data"
 
     def test_restaurant_rate_sanity_gate_blocks_large_divergence(self):
-        """Restaurant/cafe rejects tones with >£150/m² distance from implied subject rate."""
+        """Restaurant/cafe rejects tones with >£50/m² distance from implied subject rate."""
         comps = [
             _comp("A", rv=15_000, nia_sqm=100, unadjusted_price_psm=400.0, has_summary=True, scat_code=409,
                   lat=51.5005, lon=-0.1),
@@ -473,6 +473,41 @@ class TestRestaurantSpecificPath:
         ]
         result = _run(comps, nia_sqm=100.0, voa_rv=10_000.0, business_type="restaurant_cafe")
         assert result["signal"] == "Insufficient Data"
+    def test_restaurant_rate_distance_15_30_caps_confidence_to_medium(self):
+        """Restaurant/cafe caps confidence to Medium in the 15–30 rate-distance band."""
+        comps = [
+            _comp("A", rv=15_000, nia_sqm=100, unadjusted_price_psm=205.0, has_summary=True, scat_code=409,
+                  lat=51.5005, lon=-0.1),
+            _comp("B", rv=16_000, nia_sqm=100, unadjusted_price_psm=210.0, has_summary=True, scat_code=409,
+                  lat=51.5006, lon=-0.1),
+            _comp("C", rv=14_000, nia_sqm=100, unadjusted_price_psm=215.0, has_summary=True, scat_code=409,
+                  lat=51.5007, lon=-0.1),
+        ]
+        result = _run(comps, nia_sqm=100.0, voa_rv=10_900.0, business_type="restaurant_cafe")
+        assert result["signal"] != "Insufficient Data"
+        assert result["confidence"] in ("Medium", "Low")
+        assert result["confidence"] != "High"
+        dbg = result.get("_debug", {})
+        assert dbg.get("rate_distance_band") == "15_30"
+        assert dbg.get("restaurant_quality_gate_passed") is True
+
+    def test_restaurant_rate_distance_30_50_weak_pool_rejected(self):
+        """Restaurant/cafe rejects weak pools when rate-distance is in the 30–50 band."""
+        comps = [
+            _comp("A", rv=15_000, nia_sqm=100, unadjusted_price_psm=220.0, has_summary=True, scat_code=409,
+                  lat=51.5060, lon=-0.1),
+            _comp("B", rv=16_000, nia_sqm=100, unadjusted_price_psm=225.0, has_summary=True, scat_code=409,
+                  lat=51.5065, lon=-0.1),
+            _comp("C", rv=14_000, nia_sqm=100, unadjusted_price_psm=230.0, has_summary=True, scat_code=409,
+                  lat=51.5070, lon=-0.1),
+        ]
+        result = _run(comps, nia_sqm=100.0, voa_rv=11_400.0, business_type="restaurant_cafe")
+        assert result["signal"] == "Insufficient Data"
+        dbg = result.get("_debug", {})
+        assert dbg.get("rate_distance_band") == "30_50"
+        assert dbg.get("restaurant_rejection_reason") == "weak_pool_with_rate_distance_gt30"
+        assert dbg.get("restaurant_quality_gate_passed") is False
+
     def test_restaurant_conditional_trim_and_debug_fields(self):
         """Restaurant/cafe exposes trim and distance diagnostics and trims only on larger pools."""
         core = [
@@ -486,7 +521,7 @@ class TestRestaurantSpecificPath:
             _comp("HIGH", rv=15_000, nia_sqm=100, unadjusted_price_psm=500.0, has_summary=True,
                   scat_code=409, lat=51.5019, lon=-0.1),
         ]
-        result = _run(core + tails, nia_sqm=100.0, business_type="restaurant_cafe")
+        result = _run(core + tails, nia_sqm=100.0, voa_rv=6_300.0, business_type="restaurant_cafe")
         assert result["signal"] != "Insufficient Data"
         dbg = result.get("_debug", {})
         assert dbg.get("pre_trim_comparable_count") == 21
