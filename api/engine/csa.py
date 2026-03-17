@@ -221,6 +221,44 @@ _MIN_SAME_STREET_COMPS: int = 4
 _MIN_COMPS_FOR_VALUATION: int = 3
 
 # ---------------------------------------------------------------------------
+# Retail basis classification
+# ---------------------------------------------------------------------------
+
+# Primary description text fragments that indicate an area-based (NIA) valuation
+# rather than the standard Zone A / ITZA high-street zoning method.
+# Matching is case-insensitive substring; most specific terms are listed first.
+_RETAIL_WAREHOUSE_TERMS: tuple[str, ...] = (
+    "RETAIL WAREHOUSE",
+    "GARDEN CENTRE",
+    "PLANT CENTRE",
+)
+
+
+def _classify_retail_method(
+    description: str,
+    sv_line_descs: tuple[str, ...] = (),
+) -> str:
+    """
+    Return 'itza_retail' or 'area_retail' for a retail property.
+
+    Priority:
+    1. If any SV line description contains 'RETAIL ZONE A', return 'itza_retail'
+       (explicit VOA evidence of a zoning-method valuation — strongest signal).
+    2. If the primary description text matches a warehouse/big-box term,
+       return 'area_retail' (NIA area basis).
+    3. Default: 'itza_retail' (standard high-street assumption).
+    """
+    for line in sv_line_descs:
+        if "RETAIL ZONE A" in line.upper():
+            return "itza_retail"
+    desc_upper = description.upper()
+    for term in _RETAIL_WAREHOUSE_TERMS:
+        if term in desc_upper:
+            return "area_retail"
+    return "itza_retail"
+
+
+# ---------------------------------------------------------------------------
 # Retail conservative-selection constants
 # ---------------------------------------------------------------------------
 
@@ -546,6 +584,8 @@ def run_csa(
     business_type: str,
     nia_sqm: float,
     voa_rv: float,
+    subject_description: str = "",
+    subject_sv_line_descs: tuple[str, ...] = (),
 ) -> dict:
     """
     Run the CSA on a list of pre-fetched Comparable objects.
@@ -587,9 +627,12 @@ def run_csa(
     if not with_dist:
         return _insufficient_data()
 
-    # --- Extract normalised NIA rates and combined weights ---
-    # Both tiers (unadjusted_psm and rv_over_nia) produce £/m² NIA so they
-    # are directly comparable in the weighted-median pool.
+    # --- Extract normalised Zone A rates and combined weights ---
+    # Tier 1 (unadjusted_psm): already a Zone A rate — no adjustment needed.
+    # Tier 2 (rv_over_nia): rv/nia_sqm yields an NIA rate, which is inconsistent
+    # with the Zone A tier-1 rate for itza_retail properties.  Correct by
+    # converting to rv/itza for comparables classified as itza_retail.
+    # area_retail tier-2 comparables keep the rv/nia_sqm rate (area basis).
     rated: list[tuple[Comparable, float, float, float]] = []  # (comp, dist, rate, weight)
     tier_counts: dict[str, int] = {"unadjusted_psm": 0, "rv_over_nia": 0}
     excluded_no_rate = 0
@@ -598,6 +641,13 @@ def run_csa(
         if rate is None or rate <= 0:
             excluded_no_rate += 1
             continue
+        # For itza_retail tier-2 comparables, correct rv/nia → rv/itza so the
+        # rate is on the same Zone A basis as tier-1 (unadjusted_price_psm).
+        if _retail_like and tier == "rv_over_nia":
+            if _classify_retail_method(c.description) == "itza_retail":
+                _c_itza = itza_from_nia(c.nia_sqm, zone_depth)
+                if _c_itza > 0:
+                    rate = c.rv / _c_itza
         tier_counts[tier] = tier_counts.get(tier, 0) + 1
         w_prox = _proximity_weight(d, rules)
         w_src = _source_weight(c, rules)
@@ -628,15 +678,25 @@ def run_csa(
     same_street_reverted = False
     _selection_reason = "not_retail"
     subject_implied_rate: float | None = None  # computed for retail; used for confidence cap
+    subject_retail_method: str = "itza_retail"  # overridden inside retail block
 
     if _retail_like:
-        # Pre-compute subject implied Zone A rate.  This is a *diagnostic and
-        # selection signal only* — the final RV is derived purely from the
-        # tone of comparables, not anchored to this figure.
+        # Classify the subject's valuation basis.
+        subject_retail_method = _classify_retail_method(
+            subject_description, subject_sv_line_descs
+        )
+
+        # Pre-compute subject implied rate on the appropriate basis.  This is a
+        # *diagnostic and selection signal only* — the final RV is derived purely
+        # from the tone of comparables, not anchored to this figure.
         if voa_rv and voa_rv > 0:
-            _s_itza = itza_from_nia(nia_sqm, zone_depth)
-            if _s_itza > 0:
-                subject_implied_rate = voa_rv / _s_itza
+            if subject_retail_method == "area_retail":
+                if nia_sqm > 0:
+                    subject_implied_rate = voa_rv / nia_sqm
+            else:
+                _s_itza = itza_from_nia(nia_sqm, zone_depth)
+                if _s_itza > 0:
+                    subject_implied_rate = voa_rv / _s_itza
 
         # Step 1: narrow pool to same-street comparables when sufficient.
         # The dominant street (highest total weight) is the proxy for the
@@ -715,6 +775,7 @@ def run_csa(
             "same_street_key": same_street_key,
             "same_street_reverted": same_street_reverted,
             # Clustering and selection
+            "retail_method": subject_retail_method if _retail_like else None,
             "cluster_count": cluster_count,
             "selected_cluster_id": selected_cluster_id,
             "selection_reason": _selection_reason,
@@ -803,7 +864,13 @@ def run_csa(
         estimated_rv = round(tone * nia_sqm / 100) * 100
         subject_basis = nia_sqm
         basis_label = "NIA"
+    elif _retail_like and subject_retail_method == "area_retail":
+        # Retail warehouse / big-box: tone is an NIA rate; reconstruct on NIA basis.
+        estimated_rv = round(tone * nia_sqm / 100) * 100
+        subject_basis = nia_sqm
+        basis_label = "NIA"
     else:
+        # Standard high-street retail and restaurant_cafe: tone is a Zone A rate.
         itza = itza_from_nia(nia_sqm, zone_depth)
         estimated_rv = round(tone * itza / 100) * 100
         subject_basis = itza

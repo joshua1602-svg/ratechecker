@@ -46,7 +46,8 @@ def _comp(
     )
 
 
-def _run(comps, nia_sqm=100.0, voa_rv=10_000.0, business_type="retail"):
+def _run(comps, nia_sqm=100.0, voa_rv=10_000.0, business_type="retail",
+         subject_description=""):
     return run_csa(
         comps=comps,
         lat=51.5,
@@ -54,6 +55,7 @@ def _run(comps, nia_sqm=100.0, voa_rv=10_000.0, business_type="retail"):
         business_type=business_type,
         nia_sqm=nia_sqm,
         voa_rv=voa_rv,
+        subject_description=subject_description,
     )
 
 
@@ -748,3 +750,127 @@ class TestRetailConservativeSelection:
         assert result["tone_rate"] < 625, (
             f"Reverted to full pool; secondary should influence tone (<625), got {result['tone_rate']}"
         )
+
+
+# ---------------------------------------------------------------------------
+# 8. Retail basis classification and rate correction
+# ---------------------------------------------------------------------------
+
+class TestRetailMethodClassification:
+    """
+    Tests for _classify_retail_method() and its end-to-end effect on tone
+    derivation and RV reconstruction.
+    """
+
+    def test_sv_line_zone_a_returns_itza_retail(self):
+        """SV line 'Retail Zone A' overrides warehouse description → itza_retail."""
+        from api.engine.csa import _classify_retail_method
+        result = _classify_retail_method(
+            "Retail Warehouse And Premises",
+            sv_line_descs=("Retail Zone A",),
+        )
+        assert result == "itza_retail"
+
+    def test_shop_description_returns_itza_retail(self):
+        """Standard shop or empty description → itza_retail (default)."""
+        from api.engine.csa import _classify_retail_method
+        assert _classify_retail_method("SHOP AND PREMISES") == "itza_retail"
+        assert _classify_retail_method("") == "itza_retail"
+
+    def test_retail_warehouse_returns_area_retail(self):
+        """'RETAIL WAREHOUSE' in description → area_retail."""
+        from api.engine.csa import _classify_retail_method
+        assert _classify_retail_method("RETAIL WAREHOUSE AND PREMISES") == "area_retail"
+
+    def test_garden_centre_returns_area_retail(self):
+        """'GARDEN CENTRE' in description → area_retail."""
+        from api.engine.csa import _classify_retail_method
+        assert _classify_retail_method("GARDEN CENTRE AND PREMISES") == "area_retail"
+
+    def test_tier2_rate_corrected_for_itza_retail(self):
+        """
+        End-to-end: tier-2 comps for itza_retail must be rated on rv/itza,
+        not rv/nia.
+
+        A comp whose RV = zone_a_rate × itza should produce tone ≈ zone_a_rate
+        once the tier-2 correction is applied.  Without the correction,
+        tone would equal rv / nia ≈ zone_a_rate × (itza/nia) < zone_a_rate.
+        """
+        from api.engine.csa import itza_from_nia
+        nia = 100.0
+        zone_a_rate = 300.0
+        itza = itza_from_nia(nia)
+        rv = zone_a_rate * itza  # VOA-style: rate × ITZA = RV
+
+        # Three tier-2 comps (no summary) — description defaults to itza_retail
+        comps = [
+            Comparable(
+                uarn=str(i), address="SHOP, HIGH STREET",
+                scat_code=249, rv=rv, nia_sqm=nia,
+                unadjusted_price_psm=None,
+                unit_of_measurement="NIA", has_summary=False,
+                lat=51.5, lon=-0.1, description="SHOP AND PREMISES",
+            )
+            for i in range(3)
+        ]
+        result = _run(comps, nia_sqm=nia, voa_rv=rv,
+                      subject_description="SHOP AND PREMISES")
+
+        assert result["signal"] != "Insufficient Data"
+        # Tone must be near the Zone A rate, not the (lower) NIA rate
+        assert abs(result["tone_rate"] - zone_a_rate) < 20, (
+            f"Expected tone ≈ {zone_a_rate:.0f} (rv/itza corrected), "
+            f"got {result['tone_rate']:.1f}"
+        )
+
+    def test_area_retail_reconstruction_uses_nia(self):
+        """
+        End-to-end: for an area_retail subject, estimated_rv = tone × NIA.
+
+        A retail warehouse comp at £250/m² NIA with subject NIA = 200 m²
+        should give estimated_rv ≈ 250 × 200 = £50,000, not tone × itza.
+        """
+        nia = 200.0
+        rate = 250.0
+        rv = rate * nia  # area-retail: rate × NIA = RV
+
+        comps = [
+            Comparable(
+                uarn=str(i), address="RETAIL WAREHOUSE, RETAIL PARK",
+                scat_code=249, rv=rv, nia_sqm=nia,
+                unadjusted_price_psm=rate,
+                unit_of_measurement="NIA", has_summary=True,
+                lat=51.5, lon=-0.1,
+                description="RETAIL WAREHOUSE AND PREMISES",
+            )
+            for i in range(3)
+        ]
+        result = _run(
+            comps, nia_sqm=nia, voa_rv=rv,
+            subject_description="RETAIL WAREHOUSE AND PREMISES",
+        )
+
+        assert result["signal"] != "Insufficient Data"
+        expected = round(rate * nia / 100) * 100
+        assert result["estimated_rv"] == pytest.approx(expected, abs=500), (
+            f"Expected area_retail estimated_rv ≈ {expected} (tone×NIA), "
+            f"got {result['estimated_rv']}"
+        )
+        assert result["rate_normalisation"]["subject_basis_label"] == "NIA"
+
+    def test_nursery_unaffected_by_retail_method(self):
+        """Nursery must continue to reconstruct on NIA basis regardless of description."""
+        nia = 200.0
+        nia_rate = 120.0
+        rv = nia_rate * nia
+
+        comps = [
+            _comp(uarn, rv=rv, nia_sqm=nia,
+                  unadjusted_price_psm=nia_rate, has_summary=True,
+                  scat_code=85)
+            for uarn in ("A", "B", "C")
+        ]
+        result = _run(comps, nia_sqm=nia, business_type="nursery")
+
+        assert result["signal"] != "Insufficient Data"
+        assert result["rate_normalisation"]["subject_basis_label"] == "NIA"
