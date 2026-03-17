@@ -1068,9 +1068,7 @@ def run_csa(
                     and (_median_distance_m is not None and _median_distance_m <= 1100)
                 )
 
-                _location_support = (
-                    _location_tier in ["same_street","postcode_sector"]
-                )
+                _location_support = False
 
                 _weak_broad_pool = not (
                     _high_quality_cluster

@@ -206,21 +206,28 @@ for sample in SAMPLES:
 
         try:
             sector = postcode_sector(postcode)
-            _is_nursery = sample["business_type"] == "nursery"
-            _is_restaurant = sample["business_type"] == "restaurant_cafe"
-            _radius = 10_000 if _is_nursery else (3_000 if _is_restaurant else 1_000)
-            _size_band_pct = 75 if _is_restaurant else 50
-            _postcode_prefix = None if (_is_nursery or _is_restaurant) else sector
+            if sample["business_type"] == "nursery":
+                _radius = 10_000
+                _postcode_prefix = None
+            elif sample["business_type"] == "restaurant_cafe":
+                _radius = 1_500
+                _postcode_prefix = None
+            else:
+                _radius = 1_000
+                _postcode_prefix = sector
             raw_comps = get_comparables(
                 lat=lat,
                 lon=lon,
                 scat_codes=sample["scat_codes"],
                 radius_m=_radius,
                 nia_sqm=nia_sqm,
-                size_band_pct=_size_band_pct,
+                size_band_pct=50,
                 postcode_prefix=_postcode_prefix,
             )
-            comp_source = "radius_only" if (_is_nursery or _is_restaurant) else f"sector:{sector}"
+            if _postcode_prefix:
+                comp_source = f"sector:{_postcode_prefix}"
+            else:
+                comp_source = f"radius:{_radius}m"
 
             comps = dicts_to_comparables(raw_comps)
 
@@ -233,7 +240,7 @@ for sample in SAMPLES:
                 voa_rv=voa_rv,
                 subject_description=str(desc) if desc else "",
                 subject_sv_line_descs=sv_lines_map.get(str(uarn), ()),
-                subject_postcode_sector="" if (_is_nursery or _is_restaurant) else sector,
+                subject_postcode_sector="" if _postcode_prefix is None else sector,
             )
 
             model_rv = result.get("estimated_rv")

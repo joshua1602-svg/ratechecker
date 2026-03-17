@@ -491,8 +491,13 @@ class TestRestaurantSpecificPath:
         assert dbg.get("restaurant_rate_distance_band") == "20_35"
         assert dbg.get("restaurant_quality_gate_passed") is True
 
-    def test_restaurant_rate_distance_30_50_weak_pool_rejected(self):
-        """Restaurant/cafe rejects weak pools when rate-distance is in the 35–50 band."""
+    def test_restaurant_rate_distance_35_50_moderate_pool_accepted_low_confidence(self):
+        """
+        Restaurant/cafe accepts a 3-comp pool in the 35–50 rate-distance band when
+        the pool has moderate location support (median distance ≤ 1 100 m), but
+        caps confidence to Low.  The pool is NOT rejected outright because
+        _moderate_quality_cluster is True (3 comps, median ~900 m).
+        """
         comps = [
             _comp("A", rv=15_000, nia_sqm=100, unadjusted_price_psm=220.0, has_summary=True, scat_code=409,
                   lat=51.5027, lon=-0.1),
@@ -502,11 +507,15 @@ class TestRestaurantSpecificPath:
                   lat=51.5126, lon=-0.1),
         ]
         result = _run(comps, nia_sqm=100.0, voa_rv=11_400.0, business_type="restaurant_cafe")
-        assert result["signal"] == "Insufficient Data"
+        assert result["signal"] != "Insufficient Data", (
+            "Moderate-quality 3-comp pool in 35–50 band should be accepted"
+        )
+        assert result["confidence"] == "Low", (
+            "35–50 rate-distance band must cap confidence to Low"
+        )
         dbg = result.get("_debug", {})
         assert dbg.get("restaurant_rate_distance_band") == "35_50"
-        assert dbg.get("restaurant_rejection_reason") == "weak_pool_with_rate_distance_gt35"
-        assert dbg.get("restaurant_quality_gate_passed") is False
+        assert dbg.get("restaurant_quality_gate_passed") is True
 
     def test_restaurant_conditional_trim_and_debug_fields(self):
         """Restaurant/cafe exposes trim and distance diagnostics and trims only on larger pools."""
@@ -1332,24 +1341,25 @@ class TestNurseryPath:
         )
         assert result["estimated_rv"] is not None and result["estimated_rv"] > 0
 
-    def test_nursery_skips_size_band_filter(self):
+    def test_nursery_uses_wide_size_band_fallback(self):
         """
-        Nursery comps with very different NIA from the subject must still survive.
-        A subject NIA of 200 m² with ±50 % would normally exclude a 50 m² or 500 m²
-        comp; the nursery path must admit them all.
+        Nursery uses a ±75% fallback band (not the tight ±30% initial band).
+        Comps outside ±30% but inside ±75% of subject NIA must survive.
+        Comps beyond ±75% (e.g. 600 m² for a 200 m² subject) are excluded.
         """
-        # 200 m² subject; comps range 50–600 m² — all outside any normal band
+        # Subject 200 m²; ±30% → lo=140, hi=260 — all 3 comps fall outside.
+        # Fallback fires with ±75% → lo=50, hi=350 — all 3 comps pass.
         comps = [
             self._nursery_comp("n1", rv=10_000, nia_sqm=50,
                                unadjusted_price_psm=200.0),
-            self._nursery_comp("n2", rv=120_000, nia_sqm=600,
+            self._nursery_comp("n2", rv=70_000, nia_sqm=350,
                                unadjusted_price_psm=200.0),
-            self._nursery_comp("n3", rv=60_000, nia_sqm=300,
+            self._nursery_comp("n3", rv=20_000, nia_sqm=100,
                                unadjusted_price_psm=200.0),
         ]
         result = self._run_nursery(comps, nia_sqm=200.0, voa_rv=40_000.0)
         assert result["signal"] != "Insufficient Data", (
-            "Nursery must not size-filter out comps with extreme NIA variance"
+            "Nursery comps within ±75% of subject NIA must not be filtered out"
         )
         assert result["comparable_count"] == 3
 
