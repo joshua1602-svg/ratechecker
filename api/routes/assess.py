@@ -42,13 +42,15 @@ async def assess(req: AssessRequest) -> AssessResponse:
     target_scats = _scat_codes(btype, rules)
 
     # 3. Query comparables from VOA database
+    _radius_m = 3000 if btype == "restaurant_cafe" else rules["filters"]["distance_m"]["fallback"]
+    _size_band_pct = 75 if btype == "restaurant_cafe" else rules["filters"]["size_band_pct_fallback"]
     rows = get_comparables(
         lat=lat,
         lon=lon,
         scat_codes=target_scats,
-        radius_m=rules["filters"]["distance_m"]["fallback"],
+        radius_m=_radius_m,
         nia_sqm=req.property.nia_sqm,
-        size_band_pct=rules["filters"]["size_band_pct_fallback"],
+        size_band_pct=_size_band_pct,
     )
 
     # 4. Convert DB rows → Comparable objects

@@ -4,9 +4,10 @@ Quick end-to-end test against the live Supabase VOA dataset.
 Samples 25 properties per segment, runs the full CSA pipeline, and writes
 results to quick_test_results.csv for manual inspection.
 
-Comparables are restricted to the same postcode sector as the subject
-property (e.g. "SW20 8" for "SW20 8AA"). This keeps the comparison pool
-tight to the same local market so tone-engine accuracy is meaningful.
+Retail comparables are restricted to the same postcode sector as the
+subject property (e.g. "SW20 8" for "SW20 8AA"). Restaurant/cafe and
+nursery comparables deliberately use wider catchments without postcode-sector
+anchoring to reflect production behaviour for those segments.
 
 Usage (from project root):
     python tests/quick_test.py
@@ -205,28 +206,21 @@ for sample in SAMPLES:
 
         try:
             sector = postcode_sector(postcode)
-            if sample["business_type"] == "nursery":
-                _radius = 10_000
-                _postcode_prefix = None
-            elif sample["business_type"] == "restaurant_cafe":
-                _radius = 1_500
-                _postcode_prefix = None
-            else:
-                _radius = 1_000
-                _postcode_prefix = sector
+            _is_nursery = sample["business_type"] == "nursery"
+            _is_restaurant = sample["business_type"] == "restaurant_cafe"
+            _radius = 10_000 if _is_nursery else (3_000 if _is_restaurant else 1_000)
+            _size_band_pct = 75 if _is_restaurant else 50
+            _postcode_prefix = None if (_is_nursery or _is_restaurant) else sector
             raw_comps = get_comparables(
                 lat=lat,
                 lon=lon,
                 scat_codes=sample["scat_codes"],
                 radius_m=_radius,
                 nia_sqm=nia_sqm,
-                size_band_pct=50,
+                size_band_pct=_size_band_pct,
                 postcode_prefix=_postcode_prefix,
             )
-            if _postcode_prefix:
-                comp_source = f"sector:{_postcode_prefix}"
-            else:
-                comp_source = f"radius:{_radius}m"
+            comp_source = "radius_only" if (_is_nursery or _is_restaurant) else f"sector:{sector}"
 
             comps = dicts_to_comparables(raw_comps)
 
@@ -239,7 +233,7 @@ for sample in SAMPLES:
                 voa_rv=voa_rv,
                 subject_description=str(desc) if desc else "",
                 subject_sv_line_descs=sv_lines_map.get(str(uarn), ()),
-                subject_postcode_sector=sector,
+                subject_postcode_sector="" if (_is_nursery or _is_restaurant) else sector,
             )
 
             model_rv = result.get("estimated_rv")
@@ -285,6 +279,11 @@ for sample in SAMPLES:
                 "n_after_size": dbg.get("n_after_size_and_launderette"),
                 "n_after_dist": dbg.get("n_after_distance"),
                 "n_after_outlier": dbg.get("n_after_outlier_removal"),
+                # Nursery diagnostics
+                "pre_cap_comparable_count": dbg.get("pre_cap_comparable_count"),
+                "post_cap_comparable_count": dbg.get("post_cap_comparable_count"),
+                "min_distance_used": dbg.get("min_distance_used"),
+                "max_distance_used": dbg.get("max_distance_used"),
                 # Location tier
                 "location_tier": dbg.get("location_tier_used"),
                 "same_street_count": dbg.get("same_street_count"),
