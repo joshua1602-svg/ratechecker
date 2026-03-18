@@ -16,14 +16,18 @@ app = FastAPI(
     description="Business rates overassessment checking engine.",
 )
 
-# CORS — tighten allowed_origins in production via the CORS_ORIGINS env var
-_origins_env = os.environ.get("CORS_ORIGINS", "*")
-_origins = [o.strip() for o in _origins_env.split(",")] if _origins_env != "*" else ["*"]
+# CORS — open during development; tighten to specific origins before public launch
+_origins_env = os.environ.get("CORS_ORIGINS", "")
+if _origins_env:
+    _origins: list[str] = [o.strip() for o in _origins_env.split(",") if o.strip()]
+else:
+    _origins = ["*"]
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_origins,
-    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_credentials=False,
+    allow_methods=["*"],
     allow_headers=["*"],
 )
 
