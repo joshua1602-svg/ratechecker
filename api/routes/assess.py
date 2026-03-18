@@ -44,7 +44,15 @@ async def assess(req: AssessRequest) -> AssessResponse:
 
     # 3. Query comparables from VOA database
     _radius_m = 3000 if btype == "restaurant_cafe" else rules["filters"]["distance_m"]["fallback"]
-    _size_band_pct = 75 if btype == "restaurant_cafe" else rules["filters"]["size_band_pct_fallback"]
+    if btype == "restaurant_cafe":
+        _size_band_pct = 75
+    elif btype in ("retail", "hair_beauty"):
+        # ITZA normalization converts all shops to a Zone A equivalent rate, so
+        # size differences are handled analytically — not by excluding comparables.
+        # Use a very wide DB pre-filter and let the CSA do fine-grained selection.
+        _size_band_pct = 500
+    else:
+        _size_band_pct = rules["filters"]["size_band_pct_fallback"]
     rows = get_comparables(
         lat=lat,
         lon=lon,

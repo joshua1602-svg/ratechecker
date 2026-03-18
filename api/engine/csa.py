@@ -652,24 +652,34 @@ def run_csa(
     _is_restaurant = business_type == "restaurant_cafe"
 
     # --- Size-band filter ---
-    # Retail uses a tighter fallback band (±35%) than the general ±50% because
-    # retail micro-markets are more size-homogeneous; admitting very large or
-    # very small units adds noise rather than evidence.
     _retail_like = business_type in ("retail", "hair_beauty")
-    size_fallback_pct = 35 if _retail_like else rules["filters"]["size_band_pct_fallback"]
     if _is_nursery:
         # Nursery pools are sparse and dispersed; use a materially wider size
         # tolerance than retail so evidence is not dropped too early.
         size_fallback_pct = 75
+    elif _retail_like:
+        # ITZA converts all shops to a Zone A equivalent rate, so a 50 sqm
+        # subject is directly comparable to a 200 sqm comparable once the
+        # zoning formula is applied.  A tight ±35% band was excluding most
+        # high-street comparables for small units (e.g. 50 sqm → only
+        # 32–67 sqm allowed, missing every shop > 67 sqm in the street).
+        # Use a very wide fallback; rate clustering and outlier removal handle
+        # heterogeneous pools.
+        size_fallback_pct = 400
+    else:
+        size_fallback_pct = rules["filters"]["size_band_pct_fallback"]
 
     if _is_restaurant:
         # Restaurant/cafe units vary more by layout and use; use a broader
         # fixed size band to preserve enough catchment evidence.
         size_pct = _RESTAURANT_SIZE_BAND_PCT
         size_fallback_pct = _RESTAURANT_SIZE_BAND_PCT
+    elif _retail_like:
+        # Wide initial band for the same ITZA reason above.
+        size_pct = 200
     else:
         size_pct = rules["filters"]["size_band_pct"]
-        
+
         if business_type == "restaurant_cafe":
             size_pct = size_pct * 1.25
 
