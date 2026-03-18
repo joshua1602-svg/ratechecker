@@ -307,6 +307,20 @@ _RETAIL_CLUSTER_IQR_HIGH: float = 0.50     # IQR/median > 50% → cap at Low
 # cluster to represent at least this fraction of the pool before awarding High.
 _RETAIL_FULL_POOL_MIN_DOMINANT_SHARE: float = 0.45
 
+# Coherence bonus weight in retail cluster scoring.  A cluster's IQR/median
+# ratio is mapped linearly to [0,1]: ratio=0 → 1.0; ratio ≥ scale → 0.0.
+_RETAIL_COHERENCE_SCALE: float = 0.60
+
+# Same-street coherence gate: reject the same-street tier if the pool's
+# (max_rate − min_rate) / median exceeds this.  A wide spread means the street
+# has multiple competing pitch levels and should not be treated as one tone.
+_RETAIL_SAME_STREET_MAX_SPREAD: float = 0.70
+
+# full_pool selection guard: the largest cluster must cover at least this
+# fraction of the pool for a full_pool estimate to be defensible.  Below this
+# the pool is too fragmented to drive a point estimate.
+_RETAIL_FULL_POOL_SELECTION_MIN_DOMINANT_SHARE: float = 0.45
+
 
 def _extract_street_key(address: str) -> str | None:
     """
@@ -392,6 +406,29 @@ def _cluster_median_rate(cluster: list[_ClusterItem]) -> float:
     """Return the median rate of a cluster (sorted lower-half median)."""
     rates = sorted(r for _, _, r, _ in cluster)
     return rates[len(rates) // 2] if rates else 0.0
+
+
+def _cluster_coherence(cl: list[_ClusterItem]) -> float:
+    """
+    Coherence bonus in [0, 1] based on how tight the cluster's rate spread is.
+
+    Uses IQR/median as the spread measure, mapped linearly onto [0, 1]:
+        ratio = 0                    → 1.0  (perfectly tight)
+        ratio = _RETAIL_COHERENCE_SCALE → 0.0  (very wide)
+
+    Small clusters (< 2 items) are assumed internally coherent (return 1.0).
+    """
+    rates = sorted(r for _, _, r, _ in cl)
+    n = len(rates)
+    if n < 2:
+        return 1.0
+    med = rates[n // 2]
+    if med <= 0:
+        return 0.0
+    p25 = rates[max(0, int(n * 0.25))]
+    p75 = rates[min(n - 1, int(n * 0.75))]
+    iqr_ratio = (p75 - p25) / med
+    return max(0.0, 1.0 - iqr_ratio / _RETAIL_COHERENCE_SCALE)
 
 
 def _find_rate_clusters(
@@ -544,7 +581,7 @@ def _retail_select_cluster(
     independent evidence signals — no reference to the subject's VOA-implied
     rate at any point.
 
-    Scoring per cluster (all terms in [0, 1]; max total = 2.0):
+    Scoring per cluster (all terms in [0, 1]; max total = 3.0):
 
         density   = cluster weight / total pool weight
                     → rewards clusters with more / closer comparables
@@ -553,7 +590,11 @@ def _retail_select_cluster(
                     / max(subject_nia, cluster_median_nia)
                     → rewards clusters whose size profile matches the subject
 
-        score = density + size_sim
+        coherence = max(0, 1 − (IQR/median) / _RETAIL_COHERENCE_SCALE)
+                    → rewards internally tight rate bands; penalises noisy
+                    clusters with wide IQR relative to their median rate
+
+        score = density + size_sim + coherence
 
     Same-street soft boost: ×1.10 when the cluster contains ≥2 comps from
     the dominant nearby street.
@@ -584,7 +625,8 @@ def _retail_select_cluster(
         med_nia = nia_vals[len(nia_vals) // 2]
         denom = max(subject_nia, med_nia)
         size_sim = min(subject_nia, med_nia) / denom if denom > 0 else 0.0
-        score = density + size_sim
+        coherence = _cluster_coherence(cl)
+        score = density + size_sim + coherence
         # Same-street soft boost: 10% when cluster contains ≥2 comps from the
         # dominant nearby street.  Bias only.
         if same_street_anchor:
@@ -868,8 +910,29 @@ def run_csa(
             _sector_pool = []
             same_postcode_sector_count = 0
 
-        # Tier selection.
+        # Coherence pre-check for same-street tier: accept only when the pool's
+        # rate spread is within a defensible range.  A wide spread signals that
+        # the street itself contains multiple competing pitch levels and should
+        # not be collapsed into a single-tier pool without further scrutiny.
+        _ss_accepted = False
         if _raw_same_street_count >= _RETAIL_SAME_STREET_TIER_MIN and _dominant_street:
+            _ss_rates = sorted(r for _, _, r, _ in _street_buckets[_dominant_street])
+            _ss_n = len(_ss_rates)
+            _ss_med = _ss_rates[_ss_n // 2] if _ss_n else 0.0
+            _ss_spread = (
+                (_ss_rates[-1] - _ss_rates[0]) / _ss_med
+                if _ss_med > 0 and _ss_n >= 2
+                else 0.0
+            )
+            if _ss_spread <= _RETAIL_SAME_STREET_MAX_SPREAD:
+                _ss_accepted = True
+            else:
+                # Count-eligible but too incoherent; mark and fall through.
+                same_street_reverted = True
+                _ss_anchor = None
+
+        # Tier selection.
+        if _ss_accepted:
             pool = _street_buckets[_dominant_street]
             same_street_key = _dominant_street
             same_street_count = _raw_same_street_count
@@ -890,6 +953,18 @@ def run_csa(
         # Cluster the selected pool and apply conservative retail cluster selection.
         clusters = _find_rate_clusters(pool)
         cluster_count = len(clusters)
+
+        # full_pool fragmentation guard: before selecting a point estimate,
+        # verify that the pool has a single defensible dominant tone.  If the
+        # largest cluster covers less than _RETAIL_FULL_POOL_SELECTION_MIN_DOMINANT_SHARE
+        # of the pool, the evidence is too fragmented and no estimate is produced.
+        # This rejects at the selection stage — not merely in confidence labeling.
+        if _location_tier == "full_pool" and cluster_count >= 2:
+            _pool_size = len(pool)
+            _largest_cluster = max(len(cl) for cl in clusters)
+            _dominant_share = _largest_cluster / _pool_size if _pool_size > 0 else 1.0
+            if _dominant_share < _RETAIL_FULL_POOL_SELECTION_MIN_DOMINANT_SHARE:
+                return _insufficient_data()
 
         pool, selected_cluster_id, _selection_reason = _retail_select_cluster(
             clusters,
