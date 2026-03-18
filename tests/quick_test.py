@@ -316,6 +316,10 @@ for sample in SAMPLES:
                 "tier1_rate_median": dbg.get("tier1_rate_median"),
                 "tier2_count": dbg.get("tier2_count"),
                 "tier2_rate_median": dbg.get("tier2_rate_median"),
+                # Comp-set diagnostics
+                "num_comps_used": dbg.get("num_comps_used"),
+                "median_distance": dbg.get("median_distance"),
+                "size_ratio_median": dbg.get("size_ratio_median"),
                 "error": None,
             })
 

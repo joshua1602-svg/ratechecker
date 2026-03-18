@@ -1182,6 +1182,20 @@ def run_csa(
 
     saving_str = f"£{saving:,.0f}" if saving and saving > 0 else None
 
+    if _debug:
+        _debug["num_comps_used"] = len(rated)
+        if rated:
+            _dists = sorted(d for _, d, _, _ in rated)
+            _debug["median_distance"] = round(statistics.median(_dists), 1)
+            if nia_sqm and nia_sqm > 0:
+                _ratios = [c.nia_sqm / nia_sqm for c, _, _, _ in rated]
+                _debug["size_ratio_median"] = round(statistics.median(_ratios), 3)
+            else:
+                _debug["size_ratio_median"] = None
+        else:
+            _debug["median_distance"] = None
+            _debug["size_ratio_median"] = None
+
     result = {
         "signal": signal,
         "explanation": _explanation(signal, confidence, tone, estimated_rv, voa_rv, n_comps, business_type),
