@@ -297,6 +297,16 @@ _PRIME_PLAUSIBILITY_THRESHOLD: float = 1.25
 _CONFIDENCE_CAP_MEDIUM_GAP: float = 0.20
 _CONFIDENCE_CAP_LOW_GAP: float = 0.30
 
+# Retail cluster coherence: cap confidence when selected cluster's internal
+# IQR spread (= (p75 - p25) / median) is too wide — indicates a noisy or
+# mixed pool.  Independent of VOA implied rate.
+_RETAIL_CLUSTER_IQR_MEDIUM: float = 0.30   # IQR/median > 30% → cap at Medium (if High)
+_RETAIL_CLUSTER_IQR_HIGH: float = 0.50     # IQR/median > 50% → cap at Low
+
+# full_pool cluster dominance: when using full_pool, require the selected
+# cluster to represent at least this fraction of the pool before awarding High.
+_RETAIL_FULL_POOL_MIN_DOMINANT_SHARE: float = 0.45
+
 
 def _extract_street_key(address: str) -> str | None:
     """
@@ -524,61 +534,46 @@ def _select_rate_cluster(
 def _retail_select_cluster(
     clusters: list[list[_ClusterItem]],
     subject_nia: float,
-    subject_implied_rate: float | None,
     min_comps: int = _MIN_COMPS_FOR_VALUATION,
     same_street_anchor: str | None = None,
 ) -> tuple[list[_ClusterItem], int, str]:
     """
-    Conservative two-stage cluster selection for retail.
+    Evidence-quality cluster selection for retail.
 
-    Stage A — plausibility gate (when subject_implied_rate is known):
-        Reject any cluster whose median rate exceeds
-        subject_implied_rate × _PRIME_PLAUSIBILITY_THRESHOLD (1.25).
-        Last-resort exception: if ALL clusters are rejected, admit the
-        lowest-rate cluster to avoid spurious Insufficient Data when the
-        entire local market is genuinely prime.
+    Selects the cluster that best represents the local market using only
+    independent evidence signals — no reference to the subject's VOA-implied
+    rate at any point.
 
-    Stage B — selection among plausible clusters:
-        Score per cluster: density + nia_similarity + rate_proximity²
-        (same formula as _select_rate_cluster).
-        Tie-break: lower-rate cluster wins (conservative bias, FR3).
+    Scoring per cluster (all terms in [0, 1]; max total = 2.0):
 
-    No mixed-pool reblending (FR2):
-        If the best plausible cluster has fewer than min_comps comparables,
-        the next plausible cluster (by score) is tried.  If none has
-        sufficient comps the function returns ([], -2, reason) — the caller
-        must return an Insufficient Data result.
+        density   = cluster weight / total pool weight
+                    → rewards clusters with more / closer comparables
+
+        size_sim  = min(subject_nia, cluster_median_nia)
+                    / max(subject_nia, cluster_median_nia)
+                    → rewards clusters whose size profile matches the subject
+
+        score = density + size_sim
+
+    Same-street soft boost: ×1.10 when the cluster contains ≥2 comps from
+    the dominant nearby street.
+
+    Tie-break: lower-rate cluster wins (conservative downward bias).
+
+    No mixed-pool reblending:
+        If the best-scoring cluster has fewer than min_comps, the next is
+        tried.  If none has sufficient comps the function returns
+        ([], -2, reason) and the caller must return Insufficient Data.
 
     Single-cluster input:
-        Returned unchanged regardless of rate level; confidence capping in
-        run_csa will flag any rate mismatch.
+        Returned unchanged.
 
     Returns (items, cluster_idx, reason).
-        cluster_idx = -2  → no plausible cluster; caller should return
-                            _insufficient_data().
+        cluster_idx = -2  → no cluster has enough evidence.
     """
     if len(clusters) <= 1:
         return (clusters[0] if clusters else []), 0, "single_cluster"
 
-    # --- Stage A: plausibility gate ---
-    if subject_implied_rate and subject_implied_rate > 0:
-        upper_limit = subject_implied_rate * _PRIME_PLAUSIBILITY_THRESHOLD
-        plausible = [i for i, cl in enumerate(clusters)
-                     if _cluster_median_rate(cl) <= upper_limit]
-        if not plausible:
-            # All clusters too high — last resort: admit the lowest
-            lowest = min(range(len(clusters)),
-                         key=lambda i: _cluster_median_rate(clusters[i]))
-            plausible = [lowest]
-            last_resort = True
-        else:
-            last_resort = False
-    else:
-        # No implied rate — all clusters are candidates; bias downward in ties
-        plausible = list(range(len(clusters)))
-        last_resort = False
-
-    # --- Stage B: score and rank plausible clusters ---
     total_weight = sum(w for cl in clusters for _, _, _, w in cl)
 
     def _score_cluster(ci: int) -> float:
@@ -589,15 +584,9 @@ def _retail_select_cluster(
         med_nia = nia_vals[len(nia_vals) // 2]
         denom = max(subject_nia, med_nia)
         size_sim = min(subject_nia, med_nia) / denom if denom > 0 else 0.0
-        if subject_implied_rate and subject_implied_rate > 0:
-            rate_dist = (abs(_cluster_median_rate(cl) - subject_implied_rate)
-                         / subject_implied_rate)
-            rate_prox = max(0.0, 1.0 - rate_dist) ** 2
-        else:
-            rate_prox = 0.0
-        score = density + size_sim + rate_prox
+        score = density + size_sim
         # Same-street soft boost: 10% when cluster contains ≥2 comps from the
-        # dominant nearby street.  Bias only — does not override the gate.
+        # dominant nearby street.  Bias only.
         if same_street_anchor:
             ss_in_cluster = sum(
                 1 for c, _, _, _ in cl
@@ -609,19 +598,17 @@ def _retail_select_cluster(
 
     # Sort: highest score first; lower median rate breaks ties (downward bias)
     ranked = sorted(
-        plausible,
+        range(len(clusters)),
         key=lambda i: (-_score_cluster(i), _cluster_median_rate(clusters[i])),
     )
 
-    # Pick first plausible cluster with sufficient evidence
+    # Pick first cluster with sufficient evidence
     for ci in ranked:
         if len(clusters[ci]) >= min_comps:
-            reason = ("prime_last_resort" if last_resort
-                      else f"cluster_{ci}_selected")
-            return clusters[ci], ci, reason
+            return clusters[ci], ci, f"cluster_{ci}_selected"
 
-    # No plausible cluster has enough evidence
-    return [], -2, "all_plausible_clusters_too_thin"
+    # No cluster has enough evidence
+    return [], -2, "all_clusters_too_thin"
 
 
 # ---------------------------------------------------------------------------
@@ -818,7 +805,7 @@ def run_csa(
     same_street_count = 0
     same_street_reverted = False
     _selection_reason = "not_retail"
-    subject_implied_rate: float | None = None  # computed for retail; used for confidence cap
+    subject_implied_rate: float | None = None  # computed for retail; diagnostic only
     subject_retail_method: str = "itza_retail"  # overridden inside retail block
     _location_tier: str = "not_retail"          # set inside retail block; used for debug
     _raw_same_street_count: int = 0             # dominant-street count in post-outlier pool
@@ -886,20 +873,7 @@ def run_csa(
             pool = _street_buckets[_dominant_street]
             same_street_key = _dominant_street
             same_street_count = _raw_same_street_count
-            # Prime-rate safety: if same-street pool is materially above subject
-            # implied rate, revert to full pool (preserves existing FR4 behaviour).
-            if subject_implied_rate and subject_implied_rate > 0:
-                if _cluster_median_rate(pool) > subject_implied_rate * _PRIME_PLAUSIBILITY_THRESHOLD:
-                    pool = rated
-                    same_street_key = None
-                    same_street_count = 0
-                    same_street_reverted = True
-                    _ss_anchor = None
-                    _location_tier = "full_pool"
-                else:
-                    _location_tier = "same_street"
-            else:
-                _location_tier = "same_street"
+            _location_tier = "same_street"
 
         elif same_postcode_sector_count >= _RETAIL_SECTOR_TIER_MIN:
             pool = _sector_pool
@@ -920,7 +894,6 @@ def run_csa(
         pool, selected_cluster_id, _selection_reason = _retail_select_cluster(
             clusters,
             subject_nia=nia_sqm,
-            subject_implied_rate=subject_implied_rate,
             min_comps=_MIN_COMPS_FOR_VALUATION,
             same_street_anchor=_ss_anchor,
         )
@@ -1032,20 +1005,34 @@ def run_csa(
         confidence = "Low"
     _confidence_reason = "count_based"
 
-    # --- Retail confidence cap (rate-gap penalty) ---
-    # When the selected tone differs materially from the subject's implied rate,
-    # cap confidence regardless of comparable count.  This prevents an
-    # unjustified prime tone from being labelled High confidence.
-    if _retail_like and subject_implied_rate and subject_implied_rate > 0:
-        _rate_gap_pct = abs(tone - subject_implied_rate) / subject_implied_rate
-        if _rate_gap_pct > _CONFIDENCE_CAP_LOW_GAP:
-            if confidence != "Low":
-                _confidence_reason = f"capped_low_gap_{_rate_gap_pct:.0%}_vs_implied"
-                confidence = "Low"
-        elif _rate_gap_pct > _CONFIDENCE_CAP_MEDIUM_GAP:
-            if confidence == "High":
-                _confidence_reason = f"capped_medium_gap_{_rate_gap_pct:.0%}_vs_implied"
-                confidence = "Medium"
+    # --- Retail confidence cap (evidence quality) ---
+    # Downgrade based on independent market-evidence signals only.
+    # No reference to the subject's VOA-implied rate.
+    if _retail_like:
+        # (1) Cluster IQR spread: wide internal spread → noisy tone.
+        _cl_rates = sorted(rate_vals)
+        _n_cl = len(_cl_rates)
+        if _n_cl >= 2:
+            _cl_p25 = _cl_rates[max(0, int(_n_cl * 0.25))]
+            _cl_p75 = _cl_rates[min(_n_cl - 1, int(_n_cl * 0.75))]
+            _cl_med = _cl_rates[_n_cl // 2]
+            if _cl_med > 0:
+                _iqr_ratio = (_cl_p75 - _cl_p25) / _cl_med
+                if _iqr_ratio > _RETAIL_CLUSTER_IQR_HIGH:
+                    if confidence != "Low":
+                        _confidence_reason = f"capped_low_iqr_spread_{_iqr_ratio:.0%}"
+                        confidence = "Low"
+                elif _iqr_ratio > _RETAIL_CLUSTER_IQR_MEDIUM:
+                    if confidence == "High":
+                        _confidence_reason = f"capped_medium_iqr_spread_{_iqr_ratio:.0%}"
+                        confidence = "Medium"
+        # (2) full_pool with weak cluster dominance → Mixed evidence; cap at Medium.
+        if _location_tier == "full_pool" and n_after_outlier > 0:
+            _cluster_share = n_comps / n_after_outlier
+            if _cluster_share < _RETAIL_FULL_POOL_MIN_DOMINANT_SHARE:
+                if confidence == "High":
+                    _confidence_reason = f"capped_medium_full_pool_share_{_cluster_share:.0%}"
+                    confidence = "Medium"
     restaurant_rejection_reason: str | None = None
     restaurant_quality_gate_passed = True
     rate_distance_band: str | None = None
