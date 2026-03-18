@@ -1118,8 +1118,9 @@ def run_csa(
         _restaurant_implied_rate = (voa_rv / _s_itza) if (voa_rv and voa_rv > 0 and _s_itza > 0) else None
 
         if _restaurant_implied_rate is None:
-            restaurant_rejection_reason = "missing_subject_implied_rate"
-            restaurant_quality_gate_passed = False
+            # No voa_rv supplied — skip rate-distance gate and proceed on market
+            # evidence alone.  Mark diagnostically but do not hard-reject.
+            restaurant_rejection_reason = "no_voa_rv_rate_distance_skipped"
         else:
             _rate_distance_to_subject = abs(tone - _restaurant_implied_rate)
             if _rate_distance_to_subject <= _RESTAURANT_RATE_GAP_LIMIT_SOFT_MEDIUM:
