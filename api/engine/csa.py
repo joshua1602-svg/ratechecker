@@ -890,12 +890,14 @@ def run_csa(
 
     _median_distance_m: float | None = None
     if _is_restaurant:
-        _restaurant_distances = sorted(d for _, d, _, _ in rated)
-        _mid = len(_restaurant_distances) // 2
-        if len(_restaurant_distances) % 2:
-            _median_distance_m = _restaurant_distances[_mid]
-        else:
-            _median_distance_m = (_restaurant_distances[_mid - 1] + _restaurant_distances[_mid]) / 2
+        # Weighted median distance: proximity weights (already on each rated tuple)
+        # mean that 8 comps at 300 m outweigh 17 comps at 1 200 m, so the gate
+        # reflects the effective centre of evidence mass rather than the geometric
+        # midpoint of the distance distribution.
+        _median_distance_m = _weighted_median(
+            [d for _, d, _, _ in rated],
+            [w for _, _, _, w in rated],
+        )
         # Select gate threshold based on local restaurant density.
         if _before_hard_cap >= _RESTAURANT_DENSE_POOL_MIN:
             _median_gate_m = _RESTAURANT_MEDIAN_GATE_DENSE
