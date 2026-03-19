@@ -67,11 +67,11 @@ def get_comparables(
     )
 
     # DEBUG: count rows matching SCAT only, before any distance or size filter
+    _scat_in = ", ".join(str(int(s)) for s in scat_codes)
     try:
         with Session(engine) as _s:
             _scat_count = _s.execute(
-                text("SELECT COUNT(*) FROM voa_list_entries WHERE scat_code IN :sc AND rateable_value > 0"),
-                {"sc": tuple(scat_codes)},
+                text(f"SELECT COUNT(*) FROM voa_list_entries WHERE scat_code IN ({_scat_in}) AND rateable_value > 0"),
             ).scalar()
         log.warning("DB_DEBUG rows_matching_scat_only=%s", _scat_count)
     except Exception as _e:
@@ -107,7 +107,7 @@ def get_comparables(
         LEFT JOIN voa_sv_header svh ON le.uarn = svh.uarn
         JOIN postcode_coords pc ON le.postcode = pc.postcode
         WHERE
-            le.scat_code IN :scat_codes
+            le.scat_code IN ({_scat_in})
             AND le.composite_indicator IS DISTINCT FROM 'C'
             AND le.rateable_value > 0
             AND pc.latitude  BETWEEN :lat_lo AND :lat_hi
@@ -118,7 +118,6 @@ def get_comparables(
     """)
 
     params: dict[str, Any] = {
-        "scat_codes": tuple(scat_codes),
         "lat_lo": lat - lat_delta,
         "lat_hi": lat + lat_delta,
         "lon_lo": lon - lon_delta,
@@ -131,6 +130,9 @@ def get_comparables(
         # Append % here so the SQL literal never contains %, avoiding psycopg2
         # treating it as a parameter placeholder escape character.
         params["postcode_prefix"] = postcode_prefix + "%"
+
+    log.warning("DB_DEBUG sql_query=\n%s", sql.text)
+    log.warning("DB_DEBUG sql_params=%s", params)
 
     try:
         with Session(engine) as session:
