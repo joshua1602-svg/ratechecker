@@ -248,7 +248,24 @@ _NURSERY_DISTANCE_DECAY_ALPHA: float = 0.25   # vs global 0.5 — distance is sa
 _RESTAURANT_RADIUS_M: int = 3_000
 _RESTAURANT_SIZE_BAND_PCT: int = 75
 _RESTAURANT_MAX_DISTANCE_M: int = 1_500
-_RESTAURANT_MEDIAN_DISTANCE_M_MAX: int = 1_250  # relaxed from 1000: SW19-type subjects sit ~1km from their restaurant cluster
+# Median-distance gate — tiered by local restaurant density.
+# Density proxy: number of candidates within the 2500 m broad radius
+# (before the 1500 m hard cap).  More candidates → denser market →
+# tighter gate, because close evidence exists.  Fewer candidates →
+# rural or sparse market → looser gate, because the nearest stock is
+# genuinely further away.
+#
+#   Dense      ≥ 100 comps  →  1 000 m  (central London, major city centres)
+#   Medium      50–99 comps  →  1 300 m  (inner suburbs, e.g. SW19 Wimbledon)
+#   Small urban 20–49 comps  →  1 400 m  (market towns, small cities)
+#   Rural         < 20 comps  →  1 500 m  (= hard cap; gate effectively off)
+_RESTAURANT_DENSE_POOL_MIN:  int = 100
+_RESTAURANT_MEDIUM_POOL_MIN: int = 50
+_RESTAURANT_SMALL_POOL_MIN:  int = 20
+_RESTAURANT_MEDIAN_GATE_DENSE:  int = 1_000
+_RESTAURANT_MEDIAN_GATE_MEDIUM: int = 1_300
+_RESTAURANT_MEDIAN_GATE_SMALL:  int = 1_400
+_RESTAURANT_MEDIAN_GATE_RURAL:  int = 1_500
 _RESTAURANT_RATE_GAP_LIMIT_SOFT_MEDIUM: float = 20.0
 _RESTAURANT_RATE_GAP_LIMIT_SOFT_LOW: float = 35.0
 _RESTAURANT_RATE_GAP_LIMIT_HARD: float = 50.0
@@ -879,8 +896,20 @@ def run_csa(
             _median_distance_m = _restaurant_distances[_mid]
         else:
             _median_distance_m = (_restaurant_distances[_mid - 1] + _restaurant_distances[_mid]) / 2
-        _csa_log.warning("CSA_RESTAURANT_DEBUG stage=5_median_distance median_m=%s limit_m=%s", round(_median_distance_m, 1), _RESTAURANT_MEDIAN_DISTANCE_M_MAX)
-        if _median_distance_m > _RESTAURANT_MEDIAN_DISTANCE_M_MAX:
+        # Select gate threshold based on local restaurant density.
+        if _before_hard_cap >= _RESTAURANT_DENSE_POOL_MIN:
+            _median_gate_m = _RESTAURANT_MEDIAN_GATE_DENSE
+        elif _before_hard_cap >= _RESTAURANT_MEDIUM_POOL_MIN:
+            _median_gate_m = _RESTAURANT_MEDIAN_GATE_MEDIUM
+        elif _before_hard_cap >= _RESTAURANT_SMALL_POOL_MIN:
+            _median_gate_m = _RESTAURANT_MEDIAN_GATE_SMALL
+        else:
+            _median_gate_m = _RESTAURANT_MEDIAN_GATE_RURAL
+        _csa_log.warning(
+            "CSA_RESTAURANT_DEBUG stage=5_median_distance median_m=%s gate_m=%s density_count=%s",
+            round(_median_distance_m, 1), _median_gate_m, _before_hard_cap,
+        )
+        if _median_distance_m > _median_gate_m:
             _csa_log.warning("CSA_RESTAURANT_DEBUG stage=5_median_distance RETURNING_INSUFFICIENT median_too_far")
             return _insufficient_data()
 
