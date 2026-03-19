@@ -1,15 +1,19 @@
 """POST /assess — free quick-check endpoint."""
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter, HTTPException
 
 from api.captcha import verify_turnstile
-from api.db import get_comparables
+from api.db import DATABASE_URL, get_comparables
 from api.engine.csa import Comparable, run_csa
 from api.engine.geocoding import postcode_to_coords
 from api.engine.rules import csa_rules
 from api.engine.valuation import apply_adjustments
 from api.models import AdjustmentBreakdown, AdjustmentItem, AssessRequest, AssessResponse
+
+log = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -42,6 +46,15 @@ async def assess(req: AssessRequest) -> AssessResponse:
     rules = csa_rules()
     target_scats = _scat_codes(btype, rules)
 
+    # DEBUG — redact password from URL for safe logging
+    _db_url_safe = DATABASE_URL.split("@")[-1] if "@" in DATABASE_URL else DATABASE_URL
+    _db_type = "sqlite" if "sqlite" in DATABASE_URL else "postgres/supabase"
+    log.warning(
+        "ASSESS_DEBUG db_type=%s db_host=%s business_type=%s postcode=%s nia_sqm=%s voa_rv=%s scat_codes=%s",
+        _db_type, _db_url_safe, btype, req.property.postcode, req.property.nia_sqm,
+        req.property.voa_rv, target_scats,
+    )
+
     # 3. Query comparables from VOA database
     if btype == "restaurant_cafe":
         _radius_m = 3000
@@ -58,6 +71,10 @@ async def assess(req: AssessRequest) -> AssessResponse:
         _size_band_pct = 500
     else:
         _size_band_pct = rules["filters"]["size_band_pct_fallback"]
+    log.warning(
+        "ASSESS_DEBUG radius_m=%s size_band_pct=%s lat=%s lon=%s",
+        _radius_m, _size_band_pct, round(lat, 4), round(lon, 4),
+    )
     rows = get_comparables(
         lat=lat,
         lon=lon,
@@ -66,6 +83,7 @@ async def assess(req: AssessRequest) -> AssessResponse:
         nia_sqm=req.property.nia_sqm,
         size_band_pct=_size_band_pct,
     )
+    log.warning("ASSESS_DEBUG rows_from_db=%s", len(rows))
 
     # 4. Convert DB rows → Comparable objects
     comps = [
@@ -90,6 +108,7 @@ async def assess(req: AssessRequest) -> AssessResponse:
     # web form request — they would require a UARN lookup.  The defaults
     # ("" and ()) resolve to itza_retail, which is correct for standard
     # high-street retail and restaurant subjects.
+    log.warning("ASSESS_DEBUG comps_passed_to_csa=%s", len(comps))
     result = run_csa(
         comps=comps,
         lat=lat,
@@ -97,6 +116,11 @@ async def assess(req: AssessRequest) -> AssessResponse:
         business_type=btype,
         nia_sqm=req.property.nia_sqm,
         voa_rv=req.property.voa_rv,
+    )
+    log.warning(
+        "ASSESS_DEBUG csa_signal=%s comparable_count=%s insufficiency_reason=%s restaurant_rejection=%s",
+        result.get("signal"), result.get("comparable_count"),
+        result.get("insufficiency_reason"), result.get("restaurant_rejection_reason"),
     )
 
     # 6. Apply adjustment layer
