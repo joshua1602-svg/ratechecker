@@ -1187,7 +1187,11 @@ def run_csa(
             else:
                 rate_distance_band = "gt_50"
                 restaurant_rejection_reason = "rate_distance_gt_50"
-                restaurant_quality_gate_passed = False
+                # Rate distance > 50 is a confidence signal, not a hard block.
+                # Regression shows NIA drives RV; rate misalignment reflects
+                # genuine overassessment — exactly the cases the product targets.
+                confidence = "Low"
+                _confidence_reason = "restaurant_rate_distance_gt_50_cap_low"
 
         if len(rated) == 2 and _rate_distance_to_subject is not None and _rate_distance_to_subject > 35:
             restaurant_rejection_reason = "two_comp_rate_distance_gt35"
