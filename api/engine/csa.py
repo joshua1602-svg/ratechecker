@@ -263,6 +263,14 @@ _RETAIL_SIZE_BAND_PCT_FALLBACK: int = 200
 # to prevent very large dense clusters from overwhelming the tone estimate.
 _RETAIL_POST_CLUSTER_MAX_COMPS: int = 25
 
+# Retail size-similarity weight: log-ratio penalty applied multiplicatively to
+# per-comp weight so larger size mismatches contribute less to tone without
+# being cut from the pool.  Symmetric: same penalty for 2× too large or too small.
+#   ratio 1.5× → weight × 0.67;  ratio 2× → weight × 0.50;  ratio 3× → weight × 0.33.
+# Set to 1.0 — strong enough to make size the dominant driver, conservative
+# enough not to zero-out comps at the wide end of the size band.
+_RETAIL_SIZE_LOG_PENALTY: float = 1.0
+
 # Smooth distance decay: weight = 1 / (1 + alpha × distance_km).
 # alpha=0.5 → 0 km→1.0, 1 km→0.67, 2 km→0.5.
 # Replaces the old step-based proximity bands.
@@ -795,7 +803,16 @@ def run_csa(
         tier_counts[tier] = tier_counts.get(tier, 0) + 1
         w_prox = _proximity_weight(d, rules, alpha=_prox_alpha)
         w_src = _source_weight(c, rules)
-        rated.append((c, d, rate, w_prox * w_src))
+        # Retail: apply a log-ratio size-similarity penalty so comps whose NIA
+        # diverges from the subject contribute proportionally less to tone.
+        # Does not cut any comp from the pool — purely a soft weight adjustment.
+        # Other segments (nursery, restaurant) are unchanged.
+        if _retail_like and nia_sqm > 0 and c.nia_sqm > 0:
+            _size_log_ratio = abs(math.log(c.nia_sqm / nia_sqm))
+            w_size = math.exp(-_RETAIL_SIZE_LOG_PENALTY * _size_log_ratio)
+        else:
+            w_size = 1.0
+        rated.append((c, d, rate, w_prox * w_src * w_size))
 
     if not rated:
         _csa_log.warning("CSA_RESTAURANT_DEBUG stage=3_rate_extraction RETURNING_INSUFFICIENT rated=0 excluded_no_rate=%s", excluded_no_rate)
