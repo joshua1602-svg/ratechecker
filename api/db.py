@@ -132,6 +132,9 @@ def get_comparables(
         # treating it as a parameter placeholder escape character.
         params["postcode_prefix"] = postcode_prefix + "%"
 
+    log.warning("DB_DEBUG sql_query=\n%s", sql.text)
+    log.warning("DB_DEBUG sql_params=%s", params)
+
     try:
         with Session(engine) as session:
             rows = session.execute(sql, params).fetchall()
