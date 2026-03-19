@@ -12,9 +12,12 @@ allowing the API to return "Insufficient Data" cleanly.
 """
 from __future__ import annotations
 
+import logging
 import math
 import os
 from typing import Any
+
+log = logging.getLogger(__name__)
 
 from dotenv import load_dotenv
 from sqlalchemy import create_engine, text
@@ -57,6 +60,22 @@ def get_comparables(
     """
     if not scat_codes:
         return []
+
+    log.warning(
+        "DB_DEBUG get_comparables lat=%s lon=%s scat_codes=%s radius_m=%s nia_sqm=%s size_band_pct=%s",
+        round(lat, 4), round(lon, 4), scat_codes, radius_m, nia_sqm, size_band_pct,
+    )
+
+    # DEBUG: count rows matching SCAT only, before any distance or size filter
+    try:
+        with Session(engine) as _s:
+            _scat_count = _s.execute(
+                text("SELECT COUNT(*) FROM voa_list_entries WHERE scat_code IN :sc AND rateable_value > 0"),
+                {"sc": tuple(scat_codes)},
+            ).scalar()
+        log.warning("DB_DEBUG rows_matching_scat_only=%s", _scat_count)
+    except Exception as _e:
+        log.warning("DB_DEBUG rows_matching_scat_only=ERROR %s", _e)
 
     # Bounding-box deltas (1° lat ≈ 111 km; 1° lon ≈ 111 km × cos(lat))
     lat_delta = radius_m / 111_000
@@ -117,9 +136,12 @@ def get_comparables(
         with Session(engine) as session:
             rows = session.execute(sql, params).fetchall()
         results = [dict(r._mapping) for r in rows]
-    except Exception:
+    except Exception as _e:
         # Database not yet populated — caller will return "Insufficient Data"
+        log.warning("DB_DEBUG query_exception=%s", _e)
         return []
+
+    log.warning("DB_DEBUG rows_after_bbox_and_size_filter=%s", len(results))
 
     # Filter to comparables within ±30% of the median RV/sqm
     rv_psm = [r["rv"] / r["nia_sqm"] for r in results if r["nia_sqm"] and r["nia_sqm"] > 0]
@@ -130,6 +152,7 @@ def get_comparables(
         lo, hi = median * 0.70, median * 1.30
         results = [r for r in results if r["nia_sqm"] and lo <= r["rv"] / r["nia_sqm"] <= hi]
 
+    log.warning("DB_DEBUG rows_after_outlier_filter=%s (final returned)", len(results))
     return results
 
 

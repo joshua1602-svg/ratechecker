@@ -41,6 +41,7 @@ async def assess(req: AssessRequest) -> AssessResponse:
     if coords is None:
         raise HTTPException(status_code=422, detail="Could not geocode postcode — check it is a valid UK postcode")
     lat, lon = coords
+    log.warning("ASSESS_DEBUG postcode=%s geocoded_lat=%s geocoded_lon=%s", req.property.postcode, round(lat, 4), round(lon, 4))
 
     btype = req.property.business_type.value
     rules = csa_rules()
