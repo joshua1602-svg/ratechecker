@@ -155,10 +155,15 @@ def itza_from_geometry(width_m: float, depth_m: float, zone_depth_m: float = 6.1
 # Weight helpers
 # ---------------------------------------------------------------------------
 
-def _proximity_weight(distance_m: float, rules: dict) -> float:  # noqa: ARG001
-    """Smooth inverse-distance weight: 1 / (1 + alpha × distance_km)."""
+def _proximity_weight(distance_m: float, rules: dict, alpha: float | None = None) -> float:  # noqa: ARG001
+    """Smooth inverse-distance weight: 1 / (1 + alpha × distance_km).
+
+    alpha defaults to _DISTANCE_DECAY_ALPHA (0.5).  Pass a smaller value for
+    segments where distance is a sanity filter only, not a pricing signal.
+    """
+    a = alpha if alpha is not None else _DISTANCE_DECAY_ALPHA
     distance_km = distance_m / 1000.0
-    return 1.0 / (1.0 + _DISTANCE_DECAY_ALPHA * distance_km)
+    return 1.0 / (1.0 + a * distance_km)
 
 
 def _source_weight(comp: Comparable, rules: dict) -> float:
@@ -234,6 +239,12 @@ _MIN_COMPS_FOR_VALUATION: int = 3
 _NURSERY_RADIUS_M: int = 10_000
 _NURSERY_MIN_COMPS: int = 2
 _NURSERY_NEAREST_CAP: int = 10
+# Nursery size-band and distance-decay calibration.
+# Nursery is sparse and size-led; use a generous initial band and a flatter
+# distance decay so all comps within the search radius contribute equally.
+_NURSERY_SIZE_BAND_PCT: int = 75
+_NURSERY_SIZE_BAND_PCT_FALLBACK: int = 100
+_NURSERY_DISTANCE_DECAY_ALPHA: float = 0.25   # vs global 0.5 — distance is sanity filter only
 _RESTAURANT_RADIUS_M: int = 3_000
 _RESTAURANT_SIZE_BAND_PCT: int = 75
 _RESTAURANT_MAX_DISTANCE_M: int = 1_500
@@ -241,6 +252,16 @@ _RESTAURANT_MEDIAN_DISTANCE_M_MAX: int = 1_000
 _RESTAURANT_RATE_GAP_LIMIT_SOFT_MEDIUM: float = 20.0
 _RESTAURANT_RATE_GAP_LIMIT_SOFT_LOW: float = 35.0
 _RESTAURANT_RATE_GAP_LIMIT_HARD: float = 50.0
+# Restaurant pool cap: in dense cities, limit pool after outlier trim to
+# prevent a single dense cluster from dominating the tone.
+_RESTAURANT_POOL_CAP: int = 30
+# Retail size-band calibration: tighter than before to reduce mixed-size
+# distortion; ITZA normalization still handles rate comparability across sizes.
+_RETAIL_SIZE_BAND_PCT: int = 100
+_RETAIL_SIZE_BAND_PCT_FALLBACK: int = 200
+# Retail post-cluster comp cap: after cluster selection, keep top N by weight
+# to prevent very large dense clusters from overwhelming the tone estimate.
+_RETAIL_POST_CLUSTER_MAX_COMPS: int = 25
 
 # Smooth distance decay: weight = 1 / (1 + alpha × distance_km).
 # alpha=0.5 → 0 km→1.0, 1 km→0.67, 2 km→0.5.
@@ -685,35 +706,26 @@ def run_csa(
 
     # --- Size-band filter ---
     _retail_like = business_type in ("retail", "hair_beauty")
-    if _is_nursery:
-        # Nursery pools are sparse and dispersed; use a materially wider size
-        # tolerance than retail so evidence is not dropped too early.
-        size_fallback_pct = 75
-    elif _retail_like:
-        # ITZA converts all shops to a Zone A equivalent rate, so a 50 sqm
-        # subject is directly comparable to a 200 sqm comparable once the
-        # zoning formula is applied.  A tight ±35% band was excluding most
-        # high-street comparables for small units (e.g. 50 sqm → only
-        # 32–67 sqm allowed, missing every shop > 67 sqm in the street).
-        # Use a very wide fallback; rate clustering and outlier removal handle
-        # heterogeneous pools.
-        size_fallback_pct = 400
-    else:
-        size_fallback_pct = rules["filters"]["size_band_pct_fallback"]
-
     if _is_restaurant:
-        # Restaurant/cafe units vary more by layout and use; use a broader
-        # fixed size band to preserve enough catchment evidence.
-        size_pct = _RESTAURANT_SIZE_BAND_PCT
+        # Restaurant/cafe units vary in layout; keep a moderate fixed band.
+        size_pct = _RESTAURANT_SIZE_BAND_PCT          # 75%
         size_fallback_pct = _RESTAURANT_SIZE_BAND_PCT
+    elif _is_nursery:
+        # Nursery is sparse and size-led; start generous, widen if thin.
+        # Wider than the generic yaml default (30%) to preserve evidence.
+        size_pct = _NURSERY_SIZE_BAND_PCT             # 75%
+        size_fallback_pct = _NURSERY_SIZE_BAND_PCT_FALLBACK  # 100%
     elif _retail_like:
-        # Wide initial band for the same ITZA reason above.
-        size_pct = 200
+        # ITZA normalization converts all shops to a Zone A equivalent rate,
+        # so a 50 sqm unit is directly comparable to a 200 sqm unit once the
+        # zoning formula is applied.  Keep a moderately wide initial band;
+        # the post-cluster cap (_RETAIL_POST_CLUSTER_MAX_COMPS) handles density
+        # distortion without requiring an extremely wide DB pre-filter.
+        size_pct = _RETAIL_SIZE_BAND_PCT              # 100% (was 200%)
+        size_fallback_pct = _RETAIL_SIZE_BAND_PCT_FALLBACK  # 200% (was 400%)
     else:
         size_pct = rules["filters"]["size_band_pct"]
-
-        if business_type == "restaurant_cafe":
-            size_pct = size_pct * 1.25
+        size_fallback_pct = rules["filters"]["size_band_pct_fallback"]
 
     filtered = _filter_size(comps, nia_sqm, size_pct)
     if len(filtered) < rules["confidence"]["low_if_min_comps"]:
@@ -766,6 +778,10 @@ def run_csa(
     rated: list[tuple[Comparable, float, float, float]] = []  # (comp, dist, rate, weight)
     tier_counts: dict[str, int] = {"unadjusted_psm": 0, "rv_over_nia": 0}
     excluded_no_rate = 0
+    # Nursery: use a flatter distance decay so all comps within the search
+    # radius are treated more equally — distance is a sanity filter, not a
+    # pricing signal for a sparse segment.
+    _prox_alpha = _NURSERY_DISTANCE_DECAY_ALPHA if _is_nursery else None
     for c, d in with_dist:
         rate, tier = c.normalised_rate()
         # Effective-rate override for itza_retail (both tier-1 and tier-2).
@@ -777,7 +793,7 @@ def run_csa(
             excluded_no_rate += 1
             continue
         tier_counts[tier] = tier_counts.get(tier, 0) + 1
-        w_prox = _proximity_weight(d, rules)
+        w_prox = _proximity_weight(d, rules, alpha=_prox_alpha)
         w_src = _source_weight(c, rules)
         rated.append((c, d, rate, w_prox * w_src))
 
@@ -796,9 +812,11 @@ def run_csa(
     pre_trim_comparable_count = len(rated)
 
     # --- Outlier removal ---
-    # Nursery: light-touch trimming only on larger pools.
+    # Nursery: light-touch 5th–95th percentile trim.  Apply consistently from
+    # pool size ≥ 3 (at n=3 this removes nothing; at n=10+ it clips one tail
+    # entry each side).  Conservative: avoids over-depleting thin nursery pools.
     if _is_nursery:
-        if len(rated) >= 5:
+        if len(rated) >= 3:
             rates_sorted = sorted(r for _, _, r, _ in rated)
             n = len(rates_sorted)
             lo = rates_sorted[max(0, int(n * 0.05))]
@@ -831,6 +849,10 @@ def run_csa(
 
     if _is_restaurant:
         _csa_log.warning("CSA_RESTAURANT_DEBUG stage=4_outlier_trim rated_after_trim=%s", len(rated))
+        # In dense cities a restaurant pool can be 50–100 comps; cap after trim
+        # to prevent one dense pitch cluster from dominating the tone estimate.
+        if len(rated) > _RESTAURANT_POOL_CAP:
+            rated = sorted(rated, key=lambda x: x[1])[:_RESTAURANT_POOL_CAP]
 
     _median_distance_m: float | None = None
     if _is_restaurant:
@@ -993,6 +1015,10 @@ def run_csa(
             same_street_anchor=_ss_anchor,
         )
         rated = pool
+        # Retail: after cluster selection, cap the pool to limit large dense
+        # cluster distortion.  Keep highest-weight comps (proximity × source).
+        if len(rated) > _RETAIL_POST_CLUSTER_MAX_COMPS:
+            rated = sorted(rated, key=lambda x: x[3], reverse=True)[:_RETAIL_POST_CLUSTER_MAX_COMPS]
 
     if not rated:
         return _insufficient_data()
@@ -1187,7 +1213,11 @@ def run_csa(
             else:
                 rate_distance_band = "gt_50"
                 restaurant_rejection_reason = "rate_distance_gt_50"
-                restaurant_quality_gate_passed = False
+                # Rate distance > 50 is a confidence signal, not a hard block.
+                # Regression shows NIA drives RV; rate misalignment reflects
+                # genuine overassessment — exactly the cases the product targets.
+                confidence = "Low"
+                _confidence_reason = "restaurant_rate_distance_gt_50_cap_low"
 
         if len(rated) == 2 and _rate_distance_to_subject is not None and _rate_distance_to_subject > 35:
             restaurant_rejection_reason = "two_comp_rate_distance_gt35"
