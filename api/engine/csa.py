@@ -13,9 +13,12 @@ Implements the rules defined in rules/csa.yaml:
 """
 from __future__ import annotations
 
+import logging
 import math
 import re
 import statistics
+
+_csa_log = logging.getLogger(__name__)
 from dataclasses import dataclass, field
 from typing import List, Optional
 
@@ -723,6 +726,9 @@ def run_csa(
         if not (c.scat_code == 249 and "LAUNDERETTE" in c.description.upper())
     ]
 
+    if _is_restaurant:
+        _csa_log.warning("CSA_RESTAURANT_DEBUG stage=1_input_to_csa comps_in=%s filtered_after_size=%s size_pct=%s", len(comps), len(filtered), size_pct)
+
     # --- Distance filter ---
     if business_type == "nursery":
         max_radius = _NURSERY_RADIUS_M
@@ -738,9 +744,12 @@ def run_csa(
 
     if _is_restaurant:
         # Hard local guardrail for restaurants: keep only comparables within 1.5 km.
+        _before_hard_cap = len(with_dist)
         with_dist = [(c, d) for c, d in with_dist if d <= _RESTAURANT_MAX_DISTANCE_M]
+        _csa_log.warning("CSA_RESTAURANT_DEBUG stage=2_distance_filter after_radius=%s after_1500m_hard_cap=%s max_radius_used=%s", _before_hard_cap, len(with_dist), max_radius)
 
     if not with_dist:
+        _csa_log.warning("CSA_RESTAURANT_DEBUG stage=2_distance_filter RETURNING_INSUFFICIENT with_dist=0")
         return _insufficient_data()
 
     # --- Extract effective Zone A rates and combined weights ---
@@ -773,10 +782,15 @@ def run_csa(
         rated.append((c, d, rate, w_prox * w_src))
 
     if not rated:
+        _csa_log.warning("CSA_RESTAURANT_DEBUG stage=3_rate_extraction RETURNING_INSUFFICIENT rated=0 excluded_no_rate=%s", excluded_no_rate)
         return _insufficient_data()
+
+    if _is_restaurant:
+        _csa_log.warning("CSA_RESTAURANT_DEBUG stage=3_rate_extraction rated=%s excluded_no_rate=%s", len(rated), excluded_no_rate)
 
     # Restaurant path is strict: do not broaden/fallback when evidence is thin.
     if _is_restaurant and len(rated) < _MIN_COMPS_FOR_VALUATION:
+        _csa_log.warning("CSA_RESTAURANT_DEBUG stage=3_rate_extraction RETURNING_INSUFFICIENT rated=%s < MIN_COMPS=%s", len(rated), _MIN_COMPS_FOR_VALUATION)
         return _insufficient_data()
 
     pre_trim_comparable_count = len(rated)
@@ -812,7 +826,11 @@ def run_csa(
         rated = [(c, d, r, w) for c, d, r, w in rated if lo <= r <= hi]
 
     if not rated:
+        _csa_log.warning("CSA_RESTAURANT_DEBUG stage=4_outlier_trim RETURNING_INSUFFICIENT rated=0")
         return _insufficient_data()
+
+    if _is_restaurant:
+        _csa_log.warning("CSA_RESTAURANT_DEBUG stage=4_outlier_trim rated_after_trim=%s", len(rated))
 
     _median_distance_m: float | None = None
     if _is_restaurant:
@@ -822,7 +840,9 @@ def run_csa(
             _median_distance_m = _restaurant_distances[_mid]
         else:
             _median_distance_m = (_restaurant_distances[_mid - 1] + _restaurant_distances[_mid]) / 2
+        _csa_log.warning("CSA_RESTAURANT_DEBUG stage=5_median_distance median_m=%s limit_m=%s", round(_median_distance_m, 1), _RESTAURANT_MEDIAN_DISTANCE_M_MAX)
         if _median_distance_m > _RESTAURANT_MEDIAN_DISTANCE_M_MAX:
+            _csa_log.warning("CSA_RESTAURANT_DEBUG stage=5_median_distance RETURNING_INSUFFICIENT median_too_far")
             return _insufficient_data()
 
     # --- Nursery nearest-N cap ---
@@ -1182,7 +1202,14 @@ def run_csa(
             _debug["restaurant_rejection_reason"] = restaurant_rejection_reason
             _debug["restaurant_quality_gate_passed"] = restaurant_quality_gate_passed
 
+        _csa_log.warning(
+            "CSA_RESTAURANT_DEBUG stage=6_quality_gate passed=%s rejection_reason=%s rated_final=%s tone=%s rate_distance=%s",
+            restaurant_quality_gate_passed, restaurant_rejection_reason, len(rated),
+            round(tone, 2),
+            round(_rate_distance_to_subject, 2) if _rate_distance_to_subject is not None else None,
+        )
         if not restaurant_quality_gate_passed:
+            _csa_log.warning("CSA_RESTAURANT_DEBUG stage=6_quality_gate RETURNING_INSUFFICIENT reason=%s", restaurant_rejection_reason)
             _ins = _insufficient_data()
             if _debug:
                 _ins["_debug"] = _debug
