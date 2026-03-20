@@ -1,7 +1,6 @@
 """POST /report/simplified and /report/evidence — PDF generation endpoints."""
 from __future__ import annotations
 
-import json
 import logging
 import re
 from copy import deepcopy
@@ -9,10 +8,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Body, HTTPException, Request
 from fastapi.responses import JSONResponse, Response
-from pydantic import ValidationError
-
 from api.models import SimplifiedReportRequest, SimplifiedReportResponse
 from api.reports.pdf_generator import generate_evidence_pack, generate_simplified_report
 
@@ -124,31 +121,14 @@ def _merge_defaults(defaults: dict[str, Any], overrides: dict[str, Any]) -> dict
     return merged
 
 
-async def _resolve_simplified_report_payload(request: Request) -> tuple[dict[str, Any], str, str]:
+def _resolve_simplified_report_payload(payload: SimplifiedReportRequest | None) -> tuple[dict[str, Any], str, str]:
     """Return merged report data plus a mode label for logging/response metadata."""
     defaults = build_default_report_data()
-    raw_body = await request.body()
 
-    if not raw_body or not raw_body.strip():
+    if payload is None:
         return defaults, "full_defaults", "No request body supplied; used placeholder defaults."
 
-    try:
-        parsed = SimplifiedReportRequest.model_validate_json(raw_body)
-    except ValidationError as exc:
-        logger.warning(
-            "Simplified report request could not be parsed; using default payload. errors=%s body=%r",
-            exc.errors(),
-            raw_body[:500],
-        )
-        return defaults, "full_defaults", "Invalid JSON or schema mismatch; used placeholder defaults."
-    except json.JSONDecodeError:
-        logger.warning(
-            "Simplified report request body contained invalid JSON; using default payload. body=%r",
-            raw_body[:500],
-        )
-        return defaults, "full_defaults", "Invalid JSON body; used placeholder defaults."
-
-    provided = parsed.model_dump(exclude_none=True)
+    provided = payload.model_dump(exclude_none=True, exclude_unset=True)
     if not provided:
         return defaults, "full_defaults", "Empty JSON payload supplied; used placeholder defaults."
 
@@ -171,22 +151,11 @@ def _persist_pdf(filename: str, pdf_bytes: bytes) -> Path:
     return file_path
 
 
-@router.post(
-    "/report/simplified",
-    response_model=SimplifiedReportResponse,
-    openapi_extra={
-        "requestBody": {
-            "required": False,
-            "content": {
-                "application/json": {
-                    "schema": SimplifiedReportRequest.model_json_schema(),
-                }
-            },
-        }
-    },
-)
-async def simplified_report(request: Request) -> JSONResponse:
-    report_data, mode_used, debug_message = await _resolve_simplified_report_payload(request)
+@router.post("/report/simplified", response_model=SimplifiedReportResponse)
+async def simplified_report(
+    payload: SimplifiedReportRequest | None = Body(default=None),
+) -> JSONResponse:
+    report_data, mode_used, debug_message = _resolve_simplified_report_payload(payload)
     logger.info(
         "Generating simplified report. mode_used=%s business_name=%s comparables=%s",
         mode_used,

@@ -3,7 +3,7 @@ from __future__ import annotations
 from enum import Enum
 from typing import Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class BusinessType(str, Enum):
@@ -114,18 +114,6 @@ class PurchaseRequest(BaseModel):
     form_data: PurchaseFormData
 
 
-
-
-class SimplifiedComparableInput(BaseModel):
-    address: Optional[str] = None
-    nia_sqm: Optional[float] = None
-    rv: Optional[float] = None
-    rate_psm: Optional[float] = None
-    layout_similarity_score: Optional[float] = None
-    floor_config: Optional[str] = None
-    uarn: Optional[str] = None
-
-
 class SimplifiedReportRequest(BaseModel):
     business_name: Optional[str] = None
     property_address: Optional[str] = None
@@ -138,7 +126,7 @@ class SimplifiedReportRequest(BaseModel):
     annual_saving_low: Optional[float] = None
     annual_saving_high: Optional[float] = None
     case_strength: Optional[str] = None
-    comparables: Optional[list[SimplifiedComparableInput]] = None
+    comparables: list[dict] = Field(default_factory=list)
     comp_count: Optional[int] = None
     layout_adjustment_applied: Optional[bool] = None
     summary_text: Optional[str] = None
