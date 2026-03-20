@@ -3,8 +3,10 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import Any
 
 from jinja2 import Environment, FileSystemLoader
+
 try:
     from weasyprint import HTML
 except ImportError as e:
@@ -13,9 +15,8 @@ except ImportError as e:
         f"dependencies are installed. Original error: {e}"
     )
 
-REPORT_TEMPLATE_DIR = os.getenv(
-    "REPORT_TEMPLATE_DIR", "src/templates/reports"
-)
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+_DEFAULT_TEMPLATE_DIR = _REPO_ROOT / "src" / "templates" / "reports"
 
 _SIMPLIFIED_REQUIRED = [
     "business_name",
@@ -69,6 +70,41 @@ def _validate_evidence_conditionals(report_data: dict) -> None:
             )
 
 
+def _resolve_template_dir() -> Path:
+    """Resolve template dir from env or fall back to the repo-local default."""
+    configured_dir = os.getenv("REPORT_TEMPLATE_DIR")
+    if configured_dir:
+        candidate = Path(configured_dir)
+        if not candidate.is_absolute():
+            candidate = (_REPO_ROOT / candidate).resolve()
+        return candidate
+    return _DEFAULT_TEMPLATE_DIR
+
+
+def _normalise_comparable(comp: dict[str, Any]) -> dict[str, Any]:
+    """Populate optional template fields so report rendering is resilient."""
+    normalised = dict(comp)
+
+    rv = normalised.get("rv")
+    nia_sqm = normalised.get("nia_sqm")
+    if normalised.get("rate_psm") is None and rv is not None and nia_sqm:
+        normalised["rate_psm"] = round(rv / nia_sqm, 2)
+
+    similarity = normalised.get("layout_similarity_score")
+    normalised["layout_similarity_score"] = float(similarity or 0)
+
+    adjusted_weight = normalised.get("adjusted_weight")
+    if normalised.get("weight_pct") is None:
+        if adjusted_weight is not None:
+            normalised["weight_pct"] = round(float(adjusted_weight) * 100, 1)
+        else:
+            normalised["weight_pct"] = ""
+
+    normalised.setdefault("floor_config", "")
+    normalised.setdefault("uarn", "")
+    return normalised
+
+
 def _derive_fields(report_data: dict) -> dict:
     """Compute derived fields and return an augmented copy."""
     data = dict(report_data)
@@ -91,12 +127,10 @@ def _derive_fields(report_data: dict) -> dict:
     # Per-comparable rate_psm
     comps = data.get("comparables")
     if comps:
-        for comp in comps:
-            if isinstance(comp, dict):
-                c_rv = comp.get("rv")
-                c_nia = comp.get("nia_sqm")
-                if c_rv and c_nia:
-                    comp.setdefault("rate_psm", round(c_rv / c_nia, 2))
+        data["comparables"] = [
+            _normalise_comparable(comp) if isinstance(comp, dict) else comp
+            for comp in comps
+        ]
 
     # Submission narrative (evidence pack)
     if data.get("modelled_rv") is not None:
@@ -123,7 +157,7 @@ def _derive_fields(report_data: dict) -> dict:
 
 def _get_env() -> Environment:
     """Build a Jinja2 environment pointing at the configured template dir."""
-    template_path = Path(REPORT_TEMPLATE_DIR)
+    template_path = _resolve_template_dir()
     return Environment(
         loader=FileSystemLoader(str(template_path)),
         autoescape=True,

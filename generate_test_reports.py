@@ -2,9 +2,12 @@
 
 import sys
 import os
+from pathlib import Path
 sys.path.insert(0, os.path.dirname(__file__))
 
-os.environ["REPORT_TEMPLATE_DIR"] = "templates/reports"
+os.environ["REPORT_TEMPLATE_DIR"] = str(
+    Path(__file__).resolve().parent / "src" / "templates" / "reports"
+)
 
 from api.reports.pdf_generator import (
     generate_simplified_report, 

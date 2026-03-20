@@ -37,6 +37,17 @@ app.include_router(purchase_router)
 app.include_router(reports_router)
 
 
+@app.get("/", tags=["ops"])
+def root() -> dict:
+    """Simple root endpoint for platform health checks and operator sanity checks."""
+    return {
+        "service": "RateChecker API",
+        "status": "ok",
+        "docs_url": "/docs",
+        "health_url": "/health",
+    }
+
+
 @app.on_event("startup")
 def startup() -> None:
     """Create any missing runtime indexes on the VOA tables."""
