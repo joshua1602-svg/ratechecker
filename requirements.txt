@@ -8,6 +8,9 @@ stripe>=10.0.0
 python-dotenv>=1.0.0
 # PostgreSQL driver (required for Supabase)
 psycopg2-binary>=2.9.9
+# PDF report generation
+jinja2>=3.1.0
+weasyprint>=60.0
 # Ingest pipeline
 pandas>=2.0.0
 numpy>=1.26.0

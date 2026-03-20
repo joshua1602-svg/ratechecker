@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>RateChecker — Evidence Pack</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 40px; color: #222; }
+    h1 { color: #1a3c6e; font-size: 22px; }
+    h2 { color: #1a3c6e; font-size: 16px; border-bottom: 1px solid #ccc; padding-bottom: 4px; }
+    h3 { color: #333; font-size: 14px; }
+    table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
+    th, td { border: 1px solid #ccc; padding: 6px 10px; text-align: left; font-size: 13px; }
+    th { background: #f0f4fa; }
+    .summary-box { background: #f7f9fc; border: 1px solid #d0d8e8; padding: 16px; margin-bottom: 20px; border-radius: 4px; }
+    .narrative { background: #fffbe6; border: 1px solid #e6d880; padding: 14px; margin-bottom: 20px; border-radius: 4px; font-size: 13px; line-height: 1.5; }
+    .label { font-weight: bold; color: #555; }
+    .value { font-size: 15px; }
+    .section { margin-bottom: 24px; }
+    .footer { margin-top: 40px; font-size: 11px; color: #888; border-top: 1px solid #ddd; padding-top: 8px; }
+  </style>
+</head>
+<body>
+  <h1>RateChecker — Evidence Pack</h1>
+
+  <div class="summary-box">
+    <p><span class="label">Business:</span> <span class="value">{{ business_name }}</span></p>
+    <p><span class="label">Address:</span> <span class="value">{{ property_address }}, {{ postcode }}</span></p>
+    <p><span class="label">UPRN:</span> <span class="value">{{ uprn }}</span></p>
+    <p><span class="label">Business Type:</span> <span class="value">{{ business_type }}</span></p>
+    <p><span class="label">Date Prepared:</span> <span class="value">{{ date_prepared }}</span></p>
+    <p><span class="label">VOA Description:</span> <span class="value">{{ voa_description }}</span></p>
+  </div>
+
+  {% if submission_narrative is defined and submission_narrative %}
+  <div class="narrative">
+    <strong>Summary:</strong> {{ submission_narrative }}
+  </div>
+  {% endif %}
+
+  <h2>Property Details</h2>
+  <table>
+    <tr><th>Net Internal Area (sqm)</th><td>{{ nia_sqm }}</td></tr>
+    <tr><th>Current VOA Rateable Value</th><td>£{{ "%.0f"|format(voa_rv) }}</td></tr>
+    {% if rate_psm is defined and rate_psm is not none %}
+    <tr><th>VOA Rate per sqm</th><td>£{{ rate_psm }}</td></tr>
+    {% endif %}
+    <tr><th>Modelled RV</th><td>£{{ "%.0f"|format(modelled_rv) }}</td></tr>
+    <tr><th>Modelled RV (Low)</th><td>£{{ "%.0f"|format(modelled_rv_low) }}</td></tr>
+    <tr><th>Modelled RV (High)</th><td>£{{ "%.0f"|format(modelled_rv_high) }}</td></tr>
+    {% if rv_delta is defined and rv_delta is not none %}
+    <tr><th>RV Delta</th><td>£{{ "%.0f"|format(rv_delta) }} ({{ rv_delta_pct }}%)</td></tr>
+    {% endif %}
+    <tr><th>Final Tone (£/sqm)</th><td>£{{ final_tone_psm }}</td></tr>
+    <tr><th>Tone Basis</th><td>{{ tone_basis }}</td></tr>
+    <tr><th>Confidence</th><td>{{ confidence }}</td></tr>
+    <tr><th>Case Strength</th><td>{{ case_strength }}</td></tr>
+  </table>
+
+  <h2>Estimated Savings</h2>
+  <table>
+    <tr><th>Annual Saving (Low)</th><td>£{{ "%.0f"|format(annual_saving_low) }}</td></tr>
+    <tr><th>Annual Saving (High)</th><td>£{{ "%.0f"|format(annual_saving_high) }}</td></tr>
+  </table>
+
+  {% if layout_adjustment_applied is defined and layout_adjustment_applied %}
+  <div class="section">
+    <h2>Layout Analysis</h2>
+    <table>
+      {% if floor_config is defined and floor_config is not none %}
+      <tr><th>Floor Configuration</th><td>{{ floor_config }}</td></tr>
+      {% endif %}
+      {% if ground_floor_trading_sqm is defined and ground_floor_trading_sqm is not none %}
+      <tr><th>Ground Floor Trading (sqm)</th><td>{{ ground_floor_trading_sqm }}</td></tr>
+      {% endif %}
+      {% if ground_floor_storage_sqm is defined and ground_floor_storage_sqm is not none %}
+      <tr><th>Ground Floor Storage (sqm)</th><td>{{ ground_floor_storage_sqm }}</td></tr>
+      {% endif %}
+      {% if kitchen_on_ground is defined and kitchen_on_ground is not none %}
+      <tr><th>Kitchen on Ground Floor</th><td>{{ kitchen_on_ground }}</td></tr>
+      {% endif %}
+      {% if kitchen_area_sqm is defined and kitchen_area_sqm is not none %}
+      <tr><th>Kitchen Area (sqm)</th><td>{{ kitchen_area_sqm }}</td></tr>
+      {% endif %}
+      {% if upper_floor_use is defined and upper_floor_use is not none %}
+      <tr><th>Upper Floor Use</th><td>{{ upper_floor_use }}</td></tr>
+      {% endif %}
+      {% if lower_ground_use is defined and lower_ground_use is not none %}
+      <tr><th>Lower Ground Use</th><td>{{ lower_ground_use }}</td></tr>
+      {% endif %}
+      {% if layout_summary is defined and layout_summary is not none %}
+      <tr><th>Layout Summary</th><td>{{ layout_summary }}</td></tr>
+      {% endif %}
+    </table>
+  </div>
+  {% endif %}
+
+  {% if zoning_rows is defined and zoning_rows %}
+  <div class="section">
+    <h2>Zoning Analysis</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Zone</th>
+          <th>Depth (m)</th>
+          <th>Area (sqm)</th>
+          <th>Rate (£/sqm)</th>
+          <th>Value (£)</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in zoning_rows %}
+        <tr>
+          <td>{{ row.zone }}</td>
+          <td>{{ row.depth }}</td>
+          <td>{{ row.area }}</td>
+          <td>£{{ row.rate }}</td>
+          <td>£{{ "%.0f"|format(row.value) }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% if subtotal_pre is defined and subtotal_pre is not none %}
+    <p><strong>Subtotal (pre-allowances):</strong> £{{ "%.0f"|format(subtotal_pre) }}</p>
+    {% endif %}
+    {% if allowances_summary is defined and allowances_summary is not none %}
+    <p><strong>Allowances:</strong> {{ allowances_summary }}</p>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  {% if nursery_adjustments is defined and nursery_adjustments %}
+  <div class="section">
+    <h2>Nursery Adjustments</h2>
+    <table>
+      <thead>
+        <tr><th>Adjustment</th><th>Factor</th><th>Notes</th></tr>
+      </thead>
+      <tbody>
+        {% for adj in nursery_adjustments %}
+        <tr>
+          <td>{{ adj.name }}</td>
+          <td>{{ adj.factor }}</td>
+          <td>{{ adj.notes | default("", true) }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
+  <h2>Comparables ({{ comp_count }})</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Address</th>
+        <th>RV</th>
+        <th>NIA (sqm)</th>
+        <th>Rate/sqm</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for comp in comparables %}
+      <tr>
+        <td>{{ comp.address }}</td>
+        <td>£{{ "%.0f"|format(comp.rv) }}</td>
+        <td>{{ comp.nia_sqm }}</td>
+        <td>{% if comp.rate_psm is defined and comp.rate_psm is not none %}£{{ comp.rate_psm }}{% else %}—{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <h2>Recommendation</h2>
+  <p>{{ recommendation_text }}</p>
+
+  <div class="footer">
+    <p>This evidence pack is prepared using publicly available VOA data and comparable analysis. It does not constitute professional valuation advice.</p>
+  </div>
+</body>
+</html>
