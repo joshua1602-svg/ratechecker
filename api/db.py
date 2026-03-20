@@ -179,6 +179,40 @@ def get_sv_line_descs_batch(uarns: list[str]) -> dict[str, tuple[str, ...]]:
         return {}
 
 
+def get_sv_lines_batch(uarns: list[str]) -> dict[str, list[dict]]:
+    """
+    Return full SV line rows (floor, description, area) keyed by UARN.
+
+    Used by the layout overweighting layer to build layout fingerprints
+    for each comparable.  Read-only query.
+
+    Returns an empty dict if the table is unavailable or uarns is empty.
+    """
+    if not uarns:
+        return {}
+    sql = text("""
+        SELECT uarn, floor, description, area
+        FROM voa_sv_lines
+        WHERE uarn = ANY(:uarns)
+          AND description IS NOT NULL
+        ORDER BY uarn, line_number
+    """)
+    try:
+        with Session(engine) as session:
+            rows = session.execute(sql, {"uarns": list(uarns)}).fetchall()
+        result: dict[str, list[dict]] = {}
+        for r in rows:
+            result.setdefault(str(r.uarn), []).append({
+                "floor": r.floor,
+                "description": r.description,
+                "area": float(r.area) if r.area is not None else 0.0,
+            })
+        return result
+    except Exception:
+        log.warning("get_sv_lines_batch: query failed — returning empty dict")
+        return {}
+
+
 def count_voa_rows() -> int:
     """
     Return the number of rows in voa_list_entries.
