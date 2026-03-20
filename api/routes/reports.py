@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import re
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import Response
 
 from api.reports.pdf_generator import generate_evidence_pack, generate_simplified_report
@@ -20,7 +20,10 @@ def _sanitise_filename(name: str) -> str:
 @router.post("/report/simplified")
 async def simplified_report(request: Request) -> Response:
     report_data: dict = await request.json()
-    pdf_bytes = generate_simplified_report(report_data)
+    try:
+        pdf_bytes = generate_simplified_report(report_data)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     biz = _sanitise_filename(report_data.get("business_name", "Report"))
     filename = f"{biz}_RateChecker_Simplified.pdf"
@@ -35,7 +38,10 @@ async def simplified_report(request: Request) -> Response:
 @router.post("/report/evidence")
 async def evidence_report(request: Request) -> Response:
     report_data: dict = await request.json()
-    pdf_bytes = generate_evidence_pack(report_data)
+    try:
+        pdf_bytes = generate_evidence_pack(report_data)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     biz = _sanitise_filename(report_data.get("business_name", "Report"))
     filename = f"{biz}_RateChecker_Evidence.pdf"
