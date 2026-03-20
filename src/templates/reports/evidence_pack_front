@@ -1,0 +1,577 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Rateable Value Evidence Pack — {{ business_name }}</title>
+<style>
+/* ── Page setup ── */
+@page {
+  size: A4;
+  margin: 20mm 20mm 25mm 20mm;
+}
+
+/* ── Reset ── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+/* ── Base ── */
+body {
+  font-family: 'Segoe UI', Arial, Helvetica, sans-serif;
+  font-size: 10pt;
+  line-height: 1.55;
+  color: #1A1A1A;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+
+/* ── Typography ── */
+h1 {
+  font-size: 16pt;
+  font-weight: 700;
+  color: #1B3A5C;
+  margin: 0 0 10px 0;
+  padding-bottom: 6px;
+  border-bottom: 2px solid #1B3A5C;
+}
+h2 {
+  font-size: 13pt;
+  font-weight: 700;
+  color: #1B3A5C;
+  margin: 24px 0 8px 0;
+}
+p { margin: 0 0 8px 0; }
+
+/* ── Page breaks ── */
+.section { page-break-inside: avoid; }
+.section + .section h1 { page-break-before: always; }
+.page-break { page-break-after: always; }
+table { page-break-inside: avoid; }
+.callout { page-break-inside: avoid; }
+
+/* ── Wordmark ── */
+.wordmark {
+  letter-spacing: -0.02em;
+}
+.wordmark-rate { font-weight: 700; color: #1B3A5C; }
+.wordmark-checker { font-weight: 400; color: #1B3A5C; }
+.wordmark-lg { font-size: 28pt; }
+.wordmark-sm { font-size: 18pt; }
+
+/* ── Cover page ── */
+.cover {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-height: 100vh;
+}
+.cover-title {
+  font-size: 24pt;
+  font-weight: 700;
+  color: #1B3A5C;
+  margin-top: 48px;
+}
+.cover-subtitle {
+  font-size: 12pt;
+  color: #666666;
+  margin-top: 8px;
+}
+.cover-rule {
+  border: none;
+  border-top: 2px solid #1B3A5C;
+  margin: 24px 0;
+}
+.cover-details {
+  border-collapse: collapse;
+  font-size: 10pt;
+}
+.cover-details td {
+  padding: 4px 12px 4px 0;
+  vertical-align: top;
+}
+.cover-details .label {
+  font-weight: 600;
+  color: #1B3A5C;
+  white-space: nowrap;
+}
+
+/* ── Header (non-cover pages) ── */
+.report-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+}
+.header-rule {
+  border: none;
+  border-top: 2px solid #1B3A5C;
+  margin: 8px 0 6px 0;
+}
+.header-meta {
+  font-size: 9pt;
+  color: #666666;
+  margin-bottom: 20px;
+}
+
+/* ── Property facts table ── */
+.facts-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 10px;
+}
+.facts-table td {
+  padding: 8px 12px;
+  border: 1px solid #CCCCCC;
+  vertical-align: top;
+}
+.facts-table .label-cell {
+  width: 38%;
+  background: #E8EEF4;
+  font-weight: 700;
+  color: #1B3A5C;
+}
+.facts-table .value-cell {
+  width: 62%;
+  background: #FFFFFF;
+}
+
+/* ── Banner boxes ── */
+.banner {
+  display: flex;
+  gap: 10px;
+  margin: 16px 0;
+}
+.banner-box {
+  flex: 1;
+  background: #E8EEF4;
+  border: 1px solid #CCCCCC;
+  border-radius: 4px;
+  padding: 16px;
+}
+.banner-label {
+  font-size: 9pt;
+  color: #1B3A5C;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+.banner-value {
+  font-size: 22pt;
+  font-weight: 700;
+  color: #1A1A1A;
+  line-height: 1.1;
+}
+
+/* ── Comparable table ── */
+.comp-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 8pt;
+  margin-top: 10px;
+}
+.comp-table th {
+  background: #1B3A5C;
+  color: #FFFFFF;
+  font-weight: 700;
+  font-size: 8pt;
+  text-transform: uppercase;
+  text-align: left;
+  padding: 8px;
+  border: 1px solid #CCCCCC;
+}
+.comp-table td {
+  padding: 8px;
+  border: 1px solid #CCCCCC;
+  vertical-align: top;
+}
+.comp-table tr:nth-child(even) td { background: #E8EEF4; }
+.comp-table .num { text-align: right; }
+
+/* ── Summary table (conclusion) ── */
+.summary-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 10px 0 16px 0;
+}
+.summary-table td {
+  padding: 8px 12px;
+  border: 1px solid #CCCCCC;
+  vertical-align: top;
+}
+.summary-table .label-cell {
+  width: 38%;
+  background: #E8EEF4;
+  font-weight: 700;
+  color: #1B3A5C;
+}
+.summary-table .value-cell {
+  width: 62%;
+  background: #FFFFFF;
+}
+
+/* ── Callout ── */
+.callout {
+  background: #E8EEF4;
+  border-left: 4px solid #1B3A5C;
+  border-radius: 0 4px 4px 0;
+  padding: 20px 24px;
+  margin: 12px 0;
+}
+.callout strong { color: #1B3A5C; }
+
+/* ── Intro line ── */
+.intro-line {
+  font-size: 9pt;
+  color: #666666;
+  margin-bottom: 8px;
+}
+
+/* ── Case strength inline ── */
+.case-label {
+  font-weight: 600;
+  color: #1B3A5C;
+  margin: 10px 0 4px 0;
+}
+
+/* ── Zoning / calc tables ── */
+.calc-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 9pt;
+  margin-top: 10px;
+}
+.calc-table th {
+  background: #1B3A5C;
+  color: #FFFFFF;
+  font-weight: 700;
+  font-size: 9pt;
+  text-transform: uppercase;
+  text-align: left;
+  padding: 8px;
+  border: 1px solid #CCCCCC;
+}
+.calc-table td {
+  padding: 8px;
+  border: 1px solid #CCCCCC;
+  vertical-align: top;
+}
+.calc-table tr:nth-child(even) td { background: #E8EEF4; }
+.calc-table .num { text-align: right; }
+
+.calc-totals {
+  margin-top: 10px;
+  font-size: 10pt;
+}
+.calc-totals strong { color: #1B3A5C; }
+
+/* ── Preformatted narrative ── */
+.narrative-pre {
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: 10pt;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+
+/* ── Footer ── */
+@media print {
+  .page-footer {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    border-top: 1px solid #CCCCCC;
+    padding-top: 6px;
+    font-size: 8pt;
+    color: #666666;
+  }
+}
+.page-footer {
+  border-top: 1px solid #CCCCCC;
+  padding-top: 6px;
+  font-size: 8pt;
+  color: #666666;
+}
+.footer-row {
+  display: flex;
+  justify-content: space-between;
+}
+.footer-disclaimer {
+  text-align: center;
+  font-size: 8pt;
+  color: #999999;
+  margin-top: 4px;
+}
+</style>
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════════════════════════════
+     COVER PAGE
+     ═══════════════════════════════════════════════════════════════════ -->
+<div class="cover page-break">
+  <span class="wordmark wordmark-lg"><span class="wordmark-rate">Rate</span><span class="wordmark-checker">Checker</span></span>
+
+  <div class="cover-title">Rateable Value Evidence Pack</div>
+  <div class="cover-subtitle">Prepared in support of a Check Challenge Appeal submission</div>
+
+  <hr class="cover-rule">
+
+  <table class="cover-details">
+    <tr><td class="label">Business:</td><td>{{ business_name }}</td></tr>
+    <tr><td class="label">Address:</td><td>{{ property_address }}</td></tr>
+    <tr><td class="label">UPRN:</td><td>{{ uprn | default('Not available') }}</td></tr>
+    <tr><td class="label">Sector:</td><td>{{ business_type }}</td></tr>
+    <tr><td class="label">Date:</td><td>{{ date_prepared }}</td></tr>
+    <tr>
+      <td class="label">Case Strength:</td>
+      <td style="font-weight:700; color:{% if case_strength == 'High' %}#2E7D32{% elif case_strength == 'Medium' %}#E65100{% else %}#B71C1C{% endif %};">{{ case_strength }}</td>
+    </tr>
+  </table>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════
+     SECTION 1 — PROPERTY FACTS
+     ═══════════════════════════════════════════════════════════════════ -->
+<div class="section">
+  <h1>Property Facts</h1>
+  <table class="facts-table">
+    {% if business_name %}
+    <tr><td class="label-cell">Business Name</td><td class="value-cell">{{ business_name }}</td></tr>
+    {% endif %}
+    {% if property_address %}
+    <tr><td class="label-cell">Property Address</td><td class="value-cell">{{ property_address }}</td></tr>
+    {% endif %}
+    {% if postcode %}
+    <tr><td class="label-cell">Postcode</td><td class="value-cell">{{ postcode }}</td></tr>
+    {% endif %}
+    {% if uprn %}
+    <tr><td class="label-cell">UPRN</td><td class="value-cell">{{ uprn }}</td></tr>
+    {% endif %}
+    {% if business_type %}
+    <tr><td class="label-cell">Sector</td><td class="value-cell">{{ business_type }}</td></tr>
+    {% endif %}
+    {% if voa_description %}
+    <tr><td class="label-cell">VOA Description</td><td class="value-cell">{{ voa_description }}</td></tr>
+    {% endif %}
+    {% if nia_sqm %}
+    <tr><td class="label-cell">Total Floor Area (NIA)</td><td class="value-cell">{{ nia_sqm }} sqm</td></tr>
+    {% endif %}
+    {% if floor_config %}
+    <tr><td class="label-cell">Floor Configuration</td><td class="value-cell">{{ floor_config }}</td></tr>
+    {% endif %}
+    {% if ground_floor_trading_sqm %}
+    <tr><td class="label-cell">Ground Floor Trading Area</td><td class="value-cell">{{ ground_floor_trading_sqm }} sqm</td></tr>
+    {% endif %}
+    {% if ground_floor_storage_sqm %}
+    <tr><td class="label-cell">Ground Floor Storage</td><td class="value-cell">{{ ground_floor_storage_sqm }} sqm</td></tr>
+    {% endif %}
+    {% if kitchen_area_sqm %}
+    <tr><td class="label-cell">Kitchen Area</td><td class="value-cell">{{ kitchen_area_sqm }} sqm</td></tr>
+    {% endif %}
+    {% if kitchen_on_ground %}
+    <tr><td class="label-cell">Kitchen on Ground Floor</td><td class="value-cell">{{ kitchen_on_ground }}</td></tr>
+    {% endif %}
+    {% if voa_rv %}
+    <tr><td class="label-cell">Current Rateable Value</td><td class="value-cell">&pound;{{ voa_rv }}</td></tr>
+    {% endif %}
+    {% if rate_psm %}
+    <tr><td class="label-cell">Current Rate per sqm</td><td class="value-cell">&pound;{{ rate_psm }} /sqm</td></tr>
+    {% endif %}
+  </table>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════
+     SECTION 2 — ASSESSMENT RESULT
+     ═══════════════════════════════════════════════════════════════════ -->
+<div class="section">
+  <h1>Assessment Result</h1>
+
+  <div class="banner">
+    <div class="banner-box">
+      <div class="banner-label">Current Rateable Value</div>
+      <div class="banner-value">&pound;{{ voa_rv }}</div>
+    </div>
+    <div class="banner-box">
+      <div class="banner-label">Estimated Fair RV</div>
+      <div class="banner-value">&pound;{{ modelled_rv_low }}&ndash;{{ modelled_rv_high }}</div>
+    </div>
+    <div class="banner-box">
+      <div class="banner-label">Potential Annual Saving</div>
+      <div class="banner-value">&pound;{{ annual_saving_low }}&ndash;{{ annual_saving_high }}</div>
+    </div>
+    <div class="banner-box">
+      <div class="banner-label">Comparables Analysed</div>
+      <div class="banner-value">{{ comp_count }}</div>
+    </div>
+  </div>
+
+  <p class="case-label">Case Strength: <span style="color:{% if case_strength == 'High' %}#2E7D32{% elif case_strength == 'Medium' %}#E65100{% else %}#B71C1C{% endif %};">{{ case_strength }}</span></p>
+
+  <p>This assessment analysed {{ comp_count }} comparable properties drawn from the VOA's published bulk data. The evidence suggests a fair rateable value in the range &pound;{{ modelled_rv_low }}&ndash;{{ modelled_rv_high }}, compared to the current assessment of &pound;{{ voa_rv }} — a difference of &pound;{{ rv_delta }} ({{ rv_delta_pct }}%).</p>
+  {% if layout_adjustment_applied %}
+  <p>Layout details provided by the ratepayer were used to prioritise structurally similar comparables.</p>
+  {% endif %}
+  <p>This analysis applies the same valuation methodology and data used by the VOA to compile the 2026 rating list, with an antecedent valuation date of 1 April 2024.</p>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════
+     SECTION 3 — COMPARABLE EVIDENCE
+     ═══════════════════════════════════════════════════════════════════ -->
+<div class="section">
+  <h1>Comparable Evidence</h1>
+  <p class="intro-line">The following properties were identified from VOA bulk data as comparable to the subject property. Properties with higher layout similarity have been given greater weight in deriving the estimated valuation range.</p>
+
+  <table class="comp-table">
+    <thead>
+      <tr>
+        <th style="width:28%;">Address</th>
+        <th style="width:14%;">UARN</th>
+        <th style="width:10%;" class="num">Floor Area sqm</th>
+        <th style="width:12%;" class="num">Rateable Value &pound;</th>
+        <th style="width:10%;" class="num">Rate &pound;/sqm</th>
+        <th style="width:10%;">Floor Config</th>
+        {% if layout_adjustment_applied %}
+        <th style="width:8%;">Similarity</th>
+        {% endif %}
+        <th style="width:8%;" class="num">Weight %</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for comp in comparables[:20] %}
+      <tr>
+        <td>{{ comp.address }}</td>
+        <td>{{ comp.uarn }}</td>
+        <td class="num">{{ comp.nia_sqm }}</td>
+        <td class="num">&pound;{{ comp.rv }}</td>
+        <td class="num">&pound;{{ comp.rate_psm }}</td>
+        <td>{{ comp.floor_config }}</td>
+        {% if layout_adjustment_applied %}
+        <td>
+          {% if comp.layout_similarity_score >= 0.7 %}High
+          {% elif comp.layout_similarity_score >= 0.4 %}Medium
+          {% else %}Standard{% endif %}
+        </td>
+        {% endif %}
+        <td class="num">{{ comp.weight_pct }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════
+     SECTION 4 — VALUATION CALCULATION
+     ═══════════════════════════════════════════════════════════════════ -->
+<div class="section">
+  <h1>Valuation Calculation</h1>
+
+  {% if business_type in ['retail', 'restaurant'] %}
+  <h2>Zoning Schedule</h2>
+  <table class="calc-table">
+    <thead>
+      <tr>
+        <th>Zone</th>
+        <th class="num">Area (sqm)</th>
+        <th class="num">Relativity</th>
+        <th class="num">Area Type Weight</th>
+        <th class="num">Tone (&pound;/m&sup2;)</th>
+        <th class="num">Value (&pound;)</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in zoning_rows %}
+      <tr>
+        <td>{{ row.zone }}</td>
+        <td class="num">{{ row.area_sqm }}</td>
+        <td class="num">{{ row.relativity }}</td>
+        <td class="num">{{ row.area_type_weight }}</td>
+        <td class="num">&pound;{{ row.tone }}</td>
+        <td class="num">&pound;{{ row.value }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <div class="calc-totals">
+    <p><strong>Subtotal (pre-allowances):</strong> &pound;{{ subtotal_pre }}</p>
+    <p><strong>Allowances:</strong> {{ allowances_summary }}</p>
+    <p><strong>Modelled Rateable Value:</strong> &pound;{{ modelled_rv }}</p>
+  </div>
+  {% endif %}
+
+  {% if business_type == 'nursery' %}
+  <h2>NIA Calculation</h2>
+  <p>{{ nia_sqm }} sqm &times; &pound;{{ final_tone_psm }}/m&sup2; = &pound;{{ subtotal_pre }}</p>
+  <p><strong>Adjustments:</strong> {{ nursery_adjustments }}</p>
+  <p><strong>Modelled Rateable Value:</strong> &pound;{{ modelled_rv }}</p>
+  {% endif %}
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════
+     SECTION 5 — METHODOLOGY
+     ═══════════════════════════════════════════════════════════════════ -->
+<div class="section">
+  <h1>Methodology</h1>
+
+  <h2>Data Source</h2>
+  <p>All comparable data is drawn from the Valuation Office Agency's published bulk data, which contains the rateable values and property characteristics used to compile the 2026 rating list. This is the same dataset the VOA uses internally when assessing rateable values.</p>
+
+  <h2>Selection Criteria</h2>
+  <p>Comparable properties were selected based on geographic proximity, matching business type classification, and similar net internal area. The selection algorithm identifies properties within the same billing authority area first, then expands the search radius if insufficient comparables are found locally.</p>
+
+  <h2>Valuation Approach</h2>
+  <p>The estimated rateable value is derived using a weighted average of comparable rates per square metre, applied to the subject property's floor area. Weights are assigned based on similarity across multiple dimensions including size, location, and — where layout data is provided — structural configuration.</p>
+
+  {% if layout_adjustment_applied %}
+  <h2>Layout Weighting</h2>
+  <p>The ratepayer provided detailed layout information for the subject property. This data was used to calculate a structural fingerprint comprising storage-to-trading ratios, floor configuration, and kitchen positioning. Each comparable was scored against this fingerprint, and comparables with higher structural similarity received greater weight in the valuation model. This approach ensures the estimated rateable value more closely reflects the economic characteristics of the subject property rather than relying solely on headline floor area.</p>
+  {% endif %}
+
+  <h2>Antecedent Valuation Date</h2>
+  <p>All values reflect market conditions as of 1 April 2024, the antecedent valuation date prescribed by the VOA for the 2026 rating list. This is the reference date against which all rateable values in the current list are assessed.</p>
+
+  <h2>Limitations</h2>
+  <p>This analysis is based on publicly available data and information provided by the ratepayer. It does not include a physical inspection of the subject property or any of the comparable properties. The estimated rateable value is indicative and intended to support a Check Challenge Appeal submission. It does not constitute a formal valuation by a qualified surveyor.</p>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════
+     SECTION 6 — CONCLUSION AND RECOMMENDATION
+     ═══════════════════════════════════════════════════════════════════ -->
+<div class="section">
+  <h1>Conclusion and Recommendation</h1>
+
+  <table class="summary-table">
+    <tr><td class="label-cell">VOA Rateable Value</td><td class="value-cell">&pound;{{ voa_rv }}</td></tr>
+    <tr><td class="label-cell">Modelled Rateable Value</td><td class="value-cell">&pound;{{ modelled_rv }}</td></tr>
+    <tr><td class="label-cell">Difference</td><td class="value-cell">&pound;{{ rv_delta }} ({{ rv_delta_pct }}%)</td></tr>
+    <tr>
+      <td class="label-cell">Case Strength</td>
+      <td class="value-cell" style="font-weight:700; color:{% if case_strength == 'High' %}#2E7D32{% elif case_strength == 'Medium' %}#E65100{% else %}#B71C1C{% endif %};">{{ case_strength }}</td>
+    </tr>
+  </table>
+
+  <p>{{ recommendation_text }}</p>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════
+     SECTION 7 — SUBMISSION-READY NARRATIVE
+     ═══════════════════════════════════════════════════════════════════ -->
+<div class="section">
+  <h1>Submission-Ready Narrative</h1>
+
+  <div class="callout">
+    <pre class="narrative-pre">{{ submission_narrative }}</pre>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════
+     FOOTER
+     ═══════════════════════════════════════════════════════════════════ -->
+<div class="page-footer">
+  <div class="footer-row">
+    <span>Prepared by RateChecker&nbsp;&nbsp;|&nbsp;&nbsp;ratechecker.co.uk</span>
+    <span>Page <span class="pageNumber"></span> of <span class="totalPages"></span></span>
+  </div>
+  <div class="footer-disclaimer">This report is based on publicly available VOA data and does not constitute professional surveying or legal advice.</div>
+</div>
+
+</body>
+</html>
