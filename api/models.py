@@ -114,5 +114,49 @@ class PurchaseRequest(BaseModel):
     form_data: PurchaseFormData
 
 
+
+
+class SimplifiedComparableInput(BaseModel):
+    address: Optional[str] = None
+    nia_sqm: Optional[float] = None
+    rv: Optional[float] = None
+    rate_psm: Optional[float] = None
+    layout_similarity_score: Optional[float] = None
+    floor_config: Optional[str] = None
+    uarn: Optional[str] = None
+
+
+class SimplifiedReportRequest(BaseModel):
+    business_name: Optional[str] = None
+    property_address: Optional[str] = None
+    postcode: Optional[str] = None
+    business_type: Optional[str] = None
+    date_prepared: Optional[str] = None
+    voa_rv: Optional[float] = None
+    modelled_rv_low: Optional[float] = None
+    modelled_rv_high: Optional[float] = None
+    annual_saving_low: Optional[float] = None
+    annual_saving_high: Optional[float] = None
+    case_strength: Optional[str] = None
+    comparables: Optional[list[SimplifiedComparableInput]] = None
+    comp_count: Optional[int] = None
+    layout_adjustment_applied: Optional[bool] = None
+    summary_text: Optional[str] = None
+    estimated_rv: Optional[float] = None
+    current_rv: Optional[float] = None
+    property_type: Optional[str] = None
+    comparable_count: Optional[int] = None
+    estimated_saving: Optional[str] = None
+    overassessment_likelihood: Optional[str] = None
+    address: Optional[str] = None
+
+
+class SimplifiedReportResponse(BaseModel):
+    success: bool
+    mode_used: str
+    filename: str
+    file_path: str
+    debug_message: str
+
 class PurchaseResponse(BaseModel):
     checkout_url: str
