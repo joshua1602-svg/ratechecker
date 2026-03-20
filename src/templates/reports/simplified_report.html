@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>RateChecker — Simplified Report</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 40px; color: #222; }
+    h1 { color: #1a3c6e; font-size: 22px; }
+    h2 { color: #1a3c6e; font-size: 16px; border-bottom: 1px solid #ccc; padding-bottom: 4px; }
+    table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
+    th, td { border: 1px solid #ccc; padding: 6px 10px; text-align: left; font-size: 13px; }
+    th { background: #f0f4fa; }
+    .summary-box { background: #f7f9fc; border: 1px solid #d0d8e8; padding: 16px; margin-bottom: 20px; border-radius: 4px; }
+    .label { font-weight: bold; color: #555; }
+    .value { font-size: 15px; }
+    .footer { margin-top: 40px; font-size: 11px; color: #888; border-top: 1px solid #ddd; padding-top: 8px; }
+  </style>
+</head>
+<body>
+  <h1>RateChecker — Simplified Valuation Report</h1>
+
+  <div class="summary-box">
+    <p><span class="label">Business:</span> <span class="value">{{ business_name }}</span></p>
+    <p><span class="label">Address:</span> <span class="value">{{ property_address }}, {{ postcode }}</span></p>
+    <p><span class="label">Business Type:</span> <span class="value">{{ business_type }}</span></p>
+    <p><span class="label">Date Prepared:</span> <span class="value">{{ date_prepared }}</span></p>
+  </div>
+
+  <h2>Valuation Summary</h2>
+  <table>
+    <tr><th>Current VOA Rateable Value</th><td>£{{ "%.0f"|format(voa_rv) }}</td></tr>
+    <tr><th>Modelled RV (Low)</th><td>£{{ "%.0f"|format(modelled_rv_low) }}</td></tr>
+    <tr><th>Modelled RV (High)</th><td>£{{ "%.0f"|format(modelled_rv_high) }}</td></tr>
+    {% if rate_psm is defined and rate_psm is not none %}
+    <tr><th>Rate per sqm</th><td>£{{ rate_psm }}</td></tr>
+    {% endif %}
+    <tr><th>Estimated Annual Saving (Low)</th><td>£{{ "%.0f"|format(annual_saving_low) }}</td></tr>
+    <tr><th>Estimated Annual Saving (High)</th><td>£{{ "%.0f"|format(annual_saving_high) }}</td></tr>
+    <tr><th>Case Strength</th><td>{{ case_strength }}</td></tr>
+  </table>
+
+  <h2>Comparables Used ({{ comp_count }})</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Address</th>
+        <th>RV</th>
+        <th>NIA (sqm)</th>
+        <th>Rate/sqm</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for comp in comparables %}
+      <tr>
+        <td>{{ comp.address }}</td>
+        <td>£{{ "%.0f"|format(comp.rv) }}</td>
+        <td>{{ comp.nia_sqm }}</td>
+        <td>{% if comp.rate_psm is defined and comp.rate_psm is not none %}£{{ comp.rate_psm }}{% else %}—{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <div class="footer">
+    <p>This report is indicative only and is based on publicly available VOA data. It does not constitute professional valuation advice.</p>
+  </div>
+</body>
+</html>

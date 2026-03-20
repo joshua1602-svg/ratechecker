@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from api.db import count_voa_rows, ensure_runtime_indexes
 from api.routes.assess import router as assess_router
 from api.routes.purchase import router as purchase_router
+from api.routes.reports import router as reports_router
 
 app = FastAPI(
     title="RateChecker API",
@@ -33,6 +34,7 @@ app.add_middleware(
 
 app.include_router(assess_router)
 app.include_router(purchase_router)
+app.include_router(reports_router)
 
 
 @app.on_event("startup")
