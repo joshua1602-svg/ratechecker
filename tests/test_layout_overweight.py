@@ -21,31 +21,42 @@ from api.engine.layout_overweight import (
 
 class TestClassifyDescription:
     def test_trading_types(self):
-        assert classify_description("Retail Zone A") == "TRADING"
-        assert classify_description("Zone B") == "TRADING"
+        assert classify_description("Retail Area") == "TRADING"
+        assert classify_description("Ground Floor Sales") == "TRADING"
+        assert classify_description("Restaurant") == "TRADING"
+        assert classify_description("Outdoor Display/Seating Area") == "TRADING"
         assert classify_description("Shop") == "TRADING"
-        assert classify_description("RESTAURANT") == "TRADING"
         assert classify_description("Dining Area") == "TRADING"
         assert classify_description("Salon") == "TRADING"
 
     def test_storage_types(self):
+        assert classify_description("Internal Storage") == "STORAGE"
+        assert classify_description("External Storage") == "STORAGE"
+        assert classify_description("Cold Store") == "STORAGE"
         assert classify_description("Store") == "STORAGE"
-        assert classify_description("Storage Room") == "STORAGE"
         assert classify_description("Cellar") == "STORAGE"
-        assert classify_description("Cold Room") == "STORAGE"
 
     def test_kitchen_types(self):
         assert classify_description("Kitchen") == "KITCHEN"
         assert classify_description("KITCHEN AREA") == "KITCHEN"
         assert classify_description("Prep Area") == "KITCHEN"
 
-    def test_office_types(self):
-        assert classify_description("Office") == "OFFICE"
-
     def test_ancillary_types(self):
+        assert classify_description("Staff Toilets") == "ANCILLARY"
+        assert classify_description("Public Toilets") == "ANCILLARY"
+        assert classify_description("Reception / Entrance") == "ANCILLARY"
+        assert classify_description("Mess/Staff Room") == "ANCILLARY"
+        assert classify_description("Workshop") == "ANCILLARY"
+        assert classify_description("Office") == "ANCILLARY"
         assert classify_description("WC") == "ANCILLARY"
-        assert classify_description("Toilet") == "ANCILLARY"
-        assert classify_description("Staff Room") == "ANCILLARY"
+
+    def test_itza_excluded_types(self):
+        assert classify_description("Retail Zone A") == "ITZA_EXCLUDED"
+        assert classify_description("Retail Zone B") == "ITZA_EXCLUDED"
+        assert classify_description("Retail Zone C") == "ITZA_EXCLUDED"
+
+    def test_segment_root_types(self):
+        assert classify_description("Nursery") == "SEGMENT_ROOT"
 
     def test_unknown_returns_other(self):
         assert classify_description("XYZZY") == "OTHER"
@@ -105,8 +116,8 @@ class TestFingerprintFromSubject:
 class TestFingerprintFromSvLines:
     def test_basic_lines(self):
         lines = [
-            {"floor": "G", "description": "Retail Zone A", "area": 50},
-            {"floor": "G", "description": "Zone B", "area": 30},
+            {"floor": "G", "description": "Shop", "area": 50},
+            {"floor": "G", "description": "Retail Area", "area": 30},
             {"floor": "G", "description": "Store", "area": 20},
         ]
         fp = fingerprint_from_sv_lines(lines, total_nia=100)
@@ -126,6 +137,8 @@ class TestFingerprintFromSvLines:
         assert fp.has_upper_floor is True
         assert fp.trading_ratio == pytest.approx(0.6)
         assert fp.storage_ratio == pytest.approx(0.25)
+        # Office is ANCILLARY — should not affect trading or storage
+        assert fp.ancillary_ratio == pytest.approx(0.15)
 
     def test_kitchen_on_ground(self):
         lines = [
@@ -141,6 +154,44 @@ class TestFingerprintFromSvLines:
         fp = fingerprint_from_sv_lines([], total_nia=100)
         assert fp.storage_ratio == 0.0
         assert fp.trading_ratio == 0.0
+
+    def test_itza_excluded_rows_skipped(self):
+        """ITZA_EXCLUDED rows (Retail Zone A/B/C) must not affect ratios or floor config."""
+        lines = [
+            {"floor": "G", "description": "Retail Zone A", "area": 50},
+            {"floor": "G", "description": "Retail Zone B", "area": 30},
+            {"floor": "G", "description": "Store", "area": 20},
+        ]
+        fp = fingerprint_from_sv_lines(lines, total_nia=100)
+        # Only the Store row contributes — Zone A/B are skipped entirely
+        assert fp.storage_ratio == pytest.approx(0.2)
+        assert fp.trading_ratio == pytest.approx(0.0)
+        assert fp.ancillary_ratio == pytest.approx(0.0)
+
+    def test_ancillary_rows_excluded_from_trading_and_storage(self):
+        """ANCILLARY rows must not inflate trading_ratio or storage_ratio."""
+        lines = [
+            {"floor": "G", "description": "Shop", "area": 60},
+            {"floor": "G", "description": "Office", "area": 15},
+            {"floor": "G", "description": "WC", "area": 5},
+            {"floor": "G", "description": "Store", "area": 20},
+        ]
+        fp = fingerprint_from_sv_lines(lines, total_nia=100)
+        assert fp.trading_ratio == pytest.approx(0.6)
+        assert fp.storage_ratio == pytest.approx(0.2)
+        assert fp.ancillary_ratio == pytest.approx(0.2)
+
+    def test_segment_root_treated_as_trading(self):
+        """SEGMENT_ROOT (e.g. Nursery) maps to trading for ratio computation."""
+        lines = [
+            {"floor": "G", "description": "Nursery", "area": 70},
+            {"floor": "G", "description": "Store", "area": 15},
+            {"floor": "G", "description": "Office", "area": 15},
+        ]
+        fp = fingerprint_from_sv_lines(lines, total_nia=100)
+        assert fp.trading_ratio == pytest.approx(0.7)
+        assert fp.storage_ratio == pytest.approx(0.15)
+        assert fp.ancillary_ratio == pytest.approx(0.15)
 
 
 # ---------------------------------------------------------------------------

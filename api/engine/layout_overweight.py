@@ -31,32 +31,46 @@ LAYOUT_WEIGHT_FACTOR: float = 0.5
 _USE_TYPE_TRADING = "TRADING"
 _USE_TYPE_STORAGE = "STORAGE"
 _USE_TYPE_KITCHEN = "KITCHEN"
-_USE_TYPE_OFFICE = "OFFICE"
 _USE_TYPE_ANCILLARY = "ANCILLARY"
+_USE_TYPE_SEGMENT_ROOT = "SEGMENT_ROOT"
+_USE_TYPE_ITZA_EXCLUDED = "ITZA_EXCLUDED"
 _USE_TYPE_OTHER = "OTHER"
 
 DESCRIPTION_CLASSIFICATION: dict[str, str] = {
+    # ITZA-excluded — already handled by core pipeline, skip in layout fingerprinting
+    "retail zone a":    _USE_TYPE_ITZA_EXCLUDED,
+    "retail zone b":    _USE_TYPE_ITZA_EXCLUDED,
+    "retail zone c":    _USE_TYPE_ITZA_EXCLUDED,
     # Kitchen / prep
     "kitchen":          _USE_TYPE_KITCHEN,
     "prep area":        _USE_TYPE_KITCHEN,
     "prep room":        _USE_TYPE_KITCHEN,
     "preparation":      _USE_TYPE_KITCHEN,
-    # Storage
+    # Storage (specific patterns first)
+    "internal storage": _USE_TYPE_STORAGE,
+    "external storage": _USE_TYPE_STORAGE,
+    "cold store":       _USE_TYPE_STORAGE,
     "store":            _USE_TYPE_STORAGE,
     "storage":          _USE_TYPE_STORAGE,
     "cellar":           _USE_TYPE_STORAGE,
     "cold room":        _USE_TYPE_STORAGE,
-    "cold store":       _USE_TYPE_STORAGE,
     "freezer":          _USE_TYPE_STORAGE,
-    # Office
-    "office":           _USE_TYPE_OFFICE,
-    # Ancillary
+    # Ancillary (specific patterns first)
+    "staff toilet":     _USE_TYPE_ANCILLARY,
+    "public toilet":    _USE_TYPE_ANCILLARY,
+    "reception / entrance": _USE_TYPE_ANCILLARY,
+    "reception/entrance": _USE_TYPE_ANCILLARY,
+    "mess/staff room":  _USE_TYPE_ANCILLARY,
+    "mess/staff":       _USE_TYPE_ANCILLARY,
+    "workshop":         _USE_TYPE_ANCILLARY,
+    "office":           _USE_TYPE_ANCILLARY,
     "wc":               _USE_TYPE_ANCILLARY,
     "toilet":           _USE_TYPE_ANCILLARY,
     "staff":            _USE_TYPE_ANCILLARY,
     "changing":         _USE_TYPE_ANCILLARY,
     "lobby":            _USE_TYPE_ANCILLARY,
     "entrance":         _USE_TYPE_ANCILLARY,
+    "reception":        _USE_TYPE_ANCILLARY,
     "corridor":         _USE_TYPE_ANCILLARY,
     "passage":          _USE_TYPE_ANCILLARY,
     "staircase":        _USE_TYPE_ANCILLARY,
@@ -67,7 +81,13 @@ DESCRIPTION_CLASSIFICATION: dict[str, str] = {
     "bin":              _USE_TYPE_ANCILLARY,
     "yard":             _USE_TYPE_ANCILLARY,
     "loading":          _USE_TYPE_ANCILLARY,
+    # Segment root — primary usable space (e.g. nursery); treated as trading for ratios
+    "nursery":          _USE_TYPE_SEGMENT_ROOT,
     # Trading / commercial space
+    "retail area":      _USE_TYPE_TRADING,
+    "ground floor sales": _USE_TYPE_TRADING,
+    "outdoor display":  _USE_TYPE_TRADING,
+    "outdoor seating":  _USE_TYPE_TRADING,
     "retail zone":      _USE_TYPE_TRADING,
     "zone a":           _USE_TYPE_TRADING,
     "zone b":           _USE_TYPE_TRADING,
@@ -85,7 +105,6 @@ DESCRIPTION_CLASSIFICATION: dict[str, str] = {
     "seating":          _USE_TYPE_TRADING,
     "salon":            _USE_TYPE_TRADING,
     "treatment":        _USE_TYPE_TRADING,
-    "workshop":         _USE_TYPE_TRADING,
     "display":          _USE_TYPE_TRADING,
     "ground floor":     _USE_TYPE_TRADING,
 }
@@ -140,8 +159,9 @@ def _classify_floor(raw_floor: str) -> str:
 @dataclass
 class LayoutFingerprint:
     """Layout characteristics of a single property."""
-    storage_ratio: float = 0.0   # total storage sqm / total NIA
-    trading_ratio: float = 0.0   # total trading sqm / total NIA
+    storage_ratio: float = 0.0     # total storage sqm / total NIA
+    trading_ratio: float = 0.0     # total trading sqm / total NIA
+    ancillary_ratio: float = 0.0   # total ancillary sqm / total NIA (for future use)
     has_lower_ground: bool = False
     has_upper_floor: bool = False
     kitchen_on_ground: bool = False
@@ -224,6 +244,7 @@ def fingerprint_from_sv_lines(
 
     storage_sqm = 0.0
     trading_sqm = 0.0
+    ancillary_sqm = 0.0
     has_lower_ground = False
     has_upper_floor = False
     kitchen_on_ground = False
@@ -236,6 +257,11 @@ def fingerprint_from_sv_lines(
         floor_type = _classify_floor(floor_raw)
         use_type = classify_description(desc_raw)
 
+        # ITZA_EXCLUDED rows are already handled by the core pipeline —
+        # skip entirely to avoid double-counting in layout ratios.
+        if use_type == _USE_TYPE_ITZA_EXCLUDED:
+            continue
+
         if floor_type == "lower_ground":
             has_lower_ground = True
         elif floor_type == "upper":
@@ -243,8 +269,10 @@ def fingerprint_from_sv_lines(
 
         if use_type == _USE_TYPE_STORAGE:
             storage_sqm += area
-        elif use_type == _USE_TYPE_TRADING:
+        elif use_type in (_USE_TYPE_TRADING, _USE_TYPE_SEGMENT_ROOT):
             trading_sqm += area
+        elif use_type == _USE_TYPE_ANCILLARY:
+            ancillary_sqm += area
         elif use_type == _USE_TYPE_KITCHEN and floor_type == "ground":
             kitchen_on_ground = True
 
@@ -252,6 +280,7 @@ def fingerprint_from_sv_lines(
     return LayoutFingerprint(
         storage_ratio=min(storage_sqm / denom, 1.0),
         trading_ratio=min(trading_sqm / denom, 1.0),
+        ancillary_ratio=min(ancillary_sqm / denom, 1.0),
         has_lower_ground=has_lower_ground,
         has_upper_floor=has_upper_floor,
         kitchen_on_ground=kitchen_on_ground,
