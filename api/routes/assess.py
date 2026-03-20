@@ -6,9 +6,10 @@ import logging
 from fastapi import APIRouter, HTTPException
 
 from api.captcha import verify_turnstile
-from api.db import DATABASE_URL, get_comparables
+from api.db import DATABASE_URL, get_comparables, get_sv_lines_batch
 from api.engine.csa import Comparable, run_csa
 from api.engine.geocoding import postcode_to_coords
+from api.engine.layout_overweight import LayoutInput, apply_layout_overweighting
 from api.engine.rules import csa_rules
 from api.engine.valuation import apply_adjustments
 from api.models import AdjustmentBreakdown, AdjustmentItem, AssessRequest, AssessResponse
@@ -123,6 +124,33 @@ async def assess(req: AssessRequest) -> AssessResponse:
         result.get("signal"), result.get("comparable_count"),
         result.get("insufficiency_reason"), result.get("restaurant_rejection_reason"),
     )
+
+    # 5b. Layout overweighting layer (runs after CSA, before adjustments)
+    layout_result = None
+    if req.layout is not None:
+        layout_in = LayoutInput(
+            floor_config=req.layout.floor_config,
+            ground_floor_trading_sqm=req.layout.ground_floor_trading_sqm,
+            ground_floor_storage_sqm=req.layout.ground_floor_storage_sqm,
+            lower_ground_use=req.layout.lower_ground_use,
+            upper_floor_use=req.layout.upper_floor_use,
+            kitchen_on_ground=req.layout.kitchen_on_ground,
+            total_nia_sqm=req.property.nia_sqm,
+        )
+        # Fetch SV lines for all comps in the rated set
+        rated_comps = result.get("_rated_comps", [])
+        comp_uarns = [str(c["uarn"]) for c in rated_comps]
+        sv_lines = get_sv_lines_batch(comp_uarns) if comp_uarns else {}
+        layout_result = apply_layout_overweighting(
+            csa_result=result,
+            layout_input=layout_in,
+            sv_lines_by_uarn=sv_lines,
+            business_type=btype,
+        )
+        log.warning(
+            "ASSESS_DEBUG layout_adjustment_applied=%s",
+            layout_result.get("layout_adjustment_applied"),
+        )
 
     # 6. Apply adjustment layer
     # Runs only when the CSA produced a valid estimate (base_rv is not None).

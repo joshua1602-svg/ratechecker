@@ -1364,6 +1364,20 @@ def run_csa(
             _debug["median_distance"] = None
             _debug["size_ratio_median"] = None
 
+    # --- Expose rated comps for downstream layers (e.g. layout overweighting) ---
+    _rated_comps = [
+        {
+            "uarn": c.uarn,
+            "address": c.address,
+            "rv": c.rv,
+            "nia_sqm": c.nia_sqm,
+            "rate": round(r, 4),
+            "weight": round(w, 6),
+            "distance_m": round(d, 1),
+        }
+        for c, d, r, w in rated
+    ]
+
     result = {
         "signal": signal,
         "explanation": _explanation(signal, confidence, tone, estimated_rv, voa_rv, n_comps, business_type),
@@ -1379,6 +1393,7 @@ def run_csa(
             "subject_basis_sqm": round(subject_basis, 2),
             "subject_basis_label": basis_label,
         },
+        "_rated_comps": _rated_comps,
     }
     if _debug:
         result["_debug"] = _debug

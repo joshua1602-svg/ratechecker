@@ -43,6 +43,16 @@ class AreasInput(BaseModel):
     outdoor_seating: bool = False
 
 
+class LayoutInputModel(BaseModel):
+    """User-provided layout description for the overweighting layer."""
+    floor_config: str = "ground_only"  # ground_only / ground_lower_ground / ground_first / ground_lower_ground_first / other
+    ground_floor_trading_sqm: float = 0.0
+    ground_floor_storage_sqm: float = 0.0
+    lower_ground_use: str = "not_applicable"  # trading / storage / kitchen / office / not_applicable
+    upper_floor_use: str = "not_applicable"   # trading / storage / office / not_applicable
+    kitchen_on_ground: str = "no_kitchen"     # yes / no / no_kitchen (restaurants only)
+
+
 class NurseryInput(BaseModel):
     purpose_built: bool = False
     outdoor_play: bool = False
@@ -60,6 +70,7 @@ class AssessRequest(BaseModel):
     property: PropertyInput
     areas: Optional[AreasInput] = None
     nursery: Optional[NurseryInput] = None
+    layout: Optional[LayoutInputModel] = None
     flags: FlagsInput
     captcha_token: Optional[str] = None
 
