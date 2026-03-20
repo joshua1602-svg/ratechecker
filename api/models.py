@@ -3,7 +3,7 @@ from __future__ import annotations
 from enum import Enum
 from typing import Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class BusinessType(str, Enum):
@@ -113,6 +113,38 @@ class PurchaseRequest(BaseModel):
     product: str  # "report" or "evidence"
     form_data: PurchaseFormData
 
+
+class SimplifiedReportRequest(BaseModel):
+    business_name: Optional[str] = None
+    property_address: Optional[str] = None
+    postcode: Optional[str] = None
+    business_type: Optional[str] = None
+    date_prepared: Optional[str] = None
+    voa_rv: Optional[float] = None
+    modelled_rv_low: Optional[float] = None
+    modelled_rv_high: Optional[float] = None
+    annual_saving_low: Optional[float] = None
+    annual_saving_high: Optional[float] = None
+    case_strength: Optional[str] = None
+    comparables: list[dict] = Field(default_factory=list)
+    comp_count: Optional[int] = None
+    layout_adjustment_applied: Optional[bool] = None
+    summary_text: Optional[str] = None
+    estimated_rv: Optional[float] = None
+    current_rv: Optional[float] = None
+    property_type: Optional[str] = None
+    comparable_count: Optional[int] = None
+    estimated_saving: Optional[str] = None
+    overassessment_likelihood: Optional[str] = None
+    address: Optional[str] = None
+
+
+class SimplifiedReportResponse(BaseModel):
+    success: bool
+    mode_used: str
+    filename: str
+    file_path: str
+    debug_message: str
 
 class PurchaseResponse(BaseModel):
     checkout_url: str
