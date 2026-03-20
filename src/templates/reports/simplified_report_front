@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Business Rates Assessment — {{ business_name }}</title>
+<style>
+/* ── Page setup ── */
+@page {
+  size: A4;
+  margin: 20mm 20mm 25mm 20mm;
+}
+
+/* ── Reset ── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+/* ── Base ── */
+body {
+  font-family: 'Segoe UI', Arial, Helvetica, sans-serif;
+  font-size: 10pt;
+  line-height: 1.55;
+  color: #1A1A1A;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+
+/* ── Typography ── */
+h1 {
+  font-size: 16pt;
+  font-weight: 700;
+  color: #1B3A5C;
+  margin: 0 0 10px 0;
+  padding-bottom: 6px;
+  border-bottom: 2px solid #1B3A5C;
+}
+h2 {
+  font-size: 13pt;
+  font-weight: 700;
+  color: #1B3A5C;
+  margin: 24px 0 8px 0;
+}
+p { margin: 0 0 8px 0; }
+
+/* ── Page break rules ── */
+.section { page-break-inside: avoid; }
+.section + .section h1 { page-break-before: always; }
+table { page-break-inside: avoid; }
+.callout { page-break-inside: avoid; }
+
+/* ── Header ── */
+.report-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  margin-bottom: 0;
+}
+.wordmark {
+  font-size: 18pt;
+  letter-spacing: -0.02em;
+}
+.wordmark-rate { font-weight: 700; color: #1B3A5C; }
+.wordmark-checker { font-weight: 400; color: #1B3A5C; }
+.report-header h1 {
+  font-size: 14pt;
+  border: none;
+  padding: 0;
+  margin: 0;
+  text-align: right;
+}
+.header-rule {
+  border: none;
+  border-top: 2px solid #1B3A5C;
+  margin: 8px 0 6px 0;
+}
+.header-meta {
+  font-size: 9pt;
+  color: #666666;
+  margin-bottom: 20px;
+}
+
+/* ── Banner boxes ── */
+.banner {
+  display: flex;
+  gap: 10px;
+  margin: 16px 0;
+}
+.banner-box {
+  flex: 1;
+  background: #E8EEF4;
+  border: 1px solid #CCCCCC;
+  border-radius: 4px;
+  padding: 16px;
+}
+.banner-label {
+  font-size: 9pt;
+  color: #1B3A5C;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+.banner-value {
+  font-size: 22pt;
+  font-weight: 700;
+  color: #1A1A1A;
+  line-height: 1.1;
+}
+
+/* ── Comparables table ── */
+.comp-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 9pt;
+  margin-top: 10px;
+}
+.comp-table th {
+  background: #1B3A5C;
+  color: #FFFFFF;
+  font-weight: 700;
+  font-size: 9pt;
+  text-transform: uppercase;
+  text-align: left;
+  padding: 8px;
+  border: 1px solid #CCCCCC;
+}
+.comp-table td {
+  padding: 8px;
+  border: 1px solid #CCCCCC;
+  vertical-align: top;
+}
+.comp-table tr:nth-child(even) td { background: #E8EEF4; }
+.comp-table .num { text-align: right; }
+
+/* ── Ordered list ── */
+.steps-list {
+  margin: 10px 0 16px 0;
+  padding-left: 22px;
+}
+.steps-list li {
+  margin-bottom: 6px;
+  line-height: 1.5;
+}
+
+/* ── Callout ── */
+.callout {
+  background: #E8EEF4;
+  border-left: 4px solid #1B3A5C;
+  border-radius: 0 4px 4px 0;
+  padding: 12px 16px;
+  margin: 12px 0;
+}
+.callout strong { color: #1B3A5C; }
+
+/* ── Intro line ── */
+.intro-line {
+  font-size: 9pt;
+  color: #666666;
+  margin-bottom: 8px;
+}
+
+/* ── Footer ── */
+@media print {
+  .page-footer {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    border-top: 1px solid #CCCCCC;
+    padding-top: 6px;
+    font-size: 8pt;
+    color: #666666;
+  }
+}
+.page-footer {
+  border-top: 1px solid #CCCCCC;
+  padding-top: 6px;
+  font-size: 8pt;
+  color: #666666;
+}
+.footer-row {
+  display: flex;
+  justify-content: space-between;
+}
+.footer-disclaimer {
+  text-align: center;
+  font-size: 8pt;
+  color: #999999;
+  margin-top: 4px;
+}
+</style>
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════ HEADER ═══ -->
+<div class="report-header">
+  <span class="wordmark"><span class="wordmark-rate">Rate</span><span class="wordmark-checker">Checker</span></span>
+  <h1>Business Rates Assessment</h1>
+</div>
+<hr class="header-rule">
+<div class="header-meta">{{ business_name }} &nbsp;|&nbsp; {{ property_address }} &nbsp;|&nbsp; Prepared: {{ date_prepared }}</div>
+
+<!-- ═══════════════════════════════════════════ BANNER ═══ -->
+<div class="section">
+  <div class="banner">
+    <div class="banner-box">
+      <div class="banner-label">Current Rateable Value</div>
+      <div class="banner-value">&pound;{{ voa_rv }}</div>
+    </div>
+    <div class="banner-box">
+      <div class="banner-label">Estimated Fair RV</div>
+      <div class="banner-value">&pound;{{ modelled_rv_low }}&ndash;{{ modelled_rv_high }}</div>
+    </div>
+    <div class="banner-box">
+      <div class="banner-label">Potential Annual Saving</div>
+      <div class="banner-value">&pound;{{ annual_saving_low }}&ndash;{{ annual_saving_high }}</div>
+    </div>
+    <div class="banner-box">
+      <div class="banner-label">Case Strength</div>
+      <div class="banner-value" style="color: {% if case_strength == 'High' %}#2E7D32{% elif case_strength == 'Medium' %}#E65100{% else %}#B71C1C{% endif %};">{{ case_strength }}</div>
+    </div>
+  </div>
+
+  <p>Based on {{ comp_count }} comparable properties nearby, your current rateable value of &pound;{{ voa_rv }} appears
+  {% if voa_rv > modelled_rv_high %}
+  higher than similar units. This suggests you may be overpaying by &pound;{{ annual_saving_low }}&ndash;{{ annual_saving_high }} per year.
+  {% elif voa_rv < modelled_rv_low %}
+  lower than similar units. Your property may be correctly assessed or undervalued.
+  {% else %}
+  broadly in line with similar units.
+  {% endif %}</p>
+</div>
+
+<!-- ═══════════════════════════════════════════ HOW WE REACHED THIS ═══ -->
+<div class="section">
+  <h1>How We Reached This Conclusion</h1>
+  <p>This assessment compares your property against {{ comp_count }} similar properties drawn from the VOA's own published bulk data — the same data used to set rateable values nationally. Properties were selected based on location, business type, and floor area.</p>
+  {% if layout_adjustment_applied %}
+  <p>We also used the layout details you provided to prioritise comparables with a similar floor plan.</p>
+  {% endif %}
+  <p>All figures reflect market conditions as of 1 April 2024, the date the VOA used to set 2026 rateable values.</p>
+</div>
+
+<!-- ═══════════════════════════════════════════ COMPARABLES ═══ -->
+<div class="section">
+  <h1>Your Key Comparables</h1>
+  <p class="intro-line">The following properties formed the primary basis for this assessment.</p>
+
+  <table class="comp-table">
+    <thead>
+      <tr>
+        <th style="width:40%;">Address</th>
+        <th style="width:12%;">Floor Area</th>
+        <th style="width:16%;" class="num">Rateable Value</th>
+        <th style="width:16%;" class="num">Rate per sqm</th>
+        {% if layout_adjustment_applied %}
+        <th style="width:16%;">Similarity</th>
+        {% endif %}
+      </tr>
+    </thead>
+    <tbody>
+      {% for comp in comparables[:5] %}
+      <tr>
+        <td>{{ comp.address }}</td>
+        <td>{{ comp.nia_sqm }}</td>
+        <td class="num">&pound;{{ comp.rv }}</td>
+        <td class="num">&pound;{{ comp.rate_psm }}</td>
+        {% if layout_adjustment_applied %}
+        <td>
+          {% if comp.layout_similarity_score >= 0.7 %}High
+          {% elif comp.layout_similarity_score >= 0.4 %}Medium
+          {% else %}Standard{% endif %}
+        </td>
+        {% endif %}
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<!-- ═══════════════════════════════════════════ HOW TO CHALLENGE ═══ -->
+<div class="section">
+  <h1>How to Challenge</h1>
+
+  <ol class="steps-list">
+    <li>Find your property at <strong>gov.uk/find-business-rates</strong></li>
+    <li>Select 'Check your rateable value' and sign in or create a business rates valuation account</li>
+    <li>Submit a Check — confirm the facts about your property are correct</li>
+    <li>If the Check does not resolve it, submit a Challenge using the comparables in this report as evidence</li>
+    <li>If unsuccessful, you have the right to appeal to the Valuation Tribunal</li>
+  </ol>
+
+  <div class="callout">
+    <strong>Important:</strong> From April 2026, you have 3 months from the date your new rateable value takes effect to submit a formal Challenge. Do not delay.
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════ FOOTER ═══ -->
+<div class="page-footer">
+  <div class="footer-row">
+    <span>Prepared by RateChecker&nbsp;&nbsp;|&nbsp;&nbsp;ratechecker.co.uk</span>
+    <span>Page <span class="pageNumber"></span> of <span class="totalPages"></span></span>
+  </div>
+  <div class="footer-disclaimer">This report is based on publicly available VOA data and does not constitute professional surveying or legal advice.</div>
+</div>
+
+</body>
+</html>
