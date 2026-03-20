@@ -5,7 +5,13 @@ import os
 from pathlib import Path
 
 from jinja2 import Environment, FileSystemLoader
-from weasyprint import HTML
+try:
+    from weasyprint import HTML
+except ImportError as e:
+    raise ImportError(
+        f"WeasyPrint failed to import. Ensure system "
+        f"dependencies are installed. Original error: {e}"
+    )
 
 REPORT_TEMPLATE_DIR = os.getenv(
     "REPORT_TEMPLATE_DIR", "src/templates/reports"
