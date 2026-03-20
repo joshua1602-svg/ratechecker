@@ -6,6 +6,7 @@ import re
 from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
+from tempfile import gettempdir
 from typing import Any
 
 from fastapi import APIRouter, Body, HTTPException, Request
@@ -15,7 +16,7 @@ from api.reports.pdf_generator import generate_evidence_pack, generate_simplifie
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
-_REPORT_OUTPUT_DIR = Path(__file__).resolve().parents[2] / "generated_reports"
+_REPORT_OUTPUT_DIR = Path(gettempdir()) / "ratechecker_reports"
 _SIMPLIFIED_REQUIRED_FIELDS = {
     "business_name",
     "property_address",
@@ -144,10 +145,17 @@ def _resolve_simplified_report_payload(payload: SimplifiedReportRequest | None) 
 
 
 def _persist_pdf(filename: str, pdf_bytes: bytes) -> Path:
-    """Write the generated PDF to a predictable local directory for debugging."""
-    _REPORT_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    file_path = _REPORT_OUTPUT_DIR / filename
-    file_path.write_bytes(pdf_bytes)
+    """Write the generated PDF to a writable runtime directory for debugging."""
+    try:
+        _REPORT_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+        file_path = _REPORT_OUTPUT_DIR / filename
+        file_path.write_bytes(pdf_bytes)
+    except OSError as exc:
+        logger.exception("Failed to persist simplified report PDF to %s", _REPORT_OUTPUT_DIR)
+        raise HTTPException(
+            status_code=500,
+            detail="Generated the simplified report PDF but could not persist it to runtime storage.",
+        ) from exc
     return file_path
 
 
