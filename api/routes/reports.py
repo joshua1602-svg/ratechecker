@@ -162,7 +162,18 @@ def _persist_pdf(filename: str, pdf_bytes: bytes) -> Path:
 @router.post(
     "/report/simplified",
     response_class=Response,
-    responses={200: {"content": {"application/pdf": {}}, "description": "Generated simplified PDF report."}},
+    response_model=None,
+    response_description="Generated simplified PDF report.",
+    responses={
+        200: {
+            "description": "Generated simplified PDF report.",
+            "content": {
+                "application/pdf": {
+                    "schema": {"type": "string", "format": "binary"},
+                }
+            },
+        }
+    },
 )
 async def simplified_report(
     payload: SimplifiedReportRequest | None = Body(default=None),
