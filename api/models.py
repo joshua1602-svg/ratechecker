@@ -138,5 +138,25 @@ class SimplifiedReportRequest(BaseModel):
     overassessment_likelihood: Optional[str] = None
     address: Optional[str] = None
 
+
+class EvidenceReportRequest(SimplifiedReportRequest):
+    uprn: Optional[str] = None
+    voa_description: Optional[str] = None
+    nia_sqm: Optional[float] = None
+    modelled_rv: Optional[float] = None
+    final_tone_psm: Optional[float] = None
+    tone_basis: Optional[str] = None
+    confidence: Optional[str] = None
+    recommendation_text: Optional[str] = None
+    zoning_rows: list[dict] = Field(default_factory=list)
+    nursery_adjustments: list[dict] = Field(default_factory=list)
+    allowances_summary: Optional[str] = None
+    subtotal_pre: Optional[float] = None
+    floor_config: Optional[str] = None
+    ground_floor_trading_sqm: Optional[float] = None
+    ground_floor_storage_sqm: Optional[float] = None
+    kitchen_area_sqm: Optional[float] = None
+    kitchen_on_ground: Optional[str] = None
+
 class PurchaseResponse(BaseModel):
     checkout_url: str

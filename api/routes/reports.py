@@ -9,9 +9,9 @@ from pathlib import Path
 from tempfile import gettempdir
 from typing import Any
 
-from fastapi import APIRouter, Body, HTTPException, Request
+from fastapi import APIRouter, Body, HTTPException
 from fastapi.responses import Response
-from api.models import SimplifiedReportRequest
+from api.models import EvidenceReportRequest, SimplifiedReportRequest
 from api.reports.pdf_generator import generate_evidence_pack, generate_simplified_report
 
 router = APIRouter()
@@ -31,6 +31,16 @@ _SIMPLIFIED_REQUIRED_FIELDS = {
     "case_strength",
     "comparables",
     "comp_count",
+}
+_EVIDENCE_REQUIRED_FIELDS = _SIMPLIFIED_REQUIRED_FIELDS | {
+    "uprn",
+    "voa_description",
+    "nia_sqm",
+    "modelled_rv",
+    "final_tone_psm",
+    "tone_basis",
+    "confidence",
+    "recommendation_text",
 }
 
 
@@ -101,6 +111,51 @@ def build_default_report_data() -> dict[str, Any]:
     }
 
 
+def build_default_evidence_report_data() -> dict[str, Any]:
+    """Return a complete placeholder payload for evidence report generation."""
+    data = build_default_report_data()
+    modelled_rv = 19025
+    nia_sqm = 122
+    final_tone_psm = round(modelled_rv / nia_sqm, 2)
+    data.update({
+        "uprn": "100012345678",
+        "voa_description": "Shop and premises",
+        "nia_sqm": nia_sqm,
+        "modelled_rv": modelled_rv,
+        "final_tone_psm": final_tone_psm,
+        "tone_basis": "Placeholder comparable tone derived from nearby retail properties.",
+        "confidence": "Medium",
+        "recommendation_text": "Proceed to Check and Challenge using the enclosed comparable evidence.",
+        "zoning_rows": [
+            {
+                "zone": "A",
+                "area_sqm": 61.0,
+                "tone": 156.0,
+                "relativity": 1.0,
+                "area_type_weight": 1.0,
+                "value": 9516.0,
+            },
+            {
+                "zone": "B",
+                "area_sqm": 61.0,
+                "tone": 156.0,
+                "relativity": 0.5,
+                "area_type_weight": 0.5,
+                "value": 4758.0,
+            },
+        ],
+        "nursery_adjustments": [],
+        "allowances_summary": "No additional allowances applied in this placeholder evidence pack.",
+        "subtotal_pre": 14274.0,
+        "floor_config": "ground_only",
+        "ground_floor_trading_sqm": 90.0,
+        "ground_floor_storage_sqm": 32.0,
+        "kitchen_area_sqm": 0.0,
+        "kitchen_on_ground": "no_kitchen",
+    })
+    return data
+
+
 def _merge_defaults(defaults: dict[str, Any], overrides: dict[str, Any]) -> dict[str, Any]:
     """Recursively overlay non-empty user values onto defaults."""
     merged = deepcopy(defaults)
@@ -122,10 +177,12 @@ def _merge_defaults(defaults: dict[str, Any], overrides: dict[str, Any]) -> dict
     return merged
 
 
-def _resolve_simplified_report_payload(payload: SimplifiedReportRequest | None) -> tuple[dict[str, Any], str, str]:
+def _resolve_report_payload(
+    payload: SimplifiedReportRequest | EvidenceReportRequest | None,
+    defaults: dict[str, Any],
+    required_fields: set[str],
+) -> tuple[dict[str, Any], str, str]:
     """Return merged report data plus a mode label for logging/response metadata."""
-    defaults = build_default_report_data()
-
     if payload is None:
         return defaults, "full_defaults", "No request body supplied; used placeholder defaults."
 
@@ -134,7 +191,7 @@ def _resolve_simplified_report_payload(payload: SimplifiedReportRequest | None) 
         return defaults, "full_defaults", "Empty JSON payload supplied; used placeholder defaults."
 
     merged = _merge_defaults(defaults, provided)
-    required_present = all(provided.get(field) not in (None, "", []) for field in _SIMPLIFIED_REQUIRED_FIELDS)
+    required_present = all(provided.get(field) not in (None, "", []) for field in required_fields)
     mode_used = "provided" if required_present else "merged_defaults"
     debug_message = (
         "Generated report from provided payload."
@@ -144,6 +201,14 @@ def _resolve_simplified_report_payload(payload: SimplifiedReportRequest | None) 
     return merged, mode_used, debug_message
 
 
+def _resolve_simplified_report_payload(payload: SimplifiedReportRequest | None) -> tuple[dict[str, Any], str, str]:
+    return _resolve_report_payload(payload, build_default_report_data(), _SIMPLIFIED_REQUIRED_FIELDS)
+
+
+def _resolve_evidence_report_payload(payload: EvidenceReportRequest | None) -> tuple[dict[str, Any], str, str]:
+    return _resolve_report_payload(payload, build_default_evidence_report_data(), _EVIDENCE_REQUIRED_FIELDS)
+
+
 def _persist_pdf(filename: str, pdf_bytes: bytes) -> Path:
     """Write the generated PDF to a writable runtime directory for debugging."""
     try:
@@ -151,12 +216,23 @@ def _persist_pdf(filename: str, pdf_bytes: bytes) -> Path:
         file_path = _REPORT_OUTPUT_DIR / filename
         file_path.write_bytes(pdf_bytes)
     except OSError as exc:
-        logger.exception("Failed to persist simplified report PDF to %s", _REPORT_OUTPUT_DIR)
+        logger.exception("Failed to persist report PDF to %s", _REPORT_OUTPUT_DIR)
         raise HTTPException(
             status_code=500,
-            detail="Generated the simplified report PDF but could not persist it to runtime storage.",
+            detail="Generated the report PDF but could not persist it to runtime storage.",
         ) from exc
     return file_path
+
+
+
+def _build_pdf_response(filename: str, pdf_bytes: bytes, disposition: str = "attachment") -> Response:
+    """Persist a generated PDF and return it as an HTTP response."""
+    _persist_pdf(filename, pdf_bytes)
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'{disposition}; filename="{filename}"'},
+    )
 
 
 @router.post(
@@ -203,19 +279,39 @@ async def simplified_report(
     return JSONResponse(content=response_payload.model_dump())
 
 
-@router.post("/report/evidence")
-async def evidence_report(request: Request) -> Response:
-    report_data: dict = await request.json()
+@router.post(
+    "/report/evidence",
+    response_class=Response,
+    response_model=None,
+    response_description="Generated evidence pack PDF.",
+    responses={
+        200: {
+            "description": "Generated evidence pack PDF.",
+            "content": {
+                "application/pdf": {
+                    "schema": {"type": "string", "format": "binary"},
+                }
+            },
+        }
+    },
+)
+async def evidence_report(
+    payload: EvidenceReportRequest | None = Body(default=None),
+) -> Response:
+    report_data, mode_used, debug_message = _resolve_evidence_report_payload(payload)
+    logger.info(
+        "Generating evidence report. mode_used=%s business_name=%s comparables=%s note=%s",
+        mode_used,
+        report_data.get("business_name"),
+        len(report_data.get("comparables", [])),
+        debug_message,
+    )
+
     try:
         pdf_bytes = generate_evidence_pack(report_data)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
-    biz = _sanitise_filename(report_data.get("business_name", "Report"))
+    biz = _sanitise_filename(report_data.get("business_name", "Report")) or "Report"
     filename = f"{biz}_RateChecker_Evidence.pdf"
-
-    return Response(
-        content=pdf_bytes,
-        media_type="application/pdf",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
-    )
+    return _build_pdf_response(filename, pdf_bytes)

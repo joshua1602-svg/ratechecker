@@ -191,28 +191,36 @@ def _load_template(env: Environment, template_name: str):
         ) from exc
 
 
-def generate_simplified_report(report_data: dict) -> bytes:
-    """Render the simplified report and return PDF bytes."""
-    _validate(report_data, _SIMPLIFIED_REQUIRED)
+
+def generate_report_pdf(
+    template_name: str,
+    report_data: dict,
+    required_fields: list[str],
+    conditional_validator=None,
+) -> bytes:
+    """Render a PDF using the shared report pipeline and return PDF bytes."""
+    _validate(report_data, required_fields)
+    if conditional_validator is not None:
+        conditional_validator(report_data)
     data = _derive_fields(report_data)
 
     env = _get_env()
-    template = _load_template(env, "simplified_report.html")
+    template = _load_template(env, template_name)
     rendered_html = template.render(**data)
 
     pdf_bytes: bytes = HTML(string=rendered_html).write_pdf()
     return pdf_bytes
+
+def generate_simplified_report(report_data: dict) -> bytes:
+    """Render the simplified report and return PDF bytes."""
+    return generate_report_pdf("simplified_report.html", report_data, _SIMPLIFIED_REQUIRED)
 
 
 def generate_evidence_pack(report_data: dict) -> bytes:
     """Render the full evidence pack and return PDF bytes."""
-    _validate(report_data, _SIMPLIFIED_REQUIRED + _EVIDENCE_EXTRA_REQUIRED)
-    _validate_evidence_conditionals(report_data)
-    data = _derive_fields(report_data)
-
-    env = _get_env()
-    template = _load_template(env, "evidence_pack.html")
-    rendered_html = template.render(**data)
-
-    pdf_bytes: bytes = HTML(string=rendered_html).write_pdf()
-    return pdf_bytes
+    return generate_report_pdf(
+        "evidence_pack.html",
+        report_data,
+        _SIMPLIFIED_REQUIRED + _EVIDENCE_EXTRA_REQUIRED,
+        conditional_validator=_validate_evidence_conditionals,
+    )
