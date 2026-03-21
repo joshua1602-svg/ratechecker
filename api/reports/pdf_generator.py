@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-from jinja2 import Environment, FileSystemLoader
+from jinja2 import Environment, FileSystemLoader, TemplateNotFound
 
 try:
     from weasyprint import HTML
@@ -16,7 +16,10 @@ except ImportError as e:
     )
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-_DEFAULT_TEMPLATE_DIR = _REPO_ROOT / "src" / "templates" / "reports"
+_DEFAULT_TEMPLATE_DIRS = [
+    _REPO_ROOT / "src" / "templates" / "reports",
+    _REPO_ROOT / "templates" / "reports",
+]
 
 _SIMPLIFIED_REQUIRED = [
     "business_name",
@@ -71,14 +74,27 @@ def _validate_evidence_conditionals(report_data: dict) -> None:
 
 
 def _resolve_template_dir() -> Path:
-    """Resolve template dir from env or fall back to the repo-local default."""
+    """Resolve a valid report template dir from env or known repo locations."""
     configured_dir = os.getenv("REPORT_TEMPLATE_DIR")
+    candidates: list[Path] = []
+
     if configured_dir:
         candidate = Path(configured_dir)
         if not candidate.is_absolute():
             candidate = (_REPO_ROOT / candidate).resolve()
-        return candidate
-    return _DEFAULT_TEMPLATE_DIR
+        candidates.extend([candidate, candidate / "reports"])
+
+    candidates.extend(_DEFAULT_TEMPLATE_DIRS)
+
+    for candidate in candidates:
+        if (candidate / "simplified_report.html").exists() and (candidate / "evidence_pack.html").exists():
+            return candidate
+
+    searched = ", ".join(str(path) for path in candidates)
+    raise FileNotFoundError(
+        "Could not locate report templates. Expected simplified_report.html and "
+        f"evidence_pack.html in one of: {searched}"
+    )
 
 
 def _normalise_comparable(comp: dict[str, Any]) -> dict[str, Any]:
@@ -164,28 +180,47 @@ def _get_env() -> Environment:
     )
 
 
-def generate_simplified_report(report_data: dict) -> bytes:
-    """Render the simplified report and return PDF bytes."""
-    _validate(report_data, _SIMPLIFIED_REQUIRED)
+def _load_template(env: Environment, template_name: str):
+    """Load a template and raise a clearer error if it is missing."""
+    try:
+        return env.get_template(template_name)
+    except TemplateNotFound as exc:
+        search_paths = getattr(env.loader, "searchpath", [])
+        raise FileNotFoundError(
+            f"Template '{template_name}' was not found. Jinja search paths: {search_paths}"
+        ) from exc
+
+
+
+def generate_report_pdf(
+    template_name: str,
+    report_data: dict,
+    required_fields: list[str],
+    conditional_validator=None,
+) -> bytes:
+    """Render a PDF using the shared report pipeline and return PDF bytes."""
+    _validate(report_data, required_fields)
+    if conditional_validator is not None:
+        conditional_validator(report_data)
     data = _derive_fields(report_data)
 
     env = _get_env()
-    template = env.get_template("simplified_report.html")
+    template = _load_template(env, template_name)
     rendered_html = template.render(**data)
 
     pdf_bytes: bytes = HTML(string=rendered_html).write_pdf()
     return pdf_bytes
+
+def generate_simplified_report(report_data: dict) -> bytes:
+    """Render the simplified report and return PDF bytes."""
+    return generate_report_pdf("simplified_report.html", report_data, _SIMPLIFIED_REQUIRED)
 
 
 def generate_evidence_pack(report_data: dict) -> bytes:
     """Render the full evidence pack and return PDF bytes."""
-    _validate(report_data, _SIMPLIFIED_REQUIRED + _EVIDENCE_EXTRA_REQUIRED)
-    _validate_evidence_conditionals(report_data)
-    data = _derive_fields(report_data)
-
-    env = _get_env()
-    template = env.get_template("evidence_pack.html")
-    rendered_html = template.render(**data)
-
-    pdf_bytes: bytes = HTML(string=rendered_html).write_pdf()
-    return pdf_bytes
+    return generate_report_pdf(
+        "evidence_pack.html",
+        report_data,
+        _SIMPLIFIED_REQUIRED + _EVIDENCE_EXTRA_REQUIRED,
+        conditional_validator=_validate_evidence_conditionals,
+    )
