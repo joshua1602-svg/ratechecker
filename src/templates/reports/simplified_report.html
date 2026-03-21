@@ -7,7 +7,7 @@
 /* ── Page setup ── */
 @page {
   size: A4;
-  margin: 20mm 20mm 25mm 20mm;
+  margin: 16mm 18mm 20mm 18mm;
 }
 
 /* ── Reset ── */
@@ -16,165 +16,169 @@
 /* ── Base ── */
 body {
   font-family: 'Segoe UI', Arial, Helvetica, sans-serif;
-  font-size: 10pt;
-  line-height: 1.55;
-  color: #1A1A1A;
+  font-size: 9.5pt;
+  line-height: 1.5;
+  color: #2B4360;
+  background: #FFFFFF;
   -webkit-print-color-adjust: exact;
   print-color-adjust: exact;
 }
 
 /* ── Typography ── */
 h1 {
-  font-size: 16pt;
+  font-size: 11pt;
   font-weight: 700;
-  color: #1B3A5C;
-  margin: 0 0 10px 0;
-  padding-bottom: 6px;
-  border-bottom: 2px solid #1B3A5C;
+  color: #2B4360;
+  margin: 14px 0 6px 0;
+  padding-bottom: 4px;
+  border-bottom: 1.5px solid #D4956A;
+  letter-spacing: -0.01em;
 }
 h2 {
-  font-size: 13pt;
+  font-size: 10pt;
   font-weight: 700;
-  color: #1B3A5C;
-  margin: 24px 0 8px 0;
+  color: #2B4360;
+  margin: 10px 0 4px 0;
 }
-p { margin: 0 0 8px 0; }
+p { margin: 0 0 5px 0; }
 
-/* ── Page break rules ── */
+/* ── No page breaks — single page ── */
 .section { page-break-inside: avoid; }
-.section + .section h1 { page-break-before: always; }
 table { page-break-inside: avoid; }
-.callout { page-break-inside: avoid; }
 
 /* ── Header ── */
 .report-header {
   display: flex;
   justify-content: space-between;
-  align-items: flex-end;
-  margin-bottom: 0;
+  align-items: center;
+  padding-bottom: 8px;
+  border-bottom: 2px solid #D4956A;
+  margin-bottom: 4px;
 }
 .wordmark {
-  font-size: 18pt;
+  font-size: 16pt;
   letter-spacing: -0.02em;
 }
-.wordmark-rate { font-weight: 700; color: #1B3A5C; }
-.wordmark-checker { font-weight: 400; color: #1B3A5C; }
-.report-header h1 {
-  font-size: 14pt;
-  border: none;
-  padding: 0;
-  margin: 0;
-  text-align: right;
-}
-.header-rule {
-  border: none;
-  border-top: 2px solid #1B3A5C;
-  margin: 8px 0 6px 0;
+.wordmark-rate { font-weight: 700; color: #2B4360; }
+.wordmark-checker { font-weight: 400; color: #2B4360; }
+.report-type {
+  font-size: 9pt;
+  font-weight: 600;
+  color: #D4956A;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
 }
 .header-meta {
-  font-size: 9pt;
-  color: #666666;
-  margin-bottom: 20px;
+  font-size: 8pt;
+  color: #7A8A9A;
+  margin-bottom: 10px;
+  padding-top: 4px;
 }
 
 /* ── Banner boxes ── */
 .banner {
   display: flex;
-  gap: 10px;
-  margin: 16px 0;
+  gap: 8px;
+  margin: 8px 0 10px 0;
 }
 .banner-box {
   flex: 1;
-  background: #E8EEF4;
-  border: 1px solid #CCCCCC;
-  border-radius: 4px;
-  padding: 16px;
+  background: #F5E6D8;
+  border-radius: 6px;
+  padding: 10px 12px;
+}
+.banner-box-accent {
+  border: 1.5px solid #D4956A;
 }
 .banner-label {
-  font-size: 9pt;
-  color: #1B3A5C;
+  font-size: 7pt;
+  color: #7A8A9A;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.06em;
   font-weight: 600;
-  margin-bottom: 6px;
+  margin-bottom: 3px;
 }
 .banner-value {
-  font-size: 22pt;
+  font-size: 16pt;
   font-weight: 700;
-  color: #1A1A1A;
-  line-height: 1.1;
+  color: #2B4360;
+  line-height: 1.15;
+}
+
+/* ── Summary paragraph ── */
+.summary-text {
+  background: #FDF5EE;
+  border-left: 3px solid #D4956A;
+  border-radius: 0 6px 6px 0;
+  padding: 8px 12px;
+  font-size: 9pt;
+  color: #2B4360;
+  margin-bottom: 10px;
 }
 
 /* ── Comparables table ── */
 .comp-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 9pt;
-  margin-top: 10px;
+  font-size: 8pt;
+  margin-top: 4px;
 }
 .comp-table th {
-  background: #1B3A5C;
+  background: #2B4360;
   color: #FFFFFF;
-  font-weight: 700;
-  font-size: 9pt;
+  font-weight: 600;
+  font-size: 7.5pt;
   text-transform: uppercase;
+  letter-spacing: 0.03em;
   text-align: left;
-  padding: 8px;
-  border: 1px solid #CCCCCC;
+  padding: 6px 8px;
 }
+.comp-table th:first-child { border-radius: 4px 0 0 0; }
+.comp-table th:last-child { border-radius: 0 4px 0 0; }
 .comp-table td {
-  padding: 8px;
-  border: 1px solid #CCCCCC;
+  padding: 5px 8px;
+  border-bottom: 1px solid #E8DDD4;
   vertical-align: top;
 }
-.comp-table tr:nth-child(even) td { background: #E8EEF4; }
+.comp-table tr:nth-child(even) td { background: #FDF5EE; }
 .comp-table .num { text-align: right; }
 
-/* ── Ordered list ── */
+/* ── Steps list ── */
 .steps-list {
-  margin: 10px 0 16px 0;
-  padding-left: 22px;
+  margin: 4px 0 8px 0;
+  padding-left: 18px;
+  font-size: 8.5pt;
 }
 .steps-list li {
-  margin-bottom: 6px;
-  line-height: 1.5;
+  margin-bottom: 2px;
+  line-height: 1.45;
 }
 
 /* ── Callout ── */
 .callout {
-  background: #E8EEF4;
-  border-left: 4px solid #1B3A5C;
-  border-radius: 0 4px 4px 0;
-  padding: 12px 16px;
-  margin: 12px 0;
+  background: #FDF5EE;
+  border-left: 3px solid #D4956A;
+  border-radius: 0 6px 6px 0;
+  padding: 8px 12px;
+  margin: 6px 0;
+  font-size: 8.5pt;
 }
-.callout strong { color: #1B3A5C; }
+.callout strong { color: #D4956A; }
 
 /* ── Intro line ── */
 .intro-line {
-  font-size: 9pt;
-  color: #666666;
-  margin-bottom: 8px;
+  font-size: 8pt;
+  color: #7A8A9A;
+  margin-bottom: 4px;
 }
 
 /* ── Footer ── */
-@media print {
-  .page-footer {
-    position: fixed;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    border-top: 1px solid #CCCCCC;
-    padding-top: 6px;
-    font-size: 8pt;
-    color: #666666;
-  }
-}
 .page-footer {
-  border-top: 1px solid #CCCCCC;
-  padding-top: 6px;
-  font-size: 8pt;
-  color: #666666;
+  margin-top: 10px;
+  border-top: 1px solid #E8DDD4;
+  padding-top: 4px;
+  font-size: 7pt;
+  color: #7A8A9A;
 }
 .footer-row {
   display: flex;
@@ -182,54 +186,55 @@ table { page-break-inside: avoid; }
 }
 .footer-disclaimer {
   text-align: center;
-  font-size: 8pt;
-  color: #999999;
-  margin-top: 4px;
+  font-size: 7pt;
+  color: #A0A8B0;
+  margin-top: 2px;
 }
 </style>
 </head>
 <body>
 
-<!-- ═══════════════════════════════════════════ HEADER ═══ -->
+<!-- ═══ HEADER ═══ -->
 <div class="report-header">
   <span class="wordmark"><span class="wordmark-rate">Rate</span><span class="wordmark-checker">Checker</span></span>
-  <h1>Business Rates Assessment</h1>
+  <span class="report-type">Business Rates Assessment</span>
 </div>
-<hr class="header-rule">
-<div class="header-meta">{{ business_name }} &nbsp;|&nbsp; {{ property_address }} &nbsp;|&nbsp; Prepared: {{ date_prepared }}</div>
+<div class="header-meta">{{ business_name }} &nbsp;&bull;&nbsp; {{ property_address }} &nbsp;&bull;&nbsp; Prepared: {{ date_prepared }}</div>
 
-<!-- ═══════════════════════════════════════════ BANNER ═══ -->
+<!-- ═══ BANNER ═══ -->
 <div class="section">
   <div class="banner">
     <div class="banner-box">
       <div class="banner-label">Current Rateable Value</div>
       <div class="banner-value">&pound;{{ voa_rv }}</div>
     </div>
-    <div class="banner-box">
+    <div class="banner-box banner-box-accent">
       <div class="banner-label">Estimated Fair RV</div>
       <div class="banner-value">&pound;{{ modelled_rv_low }}&ndash;{{ modelled_rv_high }}</div>
     </div>
-    <div class="banner-box">
+    <div class="banner-box banner-box-accent">
       <div class="banner-label">Potential Annual Saving</div>
       <div class="banner-value">&pound;{{ annual_saving_low }}&ndash;{{ annual_saving_high }}</div>
     </div>
     <div class="banner-box">
       <div class="banner-label">Case Strength</div>
-      <div class="banner-value" style="color: {% if case_strength == 'High' %}#2E7D32{% elif case_strength == 'Medium' %}#E65100{% else %}#B71C1C{% endif %};">{{ case_strength }}</div>
+      <div class="banner-value" style="color: {% if case_strength == 'High' %}#2E7D32{% elif case_strength == 'Medium' %}#D4956A{% else %}#7A8A9A{% endif %};">{{ case_strength }}</div>
     </div>
   </div>
 
-  <p>Based on {{ comp_count }} comparable properties nearby, your current rateable value of &pound;{{ voa_rv }} appears
-  {% if voa_rv > modelled_rv_high %}
-  higher than similar units. This suggests you may be overpaying by &pound;{{ annual_saving_low }}&ndash;{{ annual_saving_high }} per year.
-  {% elif voa_rv < modelled_rv_low %}
-  lower than similar units. Your property may be correctly assessed or undervalued.
-  {% else %}
-  broadly in line with similar units.
-  {% endif %}</p>
+  <div class="summary-text">
+    Based on {{ comp_count }} comparable properties nearby, your current rateable value of &pound;{{ voa_rv }} appears
+    {% if voa_rv > modelled_rv_high %}
+    higher than similar units. This suggests you may be overpaying by &pound;{{ annual_saving_low }}&ndash;{{ annual_saving_high }} per year.
+    {% elif voa_rv < modelled_rv_low %}
+    lower than similar units. Your property may be correctly assessed or undervalued.
+    {% else %}
+    broadly in line with similar units.
+    {% endif %}
+  </div>
 </div>
 
-<!-- ═══════════════════════════════════════════ HOW WE REACHED THIS ═══ -->
+<!-- ═══ HOW WE REACHED THIS ═══ -->
 <div class="section">
   <h1>How We Reached This Conclusion</h1>
   <p>This assessment compares your property against {{ comp_count }} similar properties drawn from the VOA's own published bulk data — the same data used to set rateable values nationally. Properties were selected based on location, business type, and floor area.</p>
@@ -239,7 +244,7 @@ table { page-break-inside: avoid; }
   <p>All figures reflect market conditions as of 1 April 2024, the date the VOA used to set 2026 rateable values.</p>
 </div>
 
-<!-- ═══════════════════════════════════════════ COMPARABLES ═══ -->
+<!-- ═══ COMPARABLES ═══ -->
 <div class="section">
   <h1>Your Key Comparables</h1>
   <p class="intro-line">The following properties formed the primary basis for this assessment.</p>
@@ -276,7 +281,7 @@ table { page-break-inside: avoid; }
   </table>
 </div>
 
-<!-- ═══════════════════════════════════════════ HOW TO CHALLENGE ═══ -->
+<!-- ═══ HOW TO CHALLENGE ═══ -->
 <div class="section">
   <h1>How to Challenge</h1>
 
@@ -293,7 +298,7 @@ table { page-break-inside: avoid; }
   </div>
 </div>
 
-<!-- ═══════════════════════════════════════════ FOOTER ═══ -->
+<!-- ═══ FOOTER ═══ -->
 <div class="page-footer">
   <div class="footer-row">
     <span>Prepared by RateChecker&nbsp;&nbsp;|&nbsp;&nbsp;ratechecker.co.uk</span>
