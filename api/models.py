@@ -138,13 +138,5 @@ class SimplifiedReportRequest(BaseModel):
     overassessment_likelihood: Optional[str] = None
     address: Optional[str] = None
 
-
-class SimplifiedReportResponse(BaseModel):
-    success: bool
-    mode_used: str
-    filename: str
-    file_path: str
-    debug_message: str
-
 class PurchaseResponse(BaseModel):
     checkout_url: str

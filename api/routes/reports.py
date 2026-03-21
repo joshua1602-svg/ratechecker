@@ -10,8 +10,8 @@ from tempfile import gettempdir
 from typing import Any
 
 from fastapi import APIRouter, Body, HTTPException, Request
-from fastapi.responses import JSONResponse, Response
-from api.models import SimplifiedReportRequest, SimplifiedReportResponse
+from fastapi.responses import Response
+from api.models import SimplifiedReportRequest
 from api.reports.pdf_generator import generate_evidence_pack, generate_simplified_report
 
 router = APIRouter()
@@ -159,10 +159,14 @@ def _persist_pdf(filename: str, pdf_bytes: bytes) -> Path:
     return file_path
 
 
-@router.post("/report/simplified", response_model=SimplifiedReportResponse)
+@router.post(
+    "/report/simplified",
+    response_class=Response,
+    responses={200: {"content": {"application/pdf": {}}, "description": "Generated simplified PDF report."}},
+)
 async def simplified_report(
     payload: SimplifiedReportRequest | None = Body(default=None),
-) -> JSONResponse:
+) -> Response:
     report_data, mode_used, debug_message = _resolve_simplified_report_payload(payload)
     logger.info(
         "Generating simplified report. mode_used=%s business_name=%s comparables=%s",
@@ -178,14 +182,12 @@ async def simplified_report(
 
     biz = _sanitise_filename(report_data.get("business_name", "Report")) or "Report"
     filename = f"{biz}_RateChecker_Simplified.pdf"
-    file_path = _persist_pdf(filename, pdf_bytes)
+    _persist_pdf(filename, pdf_bytes)
 
-    response_payload = SimplifiedReportResponse(
-        success=True,
-        mode_used=mode_used,
-        filename=filename,
-        file_path=str(file_path),
-        debug_message=debug_message,
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": 'inline; filename="simplified_report.pdf"'},
     )
     return JSONResponse(content=response_payload.model_dump())
 
