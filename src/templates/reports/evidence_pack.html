@@ -7,7 +7,7 @@
 /* ── Page setup ── */
 @page {
   size: A4;
-  margin: 20mm 20mm 25mm 20mm;
+  margin: 18mm 18mm 22mm 18mm;
 }
 
 /* ── Reset ── */
@@ -16,29 +16,31 @@
 /* ── Base ── */
 body {
   font-family: 'Segoe UI', Arial, Helvetica, sans-serif;
-  font-size: 10pt;
-  line-height: 1.55;
-  color: #1A1A1A;
+  font-size: 9.5pt;
+  line-height: 1.5;
+  color: #2B4360;
+  background: #FFFFFF;
   -webkit-print-color-adjust: exact;
   print-color-adjust: exact;
 }
 
 /* ── Typography ── */
 h1 {
-  font-size: 16pt;
+  font-size: 14pt;
   font-weight: 700;
-  color: #1B3A5C;
-  margin: 0 0 10px 0;
-  padding-bottom: 6px;
-  border-bottom: 2px solid #1B3A5C;
+  color: #2B4360;
+  margin: 0 0 8px 0;
+  padding-bottom: 5px;
+  border-bottom: 2px solid #D4956A;
+  letter-spacing: -0.01em;
 }
 h2 {
-  font-size: 13pt;
+  font-size: 11pt;
   font-weight: 700;
-  color: #1B3A5C;
-  margin: 24px 0 8px 0;
+  color: #2B4360;
+  margin: 16px 0 6px 0;
 }
-p { margin: 0 0 8px 0; }
+p { margin: 0 0 6px 0; }
 
 /* ── Page breaks ── */
 .section { page-break-inside: avoid; }
@@ -51,10 +53,10 @@ table { page-break-inside: avoid; }
 .wordmark {
   letter-spacing: -0.02em;
 }
-.wordmark-rate { font-weight: 700; color: #1B3A5C; }
-.wordmark-checker { font-weight: 400; color: #1B3A5C; }
+.wordmark-rate { font-weight: 700; color: #2B4360; }
+.wordmark-checker { font-weight: 400; color: #2B4360; }
 .wordmark-lg { font-size: 28pt; }
-.wordmark-sm { font-size: 18pt; }
+.wordmark-sm { font-size: 16pt; }
 
 /* ── Cover page ── */
 .cover {
@@ -63,20 +65,33 @@ table { page-break-inside: avoid; }
   justify-content: center;
   min-height: 100vh;
 }
+.cover-badge {
+  display: inline-block;
+  background: #F5E6D8;
+  color: #D4956A;
+  font-size: 8pt;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  padding: 4px 12px;
+  border-radius: 4px;
+  margin-bottom: 16px;
+}
 .cover-title {
   font-size: 24pt;
   font-weight: 700;
-  color: #1B3A5C;
-  margin-top: 48px;
+  color: #2B4360;
+  margin-top: 32px;
+  letter-spacing: -0.02em;
 }
 .cover-subtitle {
-  font-size: 12pt;
-  color: #666666;
-  margin-top: 8px;
+  font-size: 11pt;
+  color: #7A8A9A;
+  margin-top: 6px;
 }
 .cover-rule {
   border: none;
-  border-top: 2px solid #1B3A5C;
+  border-top: 2px solid #D4956A;
   margin: 24px 0;
 }
 .cover-details {
@@ -84,191 +99,220 @@ table { page-break-inside: avoid; }
   font-size: 10pt;
 }
 .cover-details td {
-  padding: 4px 12px 4px 0;
+  padding: 5px 14px 5px 0;
   vertical-align: top;
 }
 .cover-details .label {
   font-weight: 600;
-  color: #1B3A5C;
+  color: #7A8A9A;
   white-space: nowrap;
+  text-transform: uppercase;
+  font-size: 8pt;
+  letter-spacing: 0.04em;
+  padding-top: 7px;
+}
+.cover-details .value {
+  color: #2B4360;
+  font-weight: 500;
 }
 
 /* ── Header (non-cover pages) ── */
 .report-header {
   display: flex;
   justify-content: space-between;
-  align-items: flex-end;
+  align-items: center;
+  padding-bottom: 6px;
+  border-bottom: 2px solid #D4956A;
+  margin-bottom: 4px;
 }
-.header-rule {
-  border: none;
-  border-top: 2px solid #1B3A5C;
-  margin: 8px 0 6px 0;
+.report-type {
+  font-size: 8pt;
+  font-weight: 600;
+  color: #D4956A;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
 }
 .header-meta {
-  font-size: 9pt;
-  color: #666666;
-  margin-bottom: 20px;
+  font-size: 8pt;
+  color: #7A8A9A;
+  margin-bottom: 14px;
+  padding-top: 4px;
 }
 
 /* ── Property facts table ── */
 .facts-table {
   width: 100%;
   border-collapse: collapse;
-  margin-top: 10px;
+  margin-top: 8px;
 }
 .facts-table td {
-  padding: 8px 12px;
-  border: 1px solid #CCCCCC;
+  padding: 7px 12px;
   vertical-align: top;
+  border-bottom: 1px solid #E8DDD4;
 }
 .facts-table .label-cell {
   width: 38%;
-  background: #E8EEF4;
-  font-weight: 700;
-  color: #1B3A5C;
+  background: #F5E6D8;
+  font-weight: 600;
+  color: #2B4360;
+  font-size: 8.5pt;
 }
 .facts-table .value-cell {
   width: 62%;
   background: #FFFFFF;
+  font-size: 9pt;
 }
 
 /* ── Banner boxes ── */
 .banner {
   display: flex;
-  gap: 10px;
-  margin: 16px 0;
+  gap: 8px;
+  margin: 10px 0;
 }
 .banner-box {
   flex: 1;
-  background: #E8EEF4;
-  border: 1px solid #CCCCCC;
-  border-radius: 4px;
-  padding: 16px;
+  background: #F5E6D8;
+  border-radius: 6px;
+  padding: 12px 14px;
+}
+.banner-box-accent {
+  border: 1.5px solid #D4956A;
 }
 .banner-label {
-  font-size: 9pt;
-  color: #1B3A5C;
+  font-size: 7pt;
+  color: #7A8A9A;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.06em;
   font-weight: 600;
-  margin-bottom: 6px;
+  margin-bottom: 4px;
 }
 .banner-value {
-  font-size: 22pt;
+  font-size: 18pt;
   font-weight: 700;
-  color: #1A1A1A;
-  line-height: 1.1;
+  color: #2B4360;
+  line-height: 1.15;
+}
+
+/* ── Case strength inline ── */
+.case-label {
+  font-weight: 600;
+  color: #2B4360;
+  margin: 8px 0 4px 0;
+  font-size: 9.5pt;
 }
 
 /* ── Comparable table ── */
 .comp-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 8pt;
-  margin-top: 10px;
+  font-size: 7.5pt;
+  margin-top: 8px;
 }
 .comp-table th {
-  background: #1B3A5C;
+  background: #2B4360;
   color: #FFFFFF;
-  font-weight: 700;
-  font-size: 8pt;
+  font-weight: 600;
+  font-size: 7pt;
   text-transform: uppercase;
+  letter-spacing: 0.03em;
   text-align: left;
-  padding: 8px;
-  border: 1px solid #CCCCCC;
+  padding: 6px 6px;
 }
+.comp-table th:first-child { border-radius: 4px 0 0 0; }
+.comp-table th:last-child { border-radius: 0 4px 0 0; }
 .comp-table td {
-  padding: 8px;
-  border: 1px solid #CCCCCC;
+  padding: 5px 6px;
+  border-bottom: 1px solid #E8DDD4;
   vertical-align: top;
 }
-.comp-table tr:nth-child(even) td { background: #E8EEF4; }
+.comp-table tr:nth-child(even) td { background: #FDF5EE; }
 .comp-table .num { text-align: right; }
 
 /* ── Summary table (conclusion) ── */
 .summary-table {
   width: 100%;
   border-collapse: collapse;
-  margin: 10px 0 16px 0;
+  margin: 8px 0 12px 0;
 }
 .summary-table td {
-  padding: 8px 12px;
-  border: 1px solid #CCCCCC;
+  padding: 7px 12px;
   vertical-align: top;
+  border-bottom: 1px solid #E8DDD4;
 }
 .summary-table .label-cell {
   width: 38%;
-  background: #E8EEF4;
-  font-weight: 700;
-  color: #1B3A5C;
+  background: #F5E6D8;
+  font-weight: 600;
+  color: #2B4360;
+  font-size: 8.5pt;
 }
 .summary-table .value-cell {
   width: 62%;
   background: #FFFFFF;
+  font-size: 9.5pt;
 }
 
 /* ── Callout ── */
 .callout {
-  background: #E8EEF4;
-  border-left: 4px solid #1B3A5C;
-  border-radius: 0 4px 4px 0;
-  padding: 20px 24px;
-  margin: 12px 0;
+  background: #FDF5EE;
+  border-left: 3px solid #D4956A;
+  border-radius: 0 6px 6px 0;
+  padding: 14px 18px;
+  margin: 10px 0;
 }
-.callout strong { color: #1B3A5C; }
+.callout strong { color: #D4956A; }
 
-/* ── Intro line ── */
-.intro-line {
-  font-size: 9pt;
-  color: #666666;
-  margin-bottom: 8px;
-}
-
-/* ── Case strength inline ── */
-.case-label {
-  font-weight: 600;
-  color: #1B3A5C;
-  margin: 10px 0 4px 0;
-}
-
-/* ── Zoning / calc tables ── */
+/* ── Calculation tables ── */
 .calc-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 9pt;
-  margin-top: 10px;
+  font-size: 8.5pt;
+  margin-top: 8px;
 }
 .calc-table th {
-  background: #1B3A5C;
+  background: #2B4360;
   color: #FFFFFF;
-  font-weight: 700;
-  font-size: 9pt;
+  font-weight: 600;
+  font-size: 7.5pt;
   text-transform: uppercase;
   text-align: left;
-  padding: 8px;
-  border: 1px solid #CCCCCC;
+  padding: 6px 8px;
 }
+.calc-table th:first-child { border-radius: 4px 0 0 0; }
+.calc-table th:last-child { border-radius: 0 4px 0 0; }
 .calc-table td {
-  padding: 8px;
-  border: 1px solid #CCCCCC;
+  padding: 5px 8px;
+  border-bottom: 1px solid #E8DDD4;
   vertical-align: top;
 }
-.calc-table tr:nth-child(even) td { background: #E8EEF4; }
+.calc-table tr:nth-child(even) td { background: #FDF5EE; }
 .calc-table .num { text-align: right; }
 
 .calc-totals {
-  margin-top: 10px;
-  font-size: 10pt;
+  margin-top: 8px;
+  font-size: 9.5pt;
+  background: #F5E6D8;
+  border-radius: 6px;
+  padding: 10px 14px;
 }
-.calc-totals strong { color: #1B3A5C; }
+.calc-totals p { margin: 2px 0; }
+.calc-totals strong { color: #2B4360; }
+
+/* ── Intro line ── */
+.intro-line {
+  font-size: 8pt;
+  color: #7A8A9A;
+  margin-bottom: 6px;
+}
 
 /* ── Preformatted narrative ── */
 .narrative-pre {
-  font-family: Arial, Helvetica, sans-serif;
-  font-size: 10pt;
+  font-family: 'Segoe UI', Arial, Helvetica, sans-serif;
+  font-size: 9.5pt;
   line-height: 1.6;
   white-space: pre-wrap;
   word-wrap: break-word;
+  color: #2B4360;
 }
 
 /* ── Footer ── */
@@ -278,17 +322,17 @@ table { page-break-inside: avoid; }
     bottom: 0;
     left: 0;
     right: 0;
-    border-top: 1px solid #CCCCCC;
-    padding-top: 6px;
-    font-size: 8pt;
-    color: #666666;
+    border-top: 1px solid #E8DDD4;
+    padding-top: 4px;
+    font-size: 7pt;
+    color: #7A8A9A;
   }
 }
 .page-footer {
-  border-top: 1px solid #CCCCCC;
-  padding-top: 6px;
-  font-size: 8pt;
-  color: #666666;
+  border-top: 1px solid #E8DDD4;
+  padding-top: 4px;
+  font-size: 7pt;
+  color: #7A8A9A;
 }
 .footer-row {
   display: flex;
@@ -296,9 +340,9 @@ table { page-break-inside: avoid; }
 }
 .footer-disclaimer {
   text-align: center;
-  font-size: 8pt;
-  color: #999999;
-  margin-top: 4px;
+  font-size: 7pt;
+  color: #A0A8B0;
+  margin-top: 2px;
 }
 </style>
 </head>
@@ -316,14 +360,14 @@ table { page-break-inside: avoid; }
   <hr class="cover-rule">
 
   <table class="cover-details">
-    <tr><td class="label">Business:</td><td>{{ business_name }}</td></tr>
-    <tr><td class="label">Address:</td><td>{{ property_address }}</td></tr>
-    <tr><td class="label">UPRN:</td><td>{{ uprn | default('Not available') }}</td></tr>
-    <tr><td class="label">Sector:</td><td>{{ business_type }}</td></tr>
-    <tr><td class="label">Date:</td><td>{{ date_prepared }}</td></tr>
+    <tr><td class="label">Business:</td><td class="value">{{ business_name }}</td></tr>
+    <tr><td class="label">Address:</td><td class="value">{{ property_address }}</td></tr>
+    <tr><td class="label">UPRN:</td><td class="value">{{ uprn | default('Not available') }}</td></tr>
+    <tr><td class="label">Sector:</td><td class="value">{{ business_type }}</td></tr>
+    <tr><td class="label">Date:</td><td class="value">{{ date_prepared }}</td></tr>
     <tr>
       <td class="label">Case Strength:</td>
-      <td style="font-weight:700; color:{% if case_strength == 'High' %}#2E7D32{% elif case_strength == 'Medium' %}#E65100{% else %}#B71C1C{% endif %};">{{ case_strength }}</td>
+      <td class="value" style="font-weight:700; color:{% if case_strength == 'High' %}#2E7D32{% elif case_strength == 'Medium' %}#D4956A{% else %}#7A8A9A{% endif %};">{{ case_strength }}</td>
     </tr>
   </table>
 </div>
@@ -390,11 +434,11 @@ table { page-break-inside: avoid; }
       <div class="banner-label">Current Rateable Value</div>
       <div class="banner-value">&pound;{{ voa_rv }}</div>
     </div>
-    <div class="banner-box">
+    <div class="banner-box banner-box-accent">
       <div class="banner-label">Estimated Fair RV</div>
       <div class="banner-value">&pound;{{ modelled_rv_low }}&ndash;{{ modelled_rv_high }}</div>
     </div>
-    <div class="banner-box">
+    <div class="banner-box banner-box-accent">
       <div class="banner-label">Potential Annual Saving</div>
       <div class="banner-value">&pound;{{ annual_saving_low }}&ndash;{{ annual_saving_high }}</div>
     </div>
@@ -404,7 +448,7 @@ table { page-break-inside: avoid; }
     </div>
   </div>
 
-  <p class="case-label">Case Strength: <span style="color:{% if case_strength == 'High' %}#2E7D32{% elif case_strength == 'Medium' %}#E65100{% else %}#B71C1C{% endif %};">{{ case_strength }}</span></p>
+  <p class="case-label">Case Strength: <span style="color:{% if case_strength == 'High' %}#2E7D32{% elif case_strength == 'Medium' %}#D4956A{% else %}#7A8A9A{% endif %};">{{ case_strength }}</span></p>
 
   <p>This assessment analysed {{ comp_count }} comparable properties drawn from the VOA's published bulk data. The evidence suggests a fair rateable value in the range &pound;{{ modelled_rv_low }}&ndash;{{ modelled_rv_high }}, compared to the current assessment of &pound;{{ voa_rv }} — a difference of &pound;{{ rv_delta }} ({{ rv_delta_pct }}%).</p>
   {% if layout_adjustment_applied %}
@@ -464,7 +508,7 @@ table { page-break-inside: avoid; }
 <div class="section">
   <h1>Valuation Calculation</h1>
 
-  {% if business_type != 'nursery' %}
+  {% if business_type in ['retail', 'restaurant'] %}
   <h2>Zoning Schedule</h2>
   <table class="calc-table">
     <thead>
@@ -544,7 +588,7 @@ table { page-break-inside: avoid; }
     <tr><td class="label-cell">Difference</td><td class="value-cell">&pound;{{ rv_delta }} ({{ rv_delta_pct }}%)</td></tr>
     <tr>
       <td class="label-cell">Case Strength</td>
-      <td class="value-cell" style="font-weight:700; color:{% if case_strength == 'High' %}#2E7D32{% elif case_strength == 'Medium' %}#E65100{% else %}#B71C1C{% endif %};">{{ case_strength }}</td>
+      <td class="value-cell" style="font-weight:700; color:{% if case_strength == 'High' %}#2E7D32{% elif case_strength == 'Medium' %}#D4956A{% else %}#7A8A9A{% endif %};">{{ case_strength }}</td>
     </tr>
   </table>
 
