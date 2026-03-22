@@ -109,6 +109,8 @@ FLUSH_HEADERS = 50_000    # header rows per COPY batch (29 columns, moderate row
 FLUSH_LINES   = 20_000    # line rows per COPY batch — smaller so a dropped connection
                           # mid-COPY has less work to retry
 
+LIST_ENTRY_FIELD_COUNT = 28
+
 
 # ─────────────────────────────────────────────
 # FILE HELPERS
@@ -134,6 +136,50 @@ def _open_csv(filepath: str, name_fragment: str):
     else:
         with open(filepath, "r", encoding=VOA_ENCODING) as f:
             yield f
+
+
+def _validate_list_entry_field_count(filepath: str) -> None:
+    with _open_csv(filepath, "listentries") as f:
+        first_line = f.readline()
+        if isinstance(first_line, bytes):
+            first_line = first_line.decode(VOA_ENCODING)
+        if not first_line:
+            raise ValueError("Compiled list entries file is empty.")
+        field_count = len(first_line.rstrip("\r\n").split(VOA_DELIMITER))
+        if field_count != LIST_ENTRY_FIELD_COUNT:
+            raise ValueError(
+                f"Compiled list entries must have exactly {LIST_ENTRY_FIELD_COUNT} fields; "
+                f"found {field_count}."
+            )
+
+
+def _validate_row_field_count(fields: list[str], expected: int, record_type: str) -> None:
+    if len(fields) > expected:
+        raise ValueError(
+            f"Summary valuation record type {record_type} has {len(fields)} fields; "
+            f"expected at most {expected}."
+        )
+
+
+def _build_sv_row(
+    fields: list[str],
+    columns: list[str],
+    record_type: str,
+    current_uarn: str | None = None,
+    current_assessment_ref: str | None = None,
+) -> dict:
+    _validate_row_field_count(fields, len(columns), record_type)
+    padded = fields + [""] * (len(columns) - len(fields))
+    row = dict(zip(columns, padded[: len(columns)]))
+    if record_type != "01":
+        if current_uarn is None or current_assessment_ref is None:
+            raise ValueError(
+                f"Summary valuation record type {record_type} encountered before a parent "
+                "record type 01 established uarn and assessment_reference_number."
+            )
+        row["uarn"] = current_uarn
+        row["assessment_reference_number"] = current_assessment_ref
+    return row
 
 
 # ─────────────────────────────────────────────
@@ -228,7 +274,7 @@ def _process_list_chunk(chunk: pd.DataFrame) -> pd.DataFrame:
     )
 
     # Postcode normalisation + sector derivation
-    chunk["postcode"] = chunk["postcode"].str.strip().str.upper()
+    chunk["postcode"] = chunk["postcode"].astype(str).str.strip().str.upper()
     chunk["postcode_sector"] = chunk["postcode"].str.extract(
         r"^([A-Z]{1,2}\d{1,2}[A-Z]?\s\d)"
     )[0]
@@ -260,6 +306,8 @@ def ingest_list_entries(filepath: str) -> int:
     chunks_read = 0
     first_write = True
 
+    _validate_list_entry_field_count(filepath)
+
     with _open_csv(filepath, "listentries") as f:
         reader = pd.read_csv(
             f,
@@ -274,13 +322,12 @@ def ingest_list_entries(filepath: str) -> int:
         for chunk in reader:
             chunks_read += 1
 
-            # Validate delimiter on the very first chunk
+            # Validate delimiter and compiled list structure on the very first chunk
             if chunks_read == 1 and len(chunk.columns) < 10:
                 raise ValueError(
                     f"First chunk has only {len(chunk.columns)} columns — "
                     "check the delimiter is '*' not ','."
                 )
-
             processed = _process_list_chunk(chunk)
             if processed.empty:
                 continue
@@ -340,6 +387,52 @@ SV_LINE_COLUMNS = [
     "area",         # 5
     "price",        # 6
     "value",        # 7
+    "uarn",
+    "assessment_reference_number",
+]
+
+SV_ADDITIONS_COLUMNS = [
+    "record_type",
+    "oa_description",
+    "oa_size",
+    "oa_price",
+    "oa_value",
+    "uarn",
+    "assessment_reference_number",
+]
+
+SV_PLANT_MACHINERY_COLUMNS = [
+    "record_type",
+    "pm_value",
+    "uarn",
+    "assessment_reference_number",
+]
+
+SV_CAR_PARKING_COLUMNS = [
+    "record_type",
+    "cp_spaces",
+    "cp_spaces_value",
+    "cp_area",
+    "cp_area_value",
+    "cp_total",
+    "uarn",
+    "assessment_reference_number",
+]
+
+SV_ADJUSTMENTS_COLUMNS = [
+    "record_type",
+    "adj_desc",
+    "adj_percent",
+    "uarn",
+    "assessment_reference_number",
+]
+
+SV_ADJUSTMENT_TOTALS_COLUMNS = [
+    "record_type",
+    "total_before_adj",
+    "total_adj",
+    "uarn",
+    "assessment_reference_number",
 ]
 
 
@@ -349,27 +442,86 @@ def _flush_headers(batch: list[dict], first: bool) -> None:
     df["assessment_reference_number"] = pd.to_numeric(
         df["assessment_reference_number"], errors="coerce"
     )
-    df["unadjusted_price_psm"] = pd.to_numeric(df["unadjusted_price_psm"], errors="coerce")
+    df["scat_code"] = pd.to_numeric(df["scat_code"], errors="coerce")
     df["total_area_or_units"] = pd.to_numeric(df["total_area_or_units"], errors="coerce")
+    df["sub_total"] = pd.to_numeric(df["sub_total"], errors="coerce")
+    df["total_value"] = pd.to_numeric(df["total_value"], errors="coerce")
     df["adopted_rv"] = pd.to_numeric(df["adopted_rv"], errors="coerce")
-    df["is_nia"] = df["unit_of_measurement"].str.strip() == "NIA"
+    df["unit_of_measurement"] = df["unit_of_measurement"].astype(str).str.strip().str.upper()
+    df["unadjusted_price_psm"] = pd.to_numeric(df["unadjusted_price_psm"], errors="coerce")
+    df["is_nia"] = df["unit_of_measurement"] == "NIA"
     _write_df(df, "voa_sv_header", "replace" if first else "append")
 
 
 def _flush_lines(batch: list[dict], first: bool) -> None:
     df = pd.DataFrame(batch)
     df["uarn"] = pd.to_numeric(df["uarn"], errors="coerce")
+    df["assessment_reference_number"] = pd.to_numeric(
+        df["assessment_reference_number"], errors="coerce"
+    )
+    df["line_number"] = pd.to_numeric(df["line_number"], errors="coerce")
     df["area"] = pd.to_numeric(df["area"], errors="coerce")
     df["price"] = pd.to_numeric(df["price"], errors="coerce")
     df["value"] = pd.to_numeric(df["value"], errors="coerce")
     _write_df(df, "voa_sv_lines", "replace" if first else "append")
 
 
+def _flush_additions(batch: list[dict], first: bool) -> None:
+    df = pd.DataFrame(batch)
+    df["uarn"] = pd.to_numeric(df["uarn"], errors="coerce")
+    df["assessment_reference_number"] = pd.to_numeric(df["assessment_reference_number"], errors="coerce")
+    df["oa_size"] = pd.to_numeric(df["oa_size"], errors="coerce")
+    df["oa_price"] = pd.to_numeric(df["oa_price"], errors="coerce")
+    df["oa_value"] = pd.to_numeric(df["oa_value"], errors="coerce")
+    _write_df(df, "voa_sv_additions", "replace" if first else "append")
+
+
+def _flush_plant_machinery(batch: list[dict], first: bool) -> None:
+    df = pd.DataFrame(batch)
+    df["uarn"] = pd.to_numeric(df["uarn"], errors="coerce")
+    df["assessment_reference_number"] = pd.to_numeric(df["assessment_reference_number"], errors="coerce")
+    df["pm_value"] = pd.to_numeric(df["pm_value"], errors="coerce")
+    _write_df(df, "voa_sv_plant_machinery", "replace" if first else "append")
+
+
+def _flush_car_parking(batch: list[dict], first: bool) -> None:
+    df = pd.DataFrame(batch)
+    df["uarn"] = pd.to_numeric(df["uarn"], errors="coerce")
+    df["assessment_reference_number"] = pd.to_numeric(df["assessment_reference_number"], errors="coerce")
+    df["cp_spaces"] = pd.to_numeric(df["cp_spaces"], errors="coerce")
+    df["cp_spaces_value"] = pd.to_numeric(df["cp_spaces_value"], errors="coerce")
+    df["cp_area"] = pd.to_numeric(df["cp_area"], errors="coerce")
+    df["cp_area_value"] = pd.to_numeric(df["cp_area_value"], errors="coerce")
+    df["cp_total"] = pd.to_numeric(df["cp_total"], errors="coerce")
+    _write_df(df, "voa_sv_car_parking", "replace" if first else "append")
+
+
+def _flush_adjustments(batch: list[dict], first: bool) -> None:
+    df = pd.DataFrame(batch)
+    df["uarn"] = pd.to_numeric(df["uarn"], errors="coerce")
+    df["assessment_reference_number"] = pd.to_numeric(df["assessment_reference_number"], errors="coerce")
+    df["adj_desc"] = df["adj_desc"].astype(str).str.strip()
+    df["adj_percent"] = pd.to_numeric(
+        df["adj_percent"].astype(str).str.strip().str.removesuffix("%"),
+        errors="coerce",
+    )
+    _write_df(df, "voa_sv_adjustments", "replace" if first else "append")
+
+
+def _flush_adjustment_totals(batch: list[dict], first: bool) -> None:
+    df = pd.DataFrame(batch)
+    df["uarn"] = pd.to_numeric(df["uarn"], errors="coerce")
+    df["assessment_reference_number"] = pd.to_numeric(df["assessment_reference_number"], errors="coerce")
+    df["total_before_adj"] = pd.to_numeric(df["total_before_adj"], errors="coerce")
+    df["total_adj"] = pd.to_numeric(df["total_adj"], errors="coerce")
+    _write_df(df, "voa_sv_adjustment_totals", "replace" if first else "append")
+
+
 def ingest_summary_valuations(filepath: str) -> tuple[int, int]:
     """
-    Stream the multi-record-type summary valuation file into voa_sv_header and
-    voa_sv_lines, flushing to the DB every FLUSH_EVERY records so neither table
-    accumulates in memory.
+    Stream the multi-record-type summary valuation file into voa_sv_header,
+    voa_sv_lines, and record types 03–07 child tables while flushing to the DB
+    in batches so no table accumulates unbounded in memory.
 
     Returns (headers_total, lines_total).
     """
@@ -377,10 +529,25 @@ def ingest_summary_valuations(filepath: str) -> tuple[int, int]:
 
     headers_batch: list[dict] = []
     lines_batch: list[dict] = []
+    additions_batch: list[dict] = []
+    plant_machinery_batch: list[dict] = []
+    car_parking_batch: list[dict] = []
+    adjustments_batch: list[dict] = []
+    adjustment_totals_batch: list[dict] = []
     headers_total = 0
     lines_total = 0
+    additions_total = 0
+    plant_machinery_total = 0
+    car_parking_total = 0
+    adjustments_total = 0
+    adjustment_totals_total = 0
     first_headers = True
     first_lines = True
+    first_additions = True
+    first_plant_machinery = True
+    first_car_parking = True
+    first_adjustments = True
+    first_adjustment_totals = True
     current_uarn = None
     current_assessment_ref = None
 
@@ -401,6 +568,51 @@ def ingest_summary_valuations(filepath: str) -> tuple[int, int]:
             lines_batch = []
             first_lines = False
             print(f"  … {lines_total:,} line rows written")
+
+    def _maybe_flush_additions(force: bool = False) -> None:
+        nonlocal additions_batch, additions_total, first_additions
+        if additions_batch and (force or len(additions_batch) >= FLUSH_LINES):
+            _flush_additions(additions_batch, first_additions)
+            additions_total += len(additions_batch)
+            additions_batch = []
+            first_additions = False
+            print(f"  … {additions_total:,} addition rows written")
+
+    def _maybe_flush_plant_machinery(force: bool = False) -> None:
+        nonlocal plant_machinery_batch, plant_machinery_total, first_plant_machinery
+        if plant_machinery_batch and (force or len(plant_machinery_batch) >= FLUSH_LINES):
+            _flush_plant_machinery(plant_machinery_batch, first_plant_machinery)
+            plant_machinery_total += len(plant_machinery_batch)
+            plant_machinery_batch = []
+            first_plant_machinery = False
+            print(f"  … {plant_machinery_total:,} plant/machinery rows written")
+
+    def _maybe_flush_car_parking(force: bool = False) -> None:
+        nonlocal car_parking_batch, car_parking_total, first_car_parking
+        if car_parking_batch and (force or len(car_parking_batch) >= FLUSH_LINES):
+            _flush_car_parking(car_parking_batch, first_car_parking)
+            car_parking_total += len(car_parking_batch)
+            car_parking_batch = []
+            first_car_parking = False
+            print(f"  … {car_parking_total:,} car parking rows written")
+
+    def _maybe_flush_adjustments(force: bool = False) -> None:
+        nonlocal adjustments_batch, adjustments_total, first_adjustments
+        if adjustments_batch and (force or len(adjustments_batch) >= FLUSH_LINES):
+            _flush_adjustments(adjustments_batch, first_adjustments)
+            adjustments_total += len(adjustments_batch)
+            adjustments_batch = []
+            first_adjustments = False
+            print(f"  … {adjustments_total:,} adjustment rows written")
+
+    def _maybe_flush_adjustment_totals(force: bool = False) -> None:
+        nonlocal adjustment_totals_batch, adjustment_totals_total, first_adjustment_totals
+        if adjustment_totals_batch and (force or len(adjustment_totals_batch) >= FLUSH_LINES):
+            _flush_adjustment_totals(adjustment_totals_batch, first_adjustment_totals)
+            adjustment_totals_total += len(adjustment_totals_batch)
+            adjustment_totals_batch = []
+            first_adjustment_totals = False
+            print(f"  … {adjustment_totals_total:,} adjustment total rows written")
 
     if filepath.endswith(".zip"):
         with zipfile.ZipFile(filepath) as z:
@@ -425,30 +637,68 @@ def ingest_summary_valuations(filepath: str) -> tuple[int, int]:
         record_type = fields[0].strip()
 
         if record_type == "01":
-            padded = fields + [""] * (len(SV_HEADER_COLUMNS) - len(fields))
-            row = dict(zip(SV_HEADER_COLUMNS, padded[: len(SV_HEADER_COLUMNS)]))
+            row = _build_sv_row(fields, SV_HEADER_COLUMNS, record_type)
             current_uarn = row["uarn"]
             current_assessment_ref = row["assessment_reference_number"]
             headers_batch.append(row)
             _maybe_flush_headers()
 
         elif record_type == "02":
-            padded = fields + [""] * (len(SV_LINE_COLUMNS) - len(fields))
-            row = dict(zip(SV_LINE_COLUMNS, padded[: len(SV_LINE_COLUMNS)]))
-            row["uarn"] = current_uarn
-            row["assessment_reference_number"] = current_assessment_ref
-            lines_batch.append(row)
+            lines_batch.append(
+                _build_sv_row(fields, SV_LINE_COLUMNS[:-2], record_type, current_uarn, current_assessment_ref)
+            )
             _maybe_flush_lines()
 
-        # Record types 03–07: not needed for Phase 1 — skip
+        elif record_type == "03":
+            additions_batch.append(
+                _build_sv_row(fields, SV_ADDITIONS_COLUMNS[:-2], record_type, current_uarn, current_assessment_ref)
+            )
+            _maybe_flush_additions()
+
+        elif record_type == "04":
+            plant_machinery_batch.append(
+                _build_sv_row(fields, SV_PLANT_MACHINERY_COLUMNS[:-2], record_type, current_uarn, current_assessment_ref)
+            )
+            _maybe_flush_plant_machinery()
+
+        elif record_type == "05":
+            car_parking_batch.append(
+                _build_sv_row(fields, SV_CAR_PARKING_COLUMNS[:-2], record_type, current_uarn, current_assessment_ref)
+            )
+            _maybe_flush_car_parking()
+
+        elif record_type == "06":
+            adjustments_batch.append(
+                _build_sv_row(fields, SV_ADJUSTMENTS_COLUMNS[:-2], record_type, current_uarn, current_assessment_ref)
+            )
+            _maybe_flush_adjustments()
+
+        elif record_type == "07":
+            adjustment_totals_batch.append(
+                _build_sv_row(fields, SV_ADJUSTMENT_TOTALS_COLUMNS[:-2], record_type, current_uarn, current_assessment_ref)
+            )
+            _maybe_flush_adjustment_totals()
+
+        else:
+            raise ValueError(f"Unsupported summary valuation record type: {record_type!r}")
 
     raw_file.close()
 
     # Final flush of any remaining rows
     _maybe_flush_headers(force=True)
     _maybe_flush_lines(force=True)
+    _maybe_flush_additions(force=True)
+    _maybe_flush_plant_machinery(force=True)
+    _maybe_flush_car_parking(force=True)
+    _maybe_flush_adjustments(force=True)
+    _maybe_flush_adjustment_totals(force=True)
 
-    print(f"Done. {headers_total:,} headers and {lines_total:,} lines written.")
+    print(
+        "Done. "
+        f"{headers_total:,} headers, {lines_total:,} lines, {additions_total:,} additions, "
+        f"{plant_machinery_total:,} plant/machinery, {car_parking_total:,} car parking, "
+        f"{adjustments_total:,} adjustments, and {adjustment_totals_total:,} adjustment totals written."
+    )
     return headers_total, lines_total
 
 
@@ -547,6 +797,7 @@ def add_summary_valuation_flag() -> None:
                 ADD COLUMN IF NOT EXISTS has_summary_valuation BOOLEAN DEFAULT FALSE;
             """)
         )
+        conn.execute(text("UPDATE voa_list_entries SET has_summary_valuation = FALSE;"))
         conn.execute(
             text("""
                 UPDATE voa_list_entries le
@@ -554,6 +805,7 @@ def add_summary_valuation_flag() -> None:
                 WHERE EXISTS (
                     SELECT 1 FROM voa_sv_header sv
                     WHERE sv.uarn = le.uarn
+                      AND sv.assessment_reference_number = le.assessment_reference_number
                 );
             """)
         )
@@ -577,7 +829,7 @@ def add_summary_valuation_flag() -> None:
             f"Summary valuation coverage: {row.with_sv:,} / {row.total:,} ({row.pct}%)"
         )
         assert 60 <= float(row.pct) <= 95, (
-            f"Coverage {row.pct}% outside expected 60–95% range — check the uarn join"
+            f"Coverage {row.pct}% outside expected 60–95% range — check the assessment-level join"
         )
 
 
@@ -589,8 +841,23 @@ def create_indexes() -> None:
             "CREATE INDEX IF NOT EXISTS idx_le_postcode_sector ON voa_list_entries(postcode_sector)",
             "CREATE INDEX IF NOT EXISTS idx_le_scat_code ON voa_list_entries(scat_code)",
             "CREATE INDEX IF NOT EXISTS idx_le_uarn ON voa_list_entries(uarn)",
+            "CREATE INDEX IF NOT EXISTS idx_le_uarn_assessment_ref ON voa_list_entries(uarn, assessment_reference_number)",
             "CREATE INDEX IF NOT EXISTS idx_sv_uarn ON voa_sv_header(uarn)",
+            "CREATE INDEX IF NOT EXISTS idx_sv_assessment_ref ON voa_sv_header(assessment_reference_number)",
+            "CREATE INDEX IF NOT EXISTS idx_sv_uarn_assessment_ref ON voa_sv_header(uarn, assessment_reference_number)",
             "CREATE INDEX IF NOT EXISTS idx_svl_uarn ON voa_sv_lines(uarn)",
+            "CREATE INDEX IF NOT EXISTS idx_svl_assessment_ref ON voa_sv_lines(assessment_reference_number)",
+            "CREATE INDEX IF NOT EXISTS idx_svl_uarn_assessment_ref ON voa_sv_lines(uarn, assessment_reference_number)",
+            "CREATE INDEX IF NOT EXISTS idx_sva_assessment_ref ON voa_sv_additions(assessment_reference_number)",
+            "CREATE INDEX IF NOT EXISTS idx_sva_uarn_assessment_ref ON voa_sv_additions(uarn, assessment_reference_number)",
+            "CREATE INDEX IF NOT EXISTS idx_svpm_assessment_ref ON voa_sv_plant_machinery(assessment_reference_number)",
+            "CREATE INDEX IF NOT EXISTS idx_svpm_uarn_assessment_ref ON voa_sv_plant_machinery(uarn, assessment_reference_number)",
+            "CREATE INDEX IF NOT EXISTS idx_svcp_assessment_ref ON voa_sv_car_parking(assessment_reference_number)",
+            "CREATE INDEX IF NOT EXISTS idx_svcp_uarn_assessment_ref ON voa_sv_car_parking(uarn, assessment_reference_number)",
+            "CREATE INDEX IF NOT EXISTS idx_svadj_assessment_ref ON voa_sv_adjustments(assessment_reference_number)",
+            "CREATE INDEX IF NOT EXISTS idx_svadj_uarn_assessment_ref ON voa_sv_adjustments(uarn, assessment_reference_number)",
+            "CREATE INDEX IF NOT EXISTS idx_svat_assessment_ref ON voa_sv_adjustment_totals(assessment_reference_number)",
+            "CREATE INDEX IF NOT EXISTS idx_svat_uarn_assessment_ref ON voa_sv_adjustment_totals(uarn, assessment_reference_number)",
         ]:
             conn.execute(text(stmt))
         conn.commit()
@@ -606,7 +873,7 @@ VOA ingest pipeline — run each step independently or all at once.
 
 Subcommands:
   list    <list_file>             Ingest list entries only
-  sv      <sv_file>               Ingest summary valuations only
+  sv      <sv_file>               Ingest summary valuations (record types 01–07)
   post                            Add has_summary_valuation flag + indexes
   geocode                         Geocode postcodes into postcode_coords
   all     <list_file> <sv_file>   Run every step in order
