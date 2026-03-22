@@ -56,23 +56,6 @@ def _validate(report_data: dict, required_fields: list[str]) -> None:
             raise ValueError(f"Missing required field: {field}")
 
 
-def _validate_evidence_conditionals(report_data: dict) -> None:
-    """Evidence pack needs zoning_rows or nursery_adjustments depending on type."""
-    bt = report_data.get("business_type", "")
-    if bt == "nursery":
-        if not report_data.get("nursery_adjustments"):
-            raise ValueError(
-                "Missing required field: nursery_adjustments "
-                "(required for nursery business_type)"
-            )
-    else:
-        if not report_data.get("zoning_rows"):
-            raise ValueError(
-                "Missing required field: zoning_rows "
-                "(required for non-nursery business_type)"
-            )
-
-
 def _resolve_template_dir() -> Path:
     """Resolve a valid report template dir from env or known repo locations."""
     configured_dir = os.getenv("REPORT_TEMPLATE_DIR")
@@ -97,6 +80,18 @@ def _resolve_template_dir() -> Path:
     )
 
 
+def _format_floor_config(raw_value: Any) -> str:
+    value = str(raw_value or "").strip()
+    mapping = {
+        "ground_only": "Ground floor only",
+        "ground_lower_ground": "Ground floor plus basement/lower ground",
+        "ground_first": "Ground and upper floor",
+        "ground_lower_ground_first": "Ground, basement/lower ground, and upper floor",
+        "other": "Mixed/other floor arrangement",
+    }
+    return mapping.get(value, value.replace("_", " ").title()) if value else "Not provided"
+
+
 def _normalise_comparable(comp: dict[str, Any]) -> dict[str, Any]:
     """Populate optional template fields so report rendering is resilient."""
     normalised = dict(comp)
@@ -119,6 +114,84 @@ def _normalise_comparable(comp: dict[str, Any]) -> dict[str, Any]:
     normalised.setdefault("floor_config", "")
     normalised.setdefault("uarn", "")
     return normalised
+
+
+def _build_weighting_rows(data: dict[str, Any]) -> list[dict[str, str]]:
+    rows: list[dict[str, str]] = []
+    layout_used = bool(data.get("layout_adjustment_applied"))
+
+    floor_config = _format_floor_config(data.get("floor_config"))
+    rows.append({
+        "factor": "Floor configuration",
+        "subject_profile": floor_config,
+        "effect": (
+            "Compared against properties with a similar floor split when assigning comparative weight."
+            if layout_used else
+            "Comparable weighting based on live /assess layout matching was not applied in this report payload."
+        ),
+    })
+
+    floor_value = str(data.get("floor_config") or "")
+    if floor_value in {"ground_lower_ground", "ground_lower_ground_first"}:
+        basement_profile = "Basement/lower ground space present"
+    else:
+        basement_profile = "No basement/lower ground detail provided"
+    rows.append({
+        "factor": "Basement presence",
+        "subject_profile": basement_profile,
+        "effect": "Used only to prioritise comparables with a similar vertical layout; not a direct deduction or allowance.",
+    })
+
+    kitchen_pos = data.get("kitchen_on_ground")
+    kitchen_profile = {
+        "yes": "Kitchen on the ground floor",
+        "no": "Kitchen away from the ground floor",
+        "no_kitchen": "No kitchen declared",
+    }.get(kitchen_pos, "Kitchen position not provided")
+    rows.append({
+        "factor": "Kitchen position",
+        "subject_profile": kitchen_profile,
+        "effect": "Restaurant/cafe layout matching only — used to prioritise structurally similar comparables, not to change the subject RV directly.",
+    })
+
+    trading = float(data.get("ground_floor_trading_sqm") or 0)
+    storage = float(data.get("ground_floor_storage_sqm") or 0)
+    total = trading + storage
+    if total > 0:
+        storage_pct = round(storage / total * 100)
+        balance = f"Approx. {storage_pct}% storage / {100 - storage_pct}% trading on the declared ground-floor split"
+    else:
+        balance = "Ground-floor storage/trading split not provided"
+    rows.append({
+        "factor": "Storage balance",
+        "subject_profile": balance,
+        "effect": "Used to compare storage-to-trading balance across the comparable set; not treated as an explicit subject-level adjustment.",
+    })
+
+    comps = data.get("comparables") or []
+    if layout_used and comps:
+        scores = [float(c.get("layout_similarity_score") or 0) for c in comps if isinstance(c, dict)]
+        if scores:
+            avg_score = sum(scores) / len(scores)
+            if avg_score >= 0.7:
+                alignment = "High average structural similarity across the weighted comparable set"
+            elif avg_score >= 0.4:
+                alignment = "Moderate average structural similarity across the weighted comparable set"
+            else:
+                alignment = "Limited structural similarity across the weighted comparable set"
+        else:
+            alignment = "Layout weighting indicated, but similarity detail was not supplied"
+    elif layout_used:
+        alignment = "Layout weighting indicated, but comparable similarity detail was not supplied"
+    else:
+        alignment = "Comparable set weighted without live layout-overweight detail"
+    rows.append({
+        "factor": "Overall layout alignment",
+        "subject_profile": alignment,
+        "effect": "Higher-alignment comparables can carry more weight in the inferred fair RV; layout does not apply a direct subject deduction.",
+    })
+
+    return rows
 
 
 def _derive_fields(report_data: dict) -> dict:
@@ -148,12 +221,19 @@ def _derive_fields(report_data: dict) -> dict:
             for comp in comps
         ]
 
+    data.setdefault("weighting_rows", _build_weighting_rows(data))
+
     # Submission narrative (evidence pack)
     if data.get("modelled_rv") is not None:
         business_name = data.get("business_name", "")
         property_address = data.get("property_address", "")
         postcode = data.get("postcode", "")
         business_type = data.get("business_type", "")
+        layout_sentence = (
+            " Layout details were used to prioritise and weight more structurally similar comparable properties."
+            if data.get("layout_adjustment_applied")
+            else ""
+        )
         data.setdefault(
             "submission_narrative",
             (
@@ -162,9 +242,10 @@ def _derive_fields(report_data: dict) -> dict:
                 f"The property is classified as {business_type} "
                 f"with a current VOA rateable value of £{voa_rv:,.0f}. "
                 f"Based on analysis of {data.get('comp_count', 0)} comparable "
-                f"properties, the modelled rateable value is £{modelled_rv:,.0f}, "
+                f"properties, the estimated fair rateable value inferred from the weighted comparable set is £{modelled_rv:,.0f}, "
                 f"representing a difference of £{data.get('rv_delta', 0):,.0f} "
                 f"({data.get('rv_delta_pct', 0)}%)."
+                f"{layout_sentence} These property-specific nuances influenced comparable weighting only; they did not create separate subject-level deductions or allowances in this report."
             ),
         )
 
@@ -222,5 +303,4 @@ def generate_evidence_pack(report_data: dict) -> bytes:
         "evidence_pack.html",
         report_data,
         _SIMPLIFIED_REQUIRED + _EVIDENCE_EXTRA_REQUIRED,
-        conditional_validator=_validate_evidence_conditionals,
     )

@@ -450,9 +450,9 @@ table { page-break-inside: avoid; }
 
   <p class="case-label">Case Strength: <span style="color:{% if case_strength == 'High' %}#2E7D32{% elif case_strength == 'Medium' %}#D4956A{% else %}#7A8A9A{% endif %};">{{ case_strength }}</span></p>
 
-  <p>This assessment analysed {{ comp_count }} comparable properties drawn from the VOA's published bulk data. The evidence suggests a fair rateable value in the range &pound;{{ modelled_rv_low }}&ndash;{{ modelled_rv_high }}, compared to the current assessment of &pound;{{ voa_rv }} — a difference of &pound;{{ rv_delta }} ({{ rv_delta_pct }}%).</p>
+  <p>This assessment analysed {{ comp_count }} comparable properties drawn from the VOA's published bulk data. The evidence suggests a fair rateable value in the range &pound;{{ modelled_rv_low }}&ndash;{{ modelled_rv_high }}, compared to the current assessment of &pound;{{ voa_rv }} — a difference of &pound;{{ rv_delta }} ({{ rv_delta_pct }}%). The estimate is inferred from the weighted comparable set rather than from separate subject-level deductions.</p>
   {% if layout_adjustment_applied %}
-  <p>Layout details provided by the ratepayer were used to prioritise structurally similar comparables.</p>
+  <p>Layout details provided by the ratepayer were used to prioritise and weight more structurally similar comparables. Kitchen position, basement presence, storage balance, and floor configuration affected comparable relevance only, not a direct subject adjustment.</p>
   {% endif %}
   <p>This analysis applies the same valuation methodology and data used by the VOA to compile the 2026 rating list, with an antecedent valuation date of 1 April 2024.</p>
 </div>
@@ -462,7 +462,7 @@ table { page-break-inside: avoid; }
      ═══════════════════════════════════════════════════════════════════ -->
 <div class="section">
   <h1>Comparable Evidence</h1>
-  <p class="intro-line">The following properties were identified from VOA bulk data as comparable to the subject property. Properties with higher layout similarity have been given greater weight in deriving the estimated valuation range.</p>
+  <p class="intro-line">The following properties were identified from VOA bulk data as comparable to the subject property. More relevant comparables carry greater weight in the estimate, and layout similarity can increase weighting where live layout data was supplied.</p>
 
   <table class="comp-table">
     <thead>
@@ -503,50 +503,36 @@ table { page-break-inside: avoid; }
 </div>
 
 <!-- ═══════════════════════════════════════════════════════════════════
-     SECTION 4 — VALUATION CALCULATION
+     SECTION 4 — COMPARABLE WEIGHTING SUMMARY
      ═══════════════════════════════════════════════════════════════════ -->
 <div class="section">
-  <h1>Valuation Calculation</h1>
+  <h1>Comparable Weighting Summary</h1>
+  <p>The live assessment model infers a fair rateable value from the weighted comparable set. Property-specific nuances are used to decide which comparables are most relevant and how much influence they carry, rather than applying separate kitchen, basement, zoning, or relativity deductions to the subject property.</p>
 
-  {% if business_type in ['retail', 'restaurant'] %}
-  <h2>Zoning Schedule</h2>
   <table class="calc-table">
     <thead>
       <tr>
-        <th>Zone</th>
-        <th class="num">Area (sqm)</th>
-        <th class="num">Relativity</th>
-        <th class="num">Area Type Weight</th>
-        <th class="num">Tone (&pound;/m&sup2;)</th>
-        <th class="num">Value (&pound;)</th>
+        <th>Factor</th>
+        <th>Subject Profile</th>
+        <th>Effect on Comparable Weighting</th>
       </tr>
     </thead>
     <tbody>
-      {% for row in zoning_rows %}
+      {% for row in weighting_rows %}
       <tr>
-        <td>{{ row.zone }}</td>
-        <td class="num">{{ row.area_sqm }}</td>
-        <td class="num">{{ row.relativity }}</td>
-        <td class="num">{{ row.area_type_weight }}</td>
-        <td class="num">&pound;{{ row.tone }}</td>
-        <td class="num">&pound;{{ row.value }}</td>
+        <td>{{ row.factor }}</td>
+        <td>{{ row.subject_profile }}</td>
+        <td>{{ row.effect }}</td>
       </tr>
       {% endfor %}
     </tbody>
   </table>
-  <div class="calc-totals">
-    <p><strong>Subtotal (pre-allowances):</strong> &pound;{{ subtotal_pre }}</p>
-    <p><strong>Allowances:</strong> {{ allowances_summary }}</p>
-    <p><strong>Modelled Rateable Value:</strong> &pound;{{ modelled_rv }}</p>
-  </div>
-  {% endif %}
 
-  {% if business_type == 'nursery' %}
-  <h2>NIA Calculation</h2>
-  <p>{{ nia_sqm }} sqm &times; &pound;{{ final_tone_psm }}/m&sup2; = &pound;{{ subtotal_pre }}</p>
-  <p><strong>Adjustments:</strong> {{ nursery_adjustments }}</p>
-  <p><strong>Modelled Rateable Value:</strong> &pound;{{ modelled_rv }}</p>
-  {% endif %}
+  <div class="calc-totals">
+    <p><strong>Estimated fair RV inferred from weighted comparables:</strong> &pound;{{ modelled_rv }}</p>
+    <p><strong>Current VOA RV:</strong> &pound;{{ voa_rv }}</p>
+    <p><strong>Difference:</strong> &pound;{{ rv_delta }} ({{ rv_delta_pct }}%)</p>
+  </div>
 </div>
 
 <!-- ═══════════════════════════════════════════════════════════════════
@@ -562,11 +548,11 @@ table { page-break-inside: avoid; }
   <p>Comparable properties were selected based on geographic proximity, matching business type classification, and similar net internal area. The selection algorithm identifies properties within the same billing authority area first, then expands the search radius if insufficient comparables are found locally.</p>
 
   <h2>Valuation Approach</h2>
-  <p>The estimated rateable value is derived using a weighted average of comparable rates per square metre, applied to the subject property's floor area. Weights are assigned based on similarity across multiple dimensions including size, location, and — where layout data is provided — structural configuration.</p>
+  <p>The estimated rateable value is inferred from a weighted comparable set. Comparable weights reflect market relevance across size, location, and available evidence quality, with layout-informed weighting applied when subject layout details are supplied.</p>
 
   {% if layout_adjustment_applied %}
   <h2>Layout Weighting</h2>
-  <p>The ratepayer provided detailed layout information for the subject property. This data was used to calculate a structural fingerprint comprising storage-to-trading ratios, floor configuration, and kitchen positioning. Each comparable was scored against this fingerprint, and comparables with higher structural similarity received greater weight in the valuation model. This approach ensures the estimated rateable value more closely reflects the economic characteristics of the subject property rather than relying solely on headline floor area.</p>
+  <p>The ratepayer provided detailed layout information for the subject property. This data was used to calculate a structural fingerprint comprising storage-to-trading balance, floor configuration, basement presence, and kitchen positioning. Comparables with stronger structural alignment carried greater weight in the evidence set. These factors influenced comparable weighting only; they did not create separate subject-level deductions or allowances.</p>
   {% endif %}
 
   <h2>Antecedent Valuation Date</h2>
