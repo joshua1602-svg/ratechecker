@@ -237,9 +237,9 @@ table { page-break-inside: avoid; }
 <!-- ═══ HOW WE REACHED THIS ═══ -->
 <div class="section">
   <h1>How We Reached This Conclusion</h1>
-  <p>This assessment compares your property against {{ comp_count }} similar properties drawn from the VOA's own published bulk data — the same data used to set rateable values nationally. Properties were selected based on location, business type, and floor area.</p>
+  <p>This assessment compares your property against {{ comp_count }} similar properties drawn from the VOA's own published bulk data — the same data used to set rateable values nationally. Properties were selected based on location, business type, and floor area, then weighted according to their relevance to the subject property.</p>
   {% if layout_adjustment_applied %}
-  <p>We also used the layout details you provided to prioritise comparables with a similar floor plan.</p>
+  <p>We also used the layout details you provided to prioritise and weight more structurally similar comparables. Those details improve comparable relevance only; they do not create separate subject-level deductions or allowances.</p>
   {% endif %}
   <p>All figures reflect market conditions as of 1 April 2024, the date the VOA used to set 2026 rateable values.</p>
 </div>

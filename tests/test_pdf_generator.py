@@ -137,21 +137,23 @@ class TestBusinessTypeBranching:
         assert isinstance(result, bytes)
         assert result[:4] == b"%PDF"
 
-    def test_nursery_missing_adjustments_raises(self):
+    def test_nursery_missing_adjustments_no_longer_required(self):
         data = _base_report_data()
         data["business_type"] = "nursery"
         data["zoning_rows"] = []
         data["nursery_adjustments"] = None
-        with pytest.raises(ValueError, match="nursery_adjustments"):
-            generate_evidence_pack(data)
+        result = generate_evidence_pack(data)
+        assert isinstance(result, bytes)
+        assert result[:4] == b"%PDF"
 
-    def test_retail_missing_zoning_rows_raises(self):
+    def test_retail_missing_zoning_rows_no_longer_required(self):
         data = _base_report_data()
         data["business_type"] = "retail"
         data["zoning_rows"] = None
         data["nursery_adjustments"] = None
-        with pytest.raises(ValueError, match="zoning_rows"):
-            generate_evidence_pack(data)
+        result = generate_evidence_pack(data)
+        assert isinstance(result, bytes)
+        assert result[:4] == b"%PDF"
 
 
 # ── Layout adjustment flag ─────────────────────────────────────────────
