@@ -15,7 +15,8 @@ if not DATABASE_URL:
     raise ValueError("DATABASE_URL environment variable not set. Check your .env file.")
 
 # NullPool is recommended for scripts and batch jobs — avoids connection leaks.
-# The FastAPI app (api/db.py) uses a regular pool instead.
+# The FastAPI app (api/db.py) uses a regular pool instead.  The connect args
+# below keep long COPY-based loads stable across multiple child-table ingests.
 engine = create_engine(
     DATABASE_URL,
     poolclass=NullPool,
