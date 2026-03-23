@@ -157,14 +157,10 @@ table { page-break-inside: avoid; }
 .comp-table tr:nth-child(even) td { background: #FDF5EE; }
 .comp-table .num { text-align: right; }
 
-/* ── Steps list ── */
-.steps-list {
-  margin: 4px 0 8px 0;
-  padding-left: 18px;
+/* ── Steps (manual numbered paragraphs) ── */
+.step-item {
   font-size: 8.5pt;
-}
-.steps-list li {
-  margin-bottom: 2px;
+  margin-bottom: 6px;
   line-height: 1.45;
 }
 
@@ -216,30 +212,31 @@ table { page-break-inside: avoid; }
 <div class="header-meta">{{ business_name }} &nbsp;&bull;&nbsp; {{ property_address }} &nbsp;&bull;&nbsp; Prepared: {{ date_prepared }}</div>
 
 <!-- ═══ BANNER ═══ -->
-<div class="section">
-  <div class="banner">
-    <div class="banner-box">
-      <div class="banner-label">Current Rateable Value</div>
-      <div class="banner-value">&pound;{{ voa_rv }}</div>
-    </div>
-    <div class="banner-box banner-box-accent">
-      <div class="banner-label">Estimated Fair RV</div>
-      <div class="banner-value">&pound;{{ modelled_rv_low }}&ndash;&pound;{{ modelled_rv_high }}</div>
-    </div>
-    <div class="banner-box banner-box-accent">
-      <div class="banner-label">Potential Annual Saving</div>
-      <div class="banner-value">&pound;{{ annual_saving_low }}&ndash;{{ annual_saving_high }}</div>
-    </div>
-    <div class="banner-box">
-      <div class="banner-label">Case Strength</div>
-      <div class="banner-value" style="color: {% if case_strength == 'High' %}#2E7D32{% elif case_strength == 'Medium' %}#D4956A{% else %}#7A8A9A{% endif %};">{{ case_strength }}</div>
-    </div>
+<div class="banner">
+  <div class="banner-box">
+    <div class="banner-label">Current Rateable Value</div>
+    <div class="banner-value">&pound;{{ voa_rv | format_currency }}</div>
   </div>
+  <div class="banner-box banner-box-accent">
+    <div class="banner-label">Estimated Fair RV</div>
+    <div class="banner-value">&pound;{{ modelled_rv_low | format_currency }}&ndash;&pound;{{ modelled_rv_high | format_currency }}</div>
+  </div>
+  <div class="banner-box banner-box-accent">
+    <div class="banner-label">Potential Annual Saving</div>
+    <div class="banner-value">&pound;{{ annual_saving_low | format_currency }}&ndash;&pound;{{ annual_saving_high | format_currency }}</div>
+  </div>
+  <div class="banner-box">
+    <div class="banner-label">Case Strength</div>
+    <div class="banner-value" style="color: {% if case_strength == 'High' %}#2E7D32{% elif case_strength == 'Medium' %}#D4956A{% else %}#7A8A9A{% endif %};">{{ case_strength }}</div>
+  </div>
+</div>
 
+<!-- ═══ SUMMARY ═══ -->
+<div class="section">
   <div class="summary-text">
-    Based on {{ comp_count }} comparable properties nearby, your current rateable value of &pound;{{ voa_rv }} appears
+    Based on {{ comp_count }} comparable properties nearby, your current rateable value of &pound;{{ voa_rv | format_currency }} appears
     {% if voa_rv > modelled_rv_high %}
-    higher than similar units. This suggests you may be overpaying by &pound;{{ annual_saving_low }}&ndash;{{ annual_saving_high }} per year.
+    higher than similar units. This suggests you may be overpaying by &pound;{{ annual_saving_low | format_currency }}&ndash;&pound;{{ annual_saving_high | format_currency }} per year.
     {% elif voa_rv < modelled_rv_low %}
     lower than similar units. Your property may be correctly assessed or undervalued.
     {% else %}
@@ -280,7 +277,7 @@ table { page-break-inside: avoid; }
       <tr>
         <td>{{ comp.address }}</td>
         <td>{{ comp.nia_sqm }}</td>
-        <td class="num">&pound;{{ comp.rv }}</td>
+        <td class="num">&pound;{{ comp.rv | format_currency }}</td>
         <td class="num">&pound;{{ comp.rate_psm }}</td>
         {% if layout_adjustment_applied %}
         <td>
@@ -299,13 +296,11 @@ table { page-break-inside: avoid; }
 <div class="section">
   <h1>How to Challenge</h1>
 
-  <ol class="steps-list">
-    <li>Find your property at <strong>gov.uk/find-business-rates</strong></li>
-    <li>Select 'Check your rateable value' and sign in or create a business rates valuation account</li>
-    <li>Submit a Check — confirm the facts about your property are correct</li>
-    <li>If the Check does not resolve it, submit a Challenge using the comparables in this report as evidence</li>
-    <li>If unsuccessful, you have the right to appeal to the Valuation Tribunal</li>
-  </ol>
+  <p class="step-item"><strong>1.</strong> Find your property at <strong>gov.uk/find-business-rates</strong></p>
+  <p class="step-item"><strong>2.</strong> Select 'Check your rateable value' and sign in or create a business rates valuation account</p>
+  <p class="step-item"><strong>3.</strong> Submit a Check — confirm the facts about your property are correct</p>
+  <p class="step-item"><strong>4.</strong> If the Check does not resolve it, submit a Challenge using the comparables in this report as evidence</p>
+  <p class="step-item"><strong>5.</strong> If unsuccessful, you have the right to appeal to the Valuation Tribunal</p>
 
   <div class="callout">
     <strong>Important:</strong> From April 2026, you have 3 months from the date your new rateable value takes effect to submit a formal Challenge. Do not delay.
