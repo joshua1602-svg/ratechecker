@@ -6,9 +6,18 @@ import logging
 from fastapi import APIRouter, HTTPException
 
 from api.captcha import verify_turnstile
-from api.db import DATABASE_URL, get_comparables, get_sv_lines_batch
+from api.db import (
+    DATABASE_URL,
+    get_comparables,
+    get_sv_lines_batch,
+    get_sv_car_parking_batch,
+    get_sv_additions_batch,
+    get_sv_plant_machinery_batch,
+    get_sv_adjustment_totals_batch,
+)
 from api.engine.csa import Comparable, run_csa
 from api.engine.geocoding import postcode_to_coords
+from api.engine.fit_layer import apply_fit_layer
 from api.engine.layout_overweight import LayoutInput, apply_layout_overweighting
 from api.engine.rules import csa_rules
 from api.engine.valuation import apply_adjustments
@@ -152,6 +161,30 @@ async def assess(req: AssessRequest) -> AssessResponse:
             layout_result.get("layout_adjustment_applied"),
         )
 
+    # 5c. 03-07 fit classification and pool-control layer
+    _base_comps = (
+        layout_result["comps"] if layout_result is not None
+        else result.get("_rated_comps", [])
+    )
+    _comps_for_response: list[dict] = []
+    if _base_comps:
+        _comp_uarns = [str(c["uarn"]) for c in _base_comps]
+        _fit_result = apply_fit_layer(
+            rated_comps=_base_comps,
+            parking_by_uarn=get_sv_car_parking_batch(_comp_uarns),
+            additions_by_uarn=get_sv_additions_batch(_comp_uarns),
+            pm_by_uarn=get_sv_plant_machinery_batch(_comp_uarns),
+            adj_totals_by_uarn=get_sv_adjustment_totals_batch(_comp_uarns),
+            subject_has_parking=None,  # form field not yet added
+        )
+        _comps_for_response = _fit_result["comps"]
+        log.warning(
+            "ASSESS_DEBUG fit_layer density_tier=%s fit_applied=%s in=%d out=%d",
+            _fit_result["density_tier"], _fit_result["fit_applied"],
+            _fit_result["fit_summary"]["input_count"],
+            _fit_result["fit_summary"]["output_count"],
+        )
+
     # 6. Apply adjustment layer
     # Runs only when the CSA produced a valid estimate (base_rv is not None).
     # Missing optional fields (areas, nursery) are handled inside apply_adjustments
@@ -187,4 +220,5 @@ async def assess(req: AssessRequest) -> AssessResponse:
         adjusted_estimated_rv=adj_rv,
         adjustments=adj_breakdown,
         adjustment_summary=adj_summary,
+        rated_comps=_comps_for_response,
     )

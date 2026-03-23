@@ -480,8 +480,8 @@ table { page-break-inside: avoid; }
   <table class="comp-table">
     <thead>
       <tr>
-        <th style="width:28%;">Address</th>
-        <th style="width:14%;">UARN</th>
+        <th style="width:22%;">Address</th>
+        <th style="width:12%;">UARN</th>
         <th style="width:10%;" class="num">Floor Area sqm</th>
         <th style="width:12%;" class="num">Rateable Value &pound;</th>
         <th style="width:10%;" class="num">Rate &pound;/sqm</th>
@@ -489,6 +489,7 @@ table { page-break-inside: avoid; }
         {% if layout_adjustment_applied %}
         <th style="width:8%;">Similarity</th>
         {% endif %}
+        <th style="width:8%;">Fit</th>
         <th style="width:8%;" class="num">Weight %</th>
       </tr>
     </thead>
@@ -508,6 +509,7 @@ table { page-break-inside: avoid; }
           {% else %}Standard{% endif %}
         </td>
         {% endif %}
+        <td>{{ comp.fit_class | capitalize if comp.fit_class else "—" }}</td>
         <td class="num">{{ comp.weight_pct }}</td>
       </tr>
       {% endfor %}

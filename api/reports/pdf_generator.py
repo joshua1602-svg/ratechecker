@@ -105,12 +105,9 @@ def _normalise_comparable(comp: dict[str, Any]) -> dict[str, Any]:
     similarity = normalised.get("layout_similarity_score")
     normalised["layout_similarity_score"] = float(similarity or 0)
 
-    adjusted_weight = normalised.get("adjusted_weight")
-    if normalised.get("weight_pct") is None:
-        if adjusted_weight is not None:
-            normalised["weight_pct"] = round(float(adjusted_weight) * 100, 1)
-        else:
-            normalised["weight_pct"] = ""
+    # weight_pct is intentionally left unset here; pool-level normalisation
+    # in _derive_fields() computes the correct share-of-pool percentage.
+    normalised.setdefault("weight_pct", "")
 
     normalised.setdefault("floor_config", "")
     normalised.setdefault("uarn", "")
@@ -223,13 +220,28 @@ def _derive_fields(report_data: dict) -> dict:
         if voa_rv != 0:
             data.setdefault("rv_delta_pct", round((rv_delta / voa_rv) * 100, 1))
 
-    # Per-comparable rate_psm
+    # Per-comparable normalisation (rate_psm, layout_similarity_score defaults)
     comps = data.get("comparables")
     if comps:
         data["comparables"] = [
             _normalise_comparable(comp) if isinstance(comp, dict) else comp
             for comp in comps
         ]
+
+    # Pool-level weight normalisation: convert raw weight floats to share-of-pool %.
+    # Handles both 'adjusted_weight' (layout path) and 'weight' (CSA-only path).
+    _comps_list = data.get("comparables") or []
+    if _comps_list:
+        _weight_sum = sum(
+            float(c.get("adjusted_weight") or c.get("weight") or 0)
+            for c in _comps_list if isinstance(c, dict)
+        )
+        if _weight_sum > 0:
+            for _c in _comps_list:
+                if isinstance(_c, dict):
+                    _raw = _c.get("adjusted_weight") or _c.get("weight")
+                    if _raw is not None:
+                        _c["weight_pct"] = round(float(_raw) / _weight_sum * 100, 1)
 
     data.setdefault("weighting_rows", _build_weighting_rows(data))
 
