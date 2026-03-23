@@ -1,10 +1,9 @@
 """Tests for api.reports.pdf_generator."""
 from __future__ import annotations
 
-import copy
-
 import pytest
 
+from api.reports import pdf_generator
 from api.reports.pdf_generator import generate_evidence_pack, generate_simplified_report
 
 
@@ -173,3 +172,32 @@ class TestLayoutAdjustment:
         result = generate_evidence_pack(data)
         assert isinstance(result, bytes)
         assert result[:4] == b"%PDF"
+
+
+class TestPdfTemplateRendering:
+    def test_simplified_template_uses_css_page_counters_and_single_line_rv_range(self):
+        data = pdf_generator._derive_fields(_base_report_data())
+        html = pdf_generator._load_template(
+            pdf_generator._get_env(),
+            "simplified_report.html",
+        ).render(**data)
+
+        assert 'Page <span class="page-number"></span> of <span class="total-pages"></span>' in html
+        assert ".page-number::before { content: counter(page); }" in html
+        assert ".total-pages::before { content: counter(pages); }" in html
+        assert "Annual Saving" in html
+        assert "&pound;18000&ndash;&pound;22000" in html
+        assert 'class="banner-value nowrap-range"' in html
+
+    def test_evidence_pack_renders_title_case_sector_and_dynamic_comparable_reference(self):
+        data = pdf_generator._derive_fields(_base_report_data())
+        html = pdf_generator._load_template(
+            pdf_generator._get_env(),
+            "evidence_pack.html",
+        ).render(**data)
+
+        assert ">Restaurant Cafe<" in html
+        assert 'id="comparable-evidence"' in html
+        assert 'class="page-ref"' in html
+        assert "Comparable evidence is set out on page" in html
+        assert "Challenge deadline:" in html
