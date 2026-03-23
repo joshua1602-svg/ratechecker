@@ -47,6 +47,21 @@ class DatabaseError(Exception):
     """
 
 
+def _coerce_uarns_to_int(uarns: list[str]) -> list[int]:
+    """Convert string UARNs to integers for PostgreSQL bigint column compatibility.
+
+    Silently drops any non-numeric values (should not occur with real VOA data,
+    but prevents a full batch failure from one bad value).
+    """
+    result: list[int] = []
+    for u in uarns:
+        try:
+            result.append(int(u))
+        except (ValueError, TypeError):
+            log.warning("Skipping non-numeric UARN value: %r", u)
+    return result
+
+
 def get_comparables(
     lat: float,
     lon: float,
@@ -137,7 +152,14 @@ def get_comparables(
     if postcode_prefix is not None:
         params["postcode_prefix"] = postcode_prefix + "%"
     if exclude_uarn is not None:
-        params["exclude_uarn"] = exclude_uarn
+        try:
+            params["exclude_uarn"] = int(exclude_uarn)
+        except (ValueError, TypeError):
+            log.warning("Non-numeric exclude_uarn %r — skipping exclusion", exclude_uarn)
+            # Remove the clause from the SQL by not setting the param;
+            # but since the SQL was already built with the clause, we need to
+            # set it to a value that won't match anything (0 is not a valid UARN).
+            params["exclude_uarn"] = 0
 
     try:
         with Session(engine) as session:
@@ -160,6 +182,9 @@ def get_sv_line_descs_batch(uarns: list[str]) -> dict[str, tuple[str, ...]]:
     """
     if not uarns:
         return {}
+    int_uarns = _coerce_uarns_to_int(uarns)
+    if not int_uarns:
+        return {}
     sql = text("""
         SELECT uarn, description
         FROM voa_sv_lines
@@ -169,10 +194,10 @@ def get_sv_line_descs_batch(uarns: list[str]) -> dict[str, tuple[str, ...]]:
     """)
     try:
         with Session(engine) as session:
-            rows = session.execute(sql, {"uarns": list(uarns)}).fetchall()
+            rows = session.execute(sql, {"uarns": int_uarns}).fetchall()
         result: dict[str, list[str]] = {}
         for r in rows:
-            result.setdefault(r.uarn, []).append(r.description)
+            result.setdefault(str(r.uarn), []).append(r.description)
         return {k: tuple(v) for k, v in result.items()}
     except Exception as exc:
         log.error("get_sv_line_descs_batch failed: %s", exc, exc_info=True)
@@ -191,6 +216,9 @@ def get_sv_lines_batch(uarns: list[str]) -> dict[str, list[dict]]:
     """
     if not uarns:
         return {}
+    int_uarns = _coerce_uarns_to_int(uarns)
+    if not int_uarns:
+        return {}
     sql = text("""
         SELECT uarn, floor, description, area
         FROM voa_sv_lines
@@ -200,7 +228,7 @@ def get_sv_lines_batch(uarns: list[str]) -> dict[str, list[dict]]:
     """)
     try:
         with Session(engine) as session:
-            rows = session.execute(sql, {"uarns": list(uarns)}).fetchall()
+            rows = session.execute(sql, {"uarns": int_uarns}).fetchall()
         result: dict[str, list[dict]] = {}
         for r in rows:
             result.setdefault(str(r.uarn), []).append({
@@ -228,6 +256,9 @@ def get_sv_car_parking_batch(uarns: list[str]) -> dict[str, dict]:
     """
     if not uarns:
         return {}
+    int_uarns = _coerce_uarns_to_int(uarns)
+    if not int_uarns:
+        return {}
     sql = text("""
         SELECT uarn, cp_spaces, cp_total
         FROM voa_sv_car_parking
@@ -235,7 +266,7 @@ def get_sv_car_parking_batch(uarns: list[str]) -> dict[str, dict]:
     """)
     try:
         with Session(engine) as session:
-            rows = session.execute(sql, {"uarns": list(uarns)}).fetchall()
+            rows = session.execute(sql, {"uarns": int_uarns}).fetchall()
         return {
             str(r.uarn): {
                 "cp_spaces": float(r.cp_spaces) if r.cp_spaces is not None else None,
@@ -257,6 +288,9 @@ def get_sv_additions_batch(uarns: list[str]) -> dict[str, dict]:
     """
     if not uarns:
         return {}
+    int_uarns = _coerce_uarns_to_int(uarns)
+    if not int_uarns:
+        return {}
     sql = text("""
         SELECT uarn,
                SUM(oa_value) AS total_oa_value,
@@ -267,7 +301,7 @@ def get_sv_additions_batch(uarns: list[str]) -> dict[str, dict]:
     """)
     try:
         with Session(engine) as session:
-            rows = session.execute(sql, {"uarns": list(uarns)}).fetchall()
+            rows = session.execute(sql, {"uarns": int_uarns}).fetchall()
         return {
             str(r.uarn): {
                 "total_oa_value": float(r.total_oa_value) if r.total_oa_value is not None else 0.0,
@@ -290,6 +324,9 @@ def get_sv_plant_machinery_batch(uarns: list[str]) -> dict[str, dict]:
     """
     if not uarns:
         return {}
+    int_uarns = _coerce_uarns_to_int(uarns)
+    if not int_uarns:
+        return {}
     sql = text("""
         SELECT uarn,
                SUM(pm_value) AS pm_value,
@@ -300,7 +337,7 @@ def get_sv_plant_machinery_batch(uarns: list[str]) -> dict[str, dict]:
     """)
     try:
         with Session(engine) as session:
-            rows = session.execute(sql, {"uarns": list(uarns)}).fetchall()
+            rows = session.execute(sql, {"uarns": int_uarns}).fetchall()
         return {
             str(r.uarn): {
                 "pm_value": float(r.pm_value) if r.pm_value is not None else 0.0,
@@ -321,6 +358,9 @@ def get_sv_adjustment_totals_batch(uarns: list[str]) -> dict[str, dict]:
     """
     if not uarns:
         return {}
+    int_uarns = _coerce_uarns_to_int(uarns)
+    if not int_uarns:
+        return {}
     sql = text("""
         SELECT uarn, total_before_adj, total_adj
         FROM voa_sv_adjustment_totals
@@ -328,7 +368,7 @@ def get_sv_adjustment_totals_batch(uarns: list[str]) -> dict[str, dict]:
     """)
     try:
         with Session(engine) as session:
-            rows = session.execute(sql, {"uarns": list(uarns)}).fetchall()
+            rows = session.execute(sql, {"uarns": int_uarns}).fetchall()
         return {
             str(r.uarn): {
                 "total_before_adj": float(r.total_before_adj) if r.total_before_adj is not None else 0.0,
