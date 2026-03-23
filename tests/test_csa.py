@@ -449,20 +449,42 @@ class TestRestaurantSpecificPath:
 
 
     def test_restaurant_median_distance_quality_gate(self):
-        """Restaurant/cafe returns Insufficient Data when median distance exceeds 1.0km."""
+        """
+        Restaurant/cafe returns Insufficient Data when all comps are beyond
+        the adaptive distance cap — even in low-density mode.
+
+        Comps placed at ~2 800–3 000 m from subject exceed the low-density
+        adaptive cap (2 500 m), so the pool is empty after stage 2.
+
+        Note: the original version of this test used 3 comps at ~1 336–1 558 m
+        and relied on the 1 500 m hard cap reducing the pool to 2, which then
+        failed MIN_COMPS=3.  That specific codepath is now the low-density
+        relaxation.  The test is updated to exercise the genuine "all comps
+        beyond even the widened cap" rejection path.
+        """
         comps = [
             _comp("A", rv=15_000, nia_sqm=100, unadjusted_price_psm=150.0, has_summary=True, scat_code=409,
-                  lat=51.5120, lon=-0.1),
+                  lat=51.5252, lon=-0.1),   # ~2 804 m
             _comp("B", rv=16_000, nia_sqm=100, unadjusted_price_psm=151.0, has_summary=True, scat_code=409,
-                  lat=51.5130, lon=-0.1),
+                  lat=51.5262, lon=-0.1),   # ~2 915 m
             _comp("C", rv=14_000, nia_sqm=100, unadjusted_price_psm=149.0, has_summary=True, scat_code=409,
-                  lat=51.5140, lon=-0.1),
+                  lat=51.5272, lon=-0.1),   # ~3 026 m
         ]
         result = _run(comps, nia_sqm=100.0, business_type="restaurant_cafe")
         assert result["signal"] == "Insufficient Data"
 
-    def test_restaurant_rate_sanity_gate_blocks_large_divergence(self):
-        """Restaurant/cafe rejects tones with >£50/m² distance from implied subject rate."""
+    def test_restaurant_rate_sanity_gate_caps_confidence_on_large_divergence(self):
+        """
+        Restaurant/cafe caps confidence to Low (rather than hard-blocking) when
+        the tone is >£50/m² from the implied subject rate on a 3-comp pool.
+
+        The gt_50 band is an explicit *confidence signal*, not a hard rejection:
+        large rate distance reflects genuine overassessment, which is exactly the
+        scenario the product targets.  The pipeline must still return a result.
+
+        Hard rejection requires either: fewer than 3 comps with rate_distance>35,
+        or specific 35–50 band conditions (weak pool / downward bias).
+        """
         comps = [
             _comp("A", rv=15_000, nia_sqm=100, unadjusted_price_psm=400.0, has_summary=True, scat_code=409,
                   lat=51.5005, lon=-0.1),
@@ -472,7 +494,13 @@ class TestRestaurantSpecificPath:
                   lat=51.5007, lon=-0.1),
         ]
         result = _run(comps, nia_sqm=100.0, voa_rv=10_000.0, business_type="restaurant_cafe")
-        assert result["signal"] == "Insufficient Data"
+        assert result["signal"] != "Insufficient Data", (
+            "gt_50 rate-distance band should not hard-block a 3-comp pool"
+        )
+        assert result["confidence"] == "Low"
+        dbg = result.get("_debug", {})
+        assert dbg.get("restaurant_rate_distance_band") == "gt_50"
+        assert dbg.get("restaurant_quality_gate_passed") is True
     def test_restaurant_rate_distance_20_35_caps_confidence_to_medium(self):
         """Restaurant/cafe caps confidence to Medium in the 20–35 rate-distance band."""
         comps = [
@@ -539,6 +567,76 @@ class TestRestaurantSpecificPath:
         assert dbg.get("min_distance_used") is not None
         assert dbg.get("max_distance_used") is not None
         assert "restaurant_rate_distance_band" in dbg
+
+    def test_restaurant_low_density_2comps_passes_with_low_confidence(self):
+        """
+        Low-density rural market: only 2 comps within the broad radius
+        (pre-cap count=2, triggering low-density mode).  Both comps are within
+        1 500 m and have rates close to the subject's implied rate.
+
+        Previously this would fail at the MIN_COMPS=3 check.  After the fix the
+        pipeline should proceed and return a Low-confidence result instead of
+        Insufficient Data.  (Mirrors the BA14 8AH log scenario.)
+        """
+        comps = [
+            _comp("R1", rv=15_000, nia_sqm=100, unadjusted_price_psm=150.0, has_summary=True,
+                  scat_code=409, lat=51.5040, lon=-0.1),
+            _comp("R2", rv=16_000, nia_sqm=100, unadjusted_price_psm=155.0, has_summary=True,
+                  scat_code=409, lat=51.5060, lon=-0.1),
+        ]
+        result = _run(comps, nia_sqm=100.0, voa_rv=10_000.0, business_type="restaurant_cafe")
+        assert result["signal"] != "Insufficient Data", (
+            "Low-density 2-comp pool with consistent rates should not return Insufficient Data"
+        )
+        assert result["confidence"] == "Low", (
+            "2-comp pool should have Low confidence"
+        )
+        assert result["comparable_count"] == 2
+        dbg = result.get("_debug", {})
+        assert dbg.get("density_mode") == "low", "density_mode should be 'low' for pre-cap count=2"
+        assert dbg.get("distance_cap_used") == 2500
+
+    def test_restaurant_normal_density_urban_unchanged(self):
+        """
+        Normal-density urban market: 15 comps within 1 500 m (pre-cap=15 >= 10).
+        Pipeline should stay in normal-density mode, apply the 1 500 m hard cap,
+        and require at least 3 rated comps.  Behaviour is materially unchanged
+        relative to before the low-density relaxation.  (Mirrors the SW19 5EE case.)
+        """
+        comps = [
+            _comp(str(i), rv=15_000, nia_sqm=100, unadjusted_price_psm=150.0 + i * 0.5,
+                  has_summary=True, scat_code=409,
+                  lat=51.5 + i * 0.0001, lon=-0.1)
+            for i in range(15)
+        ]
+        result = _run(comps, nia_sqm=100.0, voa_rv=10_000.0, business_type="restaurant_cafe")
+        assert result["signal"] != "Insufficient Data"
+        dbg = result.get("_debug", {})
+        assert dbg.get("density_mode") == "normal", (
+            "Urban market with 15 pre-cap comps should stay in normal-density mode"
+        )
+        assert dbg.get("distance_cap_used") == 1500
+
+    def test_restaurant_low_density_2comps_fails_when_rate_too_divergent(self):
+        """
+        Low-density market: 2 comps, low-density mode active, but the pool tone
+        is >35 £/m² from the subject's implied rate.  The existing two-comp
+        quality gate should still reject this pool even in low-density mode.
+        """
+        comps = [
+            _comp("R1", rv=25_000, nia_sqm=100, unadjusted_price_psm=250.0, has_summary=True,
+                  scat_code=409, lat=51.5040, lon=-0.1),
+            _comp("R2", rv=26_000, nia_sqm=100, unadjusted_price_psm=260.0, has_summary=True,
+                  scat_code=409, lat=51.5060, lon=-0.1),
+        ]
+        # voa_rv=10_000 → implied rate ≈ £166/m² ITZA; tone ≈ £255/m² → gap ≈ 89 > 35
+        result = _run(comps, nia_sqm=100.0, voa_rv=10_000.0, business_type="restaurant_cafe")
+        assert result["signal"] == "Insufficient Data", (
+            "2-comp low-density pool with >35 rate distance should still fail quality gate"
+        )
+        dbg = result.get("_debug", {})
+        assert dbg.get("density_mode") == "low"
+        assert dbg.get("restaurant_rejection_reason") == "two_comp_rate_distance_gt35"
 
 # ---------------------------------------------------------------------------
 # 5. Rate-band clustering
