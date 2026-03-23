@@ -269,7 +269,7 @@ def _get_env() -> Environment:
         loader=FileSystemLoader(str(template_path)),
         autoescape=True,
     )
-    env.filters["format_currency"] = lambda v: f"{int(v):,}"
+    env.filters["format_currency"] = lambda v: f"{int(float(str(v).replace(',', ''))):,}"
     return env
 
 
