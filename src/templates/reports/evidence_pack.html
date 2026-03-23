@@ -535,7 +535,7 @@ table { page-break-inside: avoid; }
       </tr>
     </thead>
     <tbody>
-      {% for row in zoning_rows %}
+      {% for row in (zoning_rows or []) %}
       <tr>
         <td>{{ row.zone }}</td>
         <td class="num">{{ row.area_sqm }}</td>

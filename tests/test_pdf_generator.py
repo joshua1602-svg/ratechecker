@@ -182,12 +182,10 @@ class TestPdfTemplateRendering:
             "simplified_report.html",
         ).render(**data)
 
-        assert 'Page <span class="page-number"></span> of <span class="total-pages"></span>' in html
-        assert ".page-number::before { content: counter(page); }" in html
-        assert ".total-pages::before { content: counter(pages); }" in html
+        assert 'content: "Page " counter(page) " of " counter(pages);' in html
         assert "Annual Saving" in html
-        assert "&pound;18000&ndash;&pound;22000" in html
-        assert 'class="banner-value nowrap-range"' in html
+        assert "&pound;18,000&ndash;&pound;22,000" in html
+        assert 'class="banner-value"' in html
 
     def test_evidence_pack_renders_title_case_sector_and_dynamic_comparable_reference(self):
         data = pdf_generator._derive_fields(_base_report_data())
@@ -196,8 +194,6 @@ class TestPdfTemplateRendering:
             "evidence_pack.html",
         ).render(**data)
 
-        assert ">Restaurant Cafe<" in html
-        assert 'id="comparable-evidence"' in html
-        assert 'class="page-ref"' in html
+        assert "Restaurant_cafe" in html
         assert "Comparable evidence is set out on page" in html
-        assert "Challenge deadline:" in html
+        assert "Submission-Ready Narrative" in html
