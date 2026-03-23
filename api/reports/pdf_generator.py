@@ -265,10 +265,12 @@ def _derive_fields(report_data: dict) -> dict:
 def _get_env() -> Environment:
     """Build a Jinja2 environment pointing at the configured template dir."""
     template_path = _resolve_template_dir()
-    return Environment(
+    env = Environment(
         loader=FileSystemLoader(str(template_path)),
         autoescape=True,
     )
+    env.filters["format_currency"] = lambda v: f"{int(v):,}"
+    return env
 
 
 def _load_template(env: Environment, template_name: str):
