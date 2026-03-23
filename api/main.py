@@ -1,15 +1,15 @@
 """RateChecker API — FastAPI application entry point."""
 from __future__ import annotations
 
+import logging
 import os
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from api.db import count_voa_rows, ensure_runtime_indexes
-from api.routes.assess import router as assess_router
-from api.routes.purchase import router as purchase_router
-from api.routes.reports import router as reports_router
+
+log = logging.getLogger(__name__)
 
 app = FastAPI(
     title="RateChecker API",
@@ -17,21 +17,38 @@ app = FastAPI(
     description="Business rates overassessment checking engine.",
 )
 
-# CORS — set CORS_ORIGINS env var to a comma-separated list of allowed origins.
-# Defaults to wildcard for local development; set explicitly in production.
+# CORS — CORS_ORIGINS must be set in production.  Wildcard is allowed only
+# when RATECHECKER_ENV is explicitly "development".
 _origins_env = os.environ.get("CORS_ORIGINS", "")
+_env_mode = os.environ.get("RATECHECKER_ENV", "production")
+
 if _origins_env:
     _origins: list[str] = [o.strip() for o in _origins_env.split(",") if o.strip()]
+elif _env_mode == "development":
+    _origins = ["*"]
+    log.warning("CORS_ORIGINS not set — using wildcard (*) because RATECHECKER_ENV=development")
 else:
-    _origins = ["*"]  # TODO: set CORS_ORIGINS in production environment
+    # Production default: no origins allowed.  Requests from browsers will be
+    # blocked by CORS until CORS_ORIGINS is configured.
+    _origins = []
+    log.warning(
+        "CORS_ORIGINS not set and RATECHECKER_ENV=%s — no origins allowed. "
+        "Set CORS_ORIGINS to a comma-separated list of allowed origins.",
+        _env_mode,
+    )
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_origins,
     allow_credentials=False,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST"],
+    allow_headers=["Content-Type", "Authorization"],
 )
+
+# Lazy imports so CORS middleware is registered before routes
+from api.routes.assess import router as assess_router  # noqa: E402
+from api.routes.purchase import router as purchase_router  # noqa: E402
+from api.routes.reports import router as reports_router  # noqa: E402
 
 app.include_router(assess_router)
 app.include_router(purchase_router)
@@ -63,10 +80,11 @@ def startup() -> None:
 def health() -> dict:
     """
     Returns database row count so callers can confirm the VOA dataset is loaded.
-    Returns voa_row_count: null if the table is not yet populated.
+    Returns status "degraded" with voa_row_count null if the database is unreachable.
     """
     try:
         n = count_voa_rows()
-    except Exception:
-        n = None
+    except Exception as exc:
+        log.error("Health check: database unreachable: %s", exc)
+        return {"status": "degraded", "voa_row_count": None, "error": "database_unreachable"}
     return {"status": "ok", "voa_row_count": n}

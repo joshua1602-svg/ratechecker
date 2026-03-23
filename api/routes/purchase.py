@@ -1,10 +1,13 @@
 """POST /purchase — create a Stripe Checkout session."""
 from __future__ import annotations
 
+import logging
 import os
 
 import stripe
 from fastapi import APIRouter, HTTPException
+
+log = logging.getLogger(__name__)
 
 from api.models import PurchaseRequest, PurchaseResponse
 
@@ -51,6 +54,10 @@ async def purchase(req: PurchaseRequest) -> PurchaseResponse:
             },
         )
     except stripe.StripeError as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
+        log.error("Stripe checkout creation failed: %s", exc)
+        raise HTTPException(
+            status_code=502,
+            detail="Payment service is temporarily unavailable. Please try again.",
+        ) from exc
 
     return PurchaseResponse(checkout_url=session.url)
