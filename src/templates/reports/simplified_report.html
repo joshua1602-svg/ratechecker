@@ -190,6 +190,10 @@ table { page-break-inside: avoid; }
   color: #A0A8B0;
   margin-top: 2px;
 }
+
+.page-number::before { content: counter(page); }
+.total-pages::before { content: counter(pages); }
+.nowrap-range { white-space: nowrap; }
 </style>
 </head>
 <body>
@@ -210,10 +214,10 @@ table { page-break-inside: avoid; }
     </div>
     <div class="banner-box banner-box-accent">
       <div class="banner-label">Estimated Fair RV</div>
-      <div class="banner-value">&pound;{{ modelled_rv_low }}&ndash;{{ modelled_rv_high }}</div>
+      <div class="banner-value nowrap-range">&pound;{{ modelled_rv_low }}&ndash;&pound;{{ modelled_rv_high }}</div>
     </div>
     <div class="banner-box banner-box-accent">
-      <div class="banner-label">Potential Annual Saving</div>
+      <div class="banner-label">Annual Saving</div>
       <div class="banner-value">&pound;{{ annual_saving_low }}&ndash;{{ annual_saving_high }}</div>
     </div>
     <div class="banner-box">
@@ -302,7 +306,7 @@ table { page-break-inside: avoid; }
 <div class="page-footer">
   <div class="footer-row">
     <span>Prepared by RateChecker&nbsp;&nbsp;|&nbsp;&nbsp;ratechecker.co.uk</span>
-    <span>Page <span class="pageNumber"></span> of <span class="totalPages"></span></span>
+    <span>Page <span class="page-number"></span> of <span class="total-pages"></span></span>
   </div>
   <div class="footer-disclaimer">This report is based on publicly available VOA data and does not constitute professional surveying or legal advice.</div>
 </div>

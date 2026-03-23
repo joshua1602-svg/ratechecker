@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 from typing import Any
 
@@ -194,9 +195,18 @@ def _build_weighting_rows(data: dict[str, Any]) -> list[dict[str, str]]:
     return rows
 
 
+def _to_title_case(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    text = text.replace("_", " ")
+    return re.sub(r"\s+", " ", text).title()
+
+
 def _derive_fields(report_data: dict) -> dict:
     """Compute derived fields and return an augmented copy."""
     data = dict(report_data)
+    data.setdefault("business_type_title", _to_title_case(data.get("business_type")))
 
     voa_rv = data.get("voa_rv")
     nia_sqm = data.get("nia_sqm")
