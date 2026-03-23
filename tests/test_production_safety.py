@@ -561,3 +561,152 @@ class TestReportModelStrictness:
             comp_count=3,
         )
         assert payload.business_name == "Test"
+
+
+# ---------------------------------------------------------------------------
+# 12. UARN bigint type coercion (Issue 1 fix)
+# ---------------------------------------------------------------------------
+
+class TestUarnBigintCoercion:
+    """Batch queries must convert string UARNs to integers for PostgreSQL bigint columns."""
+
+    def test_coerce_uarns_to_int_normal(self):
+        from api.db import _coerce_uarns_to_int
+        result = _coerce_uarns_to_int(["279633216", "248664216", "3369646000"])
+        assert result == [279633216, 248664216, 3369646000]
+
+    def test_coerce_uarns_to_int_skips_bad_values(self):
+        from api.db import _coerce_uarns_to_int
+        result = _coerce_uarns_to_int(["123", "not_a_number", "456", "", "789"])
+        assert result == [123, 456, 789]
+
+    def test_coerce_uarns_to_int_empty(self):
+        from api.db import _coerce_uarns_to_int
+        assert _coerce_uarns_to_int([]) == []
+
+    def test_coerce_uarns_to_int_all_bad(self):
+        from api.db import _coerce_uarns_to_int
+        assert _coerce_uarns_to_int(["abc", "def"]) == []
+
+    def test_batch_functions_return_empty_for_all_bad_uarns(self):
+        """If all UARNs are non-numeric, batch functions return {} without hitting DB."""
+        from api.db import (
+            get_sv_line_descs_batch,
+            get_sv_lines_batch,
+            get_sv_car_parking_batch,
+            get_sv_additions_batch,
+            get_sv_plant_machinery_batch,
+            get_sv_adjustment_totals_batch,
+        )
+        for fn in [
+            get_sv_line_descs_batch,
+            get_sv_lines_batch,
+            get_sv_car_parking_batch,
+            get_sv_additions_batch,
+            get_sv_plant_machinery_batch,
+            get_sv_adjustment_totals_batch,
+        ]:
+            assert fn(["not_a_number"]) == {}
+
+
+# ---------------------------------------------------------------------------
+# 13. Evidence payload builder (Issue 2 fix)
+# ---------------------------------------------------------------------------
+
+class TestEvidencePayloadBuilder:
+    """build_evidence_payload_from_assess must produce all required evidence fields."""
+
+    def _make_assess_response(self, **overrides):
+        from api.models import AssessResponse
+        defaults = {
+            "signal": "High",
+            "explanation": "test",
+            "comparable_count": 5,
+            "saving_estimate": "£2,000",
+            "tone_rate": 150.0,
+            "base_estimated_rv": 15000,
+            "adjusted_estimated_rv": 14200,
+            "rated_comps": [
+                {"uarn": "1", "address": "A", "rv": 14000, "nia_sqm": 100,
+                 "rate": 140.0, "weight": 0.5, "distance_m": 200},
+            ],
+        }
+        defaults.update(overrides)
+        return AssessResponse(**defaults)
+
+    def _make_request(self, **overrides):
+        from api.models import (
+            AssessRequest, ContactInput, PropertyInput, FlagsInput, BusinessType,
+        )
+        defaults = dict(
+            contact=ContactInput(email="test@test.com", business_name="Test Shop"),
+            property=PropertyInput(
+                address="1 High Street",
+                postcode="SW1A 1AA",
+                business_type=BusinessType.retail,
+                voa_rv=20000,
+                nia_sqm=120,
+                uprn="UPRN123",
+            ),
+            flags=FlagsInput(consent_disclaimer=True),
+        )
+        defaults.update(overrides)
+        return AssessRequest(**defaults)
+
+    def test_evidence_payload_has_all_required_fields(self):
+        from api.models import build_evidence_payload_from_assess
+        from api.routes.reports import _EVIDENCE_REQUIRED_FIELDS
+        resp = self._make_assess_response()
+        req = self._make_request()
+        payload = build_evidence_payload_from_assess(resp, req)
+
+        for field in _EVIDENCE_REQUIRED_FIELDS:
+            assert field in payload, f"Missing required field: {field}"
+            assert payload[field] is not None, f"Field {field} is None"
+
+    def test_evidence_payload_passes_route_validation(self):
+        from api.models import build_evidence_payload_from_assess
+        from api.routes.reports import _validate_report_payload, _EVIDENCE_REQUIRED_FIELDS
+        resp = self._make_assess_response()
+        req = self._make_request()
+        payload = build_evidence_payload_from_assess(resp, req)
+        # Should not raise
+        _validate_report_payload(payload, _EVIDENCE_REQUIRED_FIELDS)
+
+    def test_evidence_payload_validates_with_pydantic(self):
+        from api.models import build_evidence_payload_from_assess, EvidenceReportRequest
+        resp = self._make_assess_response()
+        req = self._make_request()
+        payload = build_evidence_payload_from_assess(resp, req)
+        # Should not raise
+        model = EvidenceReportRequest.model_validate(payload)
+        assert model.uprn == "UPRN123"
+        assert model.nia_sqm == 120
+        assert model.modelled_rv == 14200
+
+    def test_evidence_payload_includes_simplified_fields(self):
+        from api.models import build_evidence_payload_from_assess
+        resp = self._make_assess_response()
+        req = self._make_request()
+        payload = build_evidence_payload_from_assess(resp, req)
+        # All simplified fields should be present
+        assert payload["business_name"] == "Test Shop"
+        assert payload["voa_rv"] == 20000
+        assert payload["tone_rate"] == 150.0
+
+    def test_evidence_payload_default_recommendation(self):
+        from api.models import build_evidence_payload_from_assess
+        resp = self._make_assess_response(signal="High")
+        req = self._make_request()
+        payload = build_evidence_payload_from_assess(resp, req)
+        assert "strong case" in payload["recommendation_text"].lower()
+
+    def test_simplified_payload_passes_route_validation(self):
+        """Verify the simplified builder also passes route validation."""
+        from api.models import build_report_payload_from_assess
+        from api.routes.reports import _validate_report_payload, _SIMPLIFIED_REQUIRED_FIELDS
+        resp = self._make_assess_response()
+        req = self._make_request()
+        payload = build_report_payload_from_assess(resp, req)
+        # Should not raise
+        _validate_report_payload(payload, _SIMPLIFIED_REQUIRED_FIELDS)

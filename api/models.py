@@ -254,3 +254,89 @@ def build_report_payload_from_assess(
         "adjusted_estimated_rv": adj_rv,
         "rate_basis": None,  # set by caller from CSA result if available
     }
+
+
+def build_evidence_payload_from_assess(
+    assess_response: AssessResponse,
+    request: AssessRequest,
+    *,
+    tone_basis: str = "Weighted median",
+    recommendation_text: str | None = None,
+    zoning_rows: list[dict] | None = None,
+    nursery_adjustments: list[dict] | None = None,
+    allowances_summary: str | None = None,
+    subtotal_pre: float | None = None,
+) -> dict:
+    """Build a canonical evidence pack payload from actual engine outputs.
+
+    Extends the simplified payload with the extra fields required by
+    EvidenceReportRequest and validated by _EVIDENCE_REQUIRED_FIELDS in
+    the /report/evidence route.
+
+    Returns a dict suitable for EvidenceReportRequest.model_validate().
+    """
+    # Start from the simplified payload (all shared fields)
+    payload = build_report_payload_from_assess(assess_response, request)
+
+    voa_rv = request.property.voa_rv
+    best_rv = (
+        assess_response.adjusted_estimated_rv
+        if assess_response.adjusted_estimated_rv is not None
+        else assess_response.base_estimated_rv
+    )
+
+    # Confidence maps from signal
+    confidence_map = {
+        "High": "High",
+        "Medium": "Medium",
+        "Low": "Low",
+        "Insufficient Data": "Insufficient Data",
+    }
+
+    # Default recommendation based on signal
+    if recommendation_text is None:
+        signal = assess_response.signal
+        if signal == "High":
+            recommendation_text = (
+                "The evidence supports a strong case for reduction. "
+                "Proceed to Check and submit this pack as supporting "
+                "evidence at Challenge stage if not resolved."
+            )
+        elif signal == "Medium":
+            recommendation_text = (
+                "There is a moderate case for reduction based on comparable evidence. "
+                "Consider submitting a Check to explore further."
+            )
+        else:
+            recommendation_text = (
+                "The comparable evidence does not currently support a strong case. "
+                "Monitor for future revaluations or additional comparable data."
+            )
+
+    # Evidence-specific required fields
+    payload.update({
+        "uprn": request.property.uprn or "",
+        "voa_description": f"{request.property.business_type.value.replace('_', ' ').title()} and Premises",
+        "nia_sqm": request.property.nia_sqm,
+        "modelled_rv": best_rv,
+        "final_tone_psm": assess_response.tone_rate or 0.0,
+        "tone_basis": tone_basis,
+        "confidence": confidence_map.get(assess_response.signal, assess_response.signal),
+        "recommendation_text": recommendation_text,
+        "zoning_rows": zoning_rows or [],
+        "nursery_adjustments": nursery_adjustments or [],
+        "allowances_summary": allowances_summary,
+        "subtotal_pre": subtotal_pre,
+    })
+
+    # Layout fields from the request if provided
+    if request.layout is not None:
+        payload.update({
+            "layout_adjustment_applied": True,
+            "floor_config": request.layout.floor_config,
+            "ground_floor_trading_sqm": request.layout.ground_floor_trading_sqm,
+            "ground_floor_storage_sqm": request.layout.ground_floor_storage_sqm,
+            "kitchen_on_ground": request.layout.kitchen_on_ground,
+        })
+
+    return payload

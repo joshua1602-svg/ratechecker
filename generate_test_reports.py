@@ -145,7 +145,7 @@ report_data = {
             "value": 3609
         },
     ],
-    "nursery_adjustments": None,
+    "nursery_adjustments": [],
 }
 
 # ── Generate ───────────────────────────────────────────
