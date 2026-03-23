@@ -269,6 +269,19 @@ _RESTAURANT_MEDIAN_GATE_RURAL:  int = 1_500
 _RESTAURANT_RATE_GAP_LIMIT_SOFT_MEDIUM: float = 20.0
 _RESTAURANT_RATE_GAP_LIMIT_SOFT_LOW: float = 35.0
 _RESTAURANT_RATE_GAP_LIMIT_HARD: float = 50.0
+# Low-density mode thresholds for the restaurant/cafe pipeline.
+# Activated when the candidate pool within the broad radius is thin,
+# indicating a rural or market-town market.  In low-density mode the
+# hard distance cap is relaxed and the minimum rated-comp count is
+# reduced so the pipeline can proceed on weaker evidence rather than
+# returning Insufficient Data purely due to market sparsity.
+#
+# Threshold: fewer than 10 candidates within the broad radius.
+# BA14-type case:  after_radius=3  → low-density (3 < 10)
+# SW19-type case:  after_radius=89 → normal      (89 ≥ 10)
+_RESTAURANT_LOW_DENSITY_POOL_MAX: int = 10
+_RESTAURANT_LOW_DENSITY_MAX_DISTANCE_M: int = 2_500   # matches default max_radius
+_RESTAURANT_LOW_DENSITY_MIN_COMPS: int = 2
 # Restaurant pool cap: in dense cities, limit pool after outlier trim to
 # prevent a single dense cluster from dominating the tone.
 _RESTAURANT_POOL_CAP: int = 30
@@ -779,11 +792,33 @@ def run_csa(
         if d <= max_radius:
             with_dist.append((c, d))
 
+    # _low_density_mode is set inside the restaurant block below; initialise
+    # False here so later restaurant-specific blocks can reference it safely.
+    _low_density_mode: bool = False
+    _distance_cap_used: int = _RESTAURANT_MAX_DISTANCE_M  # overridden below if restaurant
+
     if _is_restaurant:
-        # Hard local guardrail for restaurants: keep only comparables within 1.5 km.
         _before_hard_cap = len(with_dist)
-        with_dist = [(c, d) for c, d in with_dist if d <= _RESTAURANT_MAX_DISTANCE_M]
-        _csa_log.warning("CSA_RESTAURANT_DEBUG stage=2_distance_filter after_radius=%s after_1500m_hard_cap=%s max_radius_used=%s", _before_hard_cap, len(with_dist), max_radius)
+        # Density detection: enter low-density mode when the broad-radius pool
+        # is thin, indicating a rural or sparse market.
+        _low_density_mode = _before_hard_cap < _RESTAURANT_LOW_DENSITY_POOL_MAX
+        _distance_cap_used = (
+            _RESTAURANT_LOW_DENSITY_MAX_DISTANCE_M if _low_density_mode
+            else _RESTAURANT_MAX_DISTANCE_M
+        )
+        _low_density_reason = (
+            f"pre_cap_count={_before_hard_cap}<{_RESTAURANT_LOW_DENSITY_POOL_MAX}"
+            if _low_density_mode else "normal_density"
+        )
+        _csa_log.warning(
+            "CSA_RESTAURANT_DEBUG density_mode=%s reason=%s",
+            "low" if _low_density_mode else "normal", _low_density_reason,
+        )
+        with_dist = [(c, d) for c, d in with_dist if d <= _distance_cap_used]
+        _csa_log.warning(
+            "CSA_RESTAURANT_DEBUG stage=2_distance_filter after_radius=%s after_cap=%s cap_used=%s max_radius_used=%s",
+            _before_hard_cap, len(with_dist), _distance_cap_used, max_radius,
+        )
 
     if not with_dist:
         _csa_log.warning("CSA_RESTAURANT_DEBUG stage=2_distance_filter RETURNING_INSUFFICIENT with_dist=0")
@@ -838,10 +873,25 @@ def run_csa(
     if _is_restaurant:
         _csa_log.warning("CSA_RESTAURANT_DEBUG stage=3_rate_extraction rated=%s excluded_no_rate=%s", len(rated), excluded_no_rate)
 
-    # Restaurant path is strict: do not broaden/fallback when evidence is thin.
-    if _is_restaurant and len(rated) < _MIN_COMPS_FOR_VALUATION:
-        _csa_log.warning("CSA_RESTAURANT_DEBUG stage=3_rate_extraction RETURNING_INSUFFICIENT rated=%s < MIN_COMPS=%s", len(rated), _MIN_COMPS_FOR_VALUATION)
-        return _insufficient_data()
+    # Restaurant path: in normal-density markets use the standard floor (3);
+    # in low-density mode accept 2 rated comps so rural cases are not
+    # discarded solely because of market sparsity.
+    if _is_restaurant:
+        _min_comps_restaurant = (
+            _RESTAURANT_LOW_DENSITY_MIN_COMPS if _low_density_mode
+            else _MIN_COMPS_FOR_VALUATION
+        )
+        _csa_log.warning(
+            "CSA_RESTAURANT_DEBUG stage=3_min_comps normal_threshold=%s low_density_threshold=%s threshold_applied=%s low_density_mode=%s",
+            _MIN_COMPS_FOR_VALUATION, _RESTAURANT_LOW_DENSITY_MIN_COMPS,
+            _min_comps_restaurant, _low_density_mode,
+        )
+        if len(rated) < _min_comps_restaurant:
+            _csa_log.warning(
+                "CSA_RESTAURANT_DEBUG stage=3_rate_extraction RETURNING_INSUFFICIENT rated=%s < MIN_COMPS=%s",
+                len(rated), _min_comps_restaurant,
+            )
+            return _insufficient_data()
 
     pre_trim_comparable_count = len(rated)
 
@@ -1075,7 +1125,17 @@ def run_csa(
     # Nursery uses a lower floor (_NURSERY_MIN_COMPS=2) because nurseries are
     # sparse in most sectors and the standard floor of 3 produces too many
     # Insufficient Data results at reasonable radii.
-    _min_comps = _NURSERY_MIN_COMPS if _is_nursery else _MIN_COMPS_FOR_VALUATION
+    # Restaurant/cafe in low-density mode also uses a reduced floor (2) for
+    # the same reason; this mirrors the stage-3 early check above.
+    if _is_restaurant:
+        _min_comps = (
+            _RESTAURANT_LOW_DENSITY_MIN_COMPS if _low_density_mode
+            else _MIN_COMPS_FOR_VALUATION
+        )
+    elif _is_nursery:
+        _min_comps = _NURSERY_MIN_COMPS
+    else:
+        _min_comps = _MIN_COMPS_FOR_VALUATION
     if len(rated) < _min_comps:
         return _insufficient_data()
 
@@ -1146,6 +1206,8 @@ def run_csa(
             _debug["min_distance_used"] = round(min_distance_used, 0) if min_distance_used is not None else None
             _debug["max_distance_used"] = round(max_distance_used, 0) if max_distance_used is not None else None
             _debug["size_band_pct_used"] = size_pct
+            _debug["density_mode"] = "low" if _low_density_mode else "normal"
+            _debug["distance_cap_used"] = _distance_cap_used
         t1_rates = sorted(r for c, _, r, _ in rated if c.rate_source == "voa_published")
         t2_rates = sorted(r for c, _, r, _ in rated if c.rate_source == "implied")
         if t1_rates:
