@@ -196,6 +196,7 @@ table { page-break-inside: avoid; }
   font-weight: 700;
   color: #2B4360;
   line-height: 1.15;
+  white-space: nowrap;
 }
 
 /* ── Case strength inline ── */
@@ -405,7 +406,7 @@ table { page-break-inside: avoid; }
     <tr><td class="label-cell">Total Floor Area (NIA)</td><td class="value-cell">{{ nia_sqm }} sqm</td></tr>
     {% endif %}
     {% if floor_config %}
-    <tr><td class="label-cell">Floor Configuration</td><td class="value-cell">{{ floor_config }}</td></tr>
+    <tr><td class="label-cell">Floor Configuration</td><td class="value-cell">{% if floor_config == 'ground_only' %}Ground floor only{% elif floor_config == 'ground_and_basement' %}Ground + Basement{% elif floor_config == 'ground_and_first' %}Ground + First floor{% elif floor_config == 'ground_basement_first' %}Ground + Basement + First{% else %}{{ floor_config }}{% endif %}</td></tr>
     {% endif %}
     {% if ground_floor_trading_sqm %}
     <tr><td class="label-cell">Ground Floor Trading Area</td><td class="value-cell">{{ ground_floor_trading_sqm }} sqm</td></tr>
@@ -416,11 +417,11 @@ table { page-break-inside: avoid; }
     {% if kitchen_area_sqm %}
     <tr><td class="label-cell">Kitchen Area</td><td class="value-cell">{{ kitchen_area_sqm }} sqm</td></tr>
     {% endif %}
-    {% if kitchen_on_ground %}
-    <tr><td class="label-cell">Kitchen on Ground Floor</td><td class="value-cell">{{ kitchen_on_ground }}</td></tr>
+    {% if kitchen_on_ground is defined %}
+    <tr><td class="label-cell">Kitchen on Ground Floor</td><td class="value-cell">{% if kitchen_on_ground == 'yes' %}Yes{% elif kitchen_on_ground == 'no_kitchen' %}No dedicated kitchen{% elif kitchen_on_ground == 'no' %}No — kitchen on another floor{% else %}{{ kitchen_on_ground }}{% endif %}</td></tr>
     {% endif %}
     {% if voa_rv %}
-    <tr><td class="label-cell">Current Rateable Value</td><td class="value-cell">&pound;{{ voa_rv }}</td></tr>
+    <tr><td class="label-cell">Current Rateable Value</td><td class="value-cell">&pound;{{ voa_rv | format_currency }}</td></tr>
     {% endif %}
     {% if rate_psm %}
     <tr><td class="label-cell">Current Rate per sqm</td><td class="value-cell">&pound;{{ rate_psm }} /sqm</td></tr>
@@ -437,15 +438,15 @@ table { page-break-inside: avoid; }
   <div class="banner">
     <div class="banner-box">
       <div class="banner-label">Current Rateable Value</div>
-      <div class="banner-value">&pound;{{ voa_rv }}</div>
+      <div class="banner-value">&pound;{{ voa_rv | format_currency }}</div>
     </div>
     <div class="banner-box banner-box-accent">
       <div class="banner-label">Estimated Fair RV</div>
-      <div class="banner-value">&pound;{{ modelled_rv_low }}&ndash;&pound;{{ modelled_rv_high }}</div>
+      <div class="banner-value">&pound;{{ modelled_rv_low | format_currency }}&ndash;&pound;{{ modelled_rv_high | format_currency }}</div>
     </div>
     <div class="banner-box banner-box-accent">
       <div class="banner-label">Potential Annual Saving</div>
-      <div class="banner-value">&pound;{{ annual_saving_low }}&ndash;{{ annual_saving_high }}</div>
+      <div class="banner-value">&pound;{{ annual_saving_low | format_currency }}&ndash;&pound;{{ annual_saving_high | format_currency }}</div>
     </div>
     <div class="banner-box">
       <div class="banner-label">Comparables Analysed</div>
@@ -455,7 +456,7 @@ table { page-break-inside: avoid; }
 
   <p class="case-label">Case Strength: <span style="color:{% if case_strength == 'High' %}#2E7D32{% elif case_strength == 'Medium' %}#D4956A{% else %}#7A8A9A{% endif %};">{{ case_strength }}</span></p>
 
-  <p>This assessment analysed {{ comp_count }} comparable properties drawn from the VOA's published bulk data. The evidence suggests a fair rateable value in the range &pound;{{ modelled_rv_low }}&ndash;{{ modelled_rv_high }}, compared to the current assessment of &pound;{{ voa_rv }} — a difference of &pound;{{ rv_delta }} ({{ rv_delta_pct }}%).</p>
+  <p>This assessment analysed {{ comp_count }} comparable properties drawn from the VOA's published bulk data. The evidence suggests a fair rateable value in the range &pound;{{ modelled_rv_low | format_currency }}&ndash;&pound;{{ modelled_rv_high | format_currency }}, compared to the current assessment of &pound;{{ voa_rv | format_currency }} — a difference of &pound;{{ rv_delta | format_currency }} ({{ rv_delta_pct }}%).</p>
   {% if layout_adjustment_applied %}
   <p>Layout details provided by the ratepayer were used to prioritise structurally similar comparables.</p>
   {% endif %}
@@ -467,7 +468,7 @@ table { page-break-inside: avoid; }
      ═══════════════════════════════════════════════════════════════════ -->
 <div class="section">
   <h1>Comparable Evidence</h1>
-  <p class="intro-line">The following properties were identified from VOA bulk data as comparable to the subject property. Properties with higher layout similarity have been given greater weight in deriving the estimated valuation range.</p>
+  <p class="intro-line">The following properties were identified from VOA bulk data as comparable to the subject property. {% if layout_adjustment_applied %}Properties with higher layout similarity have been given greater weight in deriving the estimated valuation range.{% else %}Properties were selected based on location, business type, and floor area.{% endif %}</p>
 
   <table class="comp-table">
     <thead>
@@ -490,7 +491,7 @@ table { page-break-inside: avoid; }
         <td>{{ comp.address }}</td>
         <td style="white-space:nowrap;">{{ comp.uarn }}</td>
         <td class="num">{{ comp.nia_sqm }}</td>
-        <td class="num">&pound;{{ comp.rv }}</td>
+        <td class="num">&pound;{{ comp.rv | format_currency }}</td>
         <td class="num">&pound;{{ comp.rate_psm }}</td>
         <td>{{ comp.floor_config }}</td>
         {% if layout_adjustment_applied %}
@@ -534,23 +535,23 @@ table { page-break-inside: avoid; }
         <td class="num">{{ row.relativity }}</td>
         <td class="num">{{ row.area_type_weight }}</td>
         <td class="num">&pound;{{ row.tone }}</td>
-        <td class="num">&pound;{{ row.value }}</td>
+        <td class="num">&pound;{{ row.value | format_currency }}</td>
       </tr>
       {% endfor %}
     </tbody>
   </table>
   <div class="calc-totals">
-    <p><strong>Subtotal (pre-allowances):</strong> &pound;{{ subtotal_pre }}</p>
+    <p><strong>Subtotal (pre-allowances):</strong> &pound;{{ subtotal_pre | format_currency }}</p>
     <p><strong>Allowances:</strong> {{ allowances_summary }}</p>
-    <p><strong>Modelled Rateable Value:</strong> &pound;{{ modelled_rv }}</p>
+    <p><strong>Modelled Rateable Value:</strong> &pound;{{ modelled_rv | format_currency }}</p>
   </div>
   {% endif %}
 
   {% if business_type == 'nursery' %}
   <h2>NIA Calculation</h2>
-  <p>{{ nia_sqm }} sqm &times; &pound;{{ final_tone_psm }}/m&sup2; = &pound;{{ subtotal_pre }}</p>
+  <p>{{ nia_sqm }} sqm &times; &pound;{{ final_tone_psm }}/m&sup2; = &pound;{{ subtotal_pre | format_currency }}</p>
   <p><strong>Adjustments:</strong> {{ nursery_adjustments }}</p>
-  <p><strong>Modelled Rateable Value:</strong> &pound;{{ modelled_rv }}</p>
+  <p><strong>Modelled Rateable Value:</strong> &pound;{{ modelled_rv | format_currency }}</p>
   {% endif %}
 </div>
 
@@ -588,9 +589,9 @@ table { page-break-inside: avoid; }
   <h1>Conclusion and Recommendation</h1>
 
   <table class="summary-table">
-    <tr><td class="label-cell">VOA Rateable Value</td><td class="value-cell">&pound;{{ voa_rv }}</td></tr>
-    <tr><td class="label-cell">Modelled Rateable Value</td><td class="value-cell">&pound;{{ modelled_rv }}</td></tr>
-    <tr><td class="label-cell">Difference</td><td class="value-cell">&pound;{{ rv_delta }} ({{ rv_delta_pct }}%)</td></tr>
+    <tr><td class="label-cell">VOA Rateable Value</td><td class="value-cell">&pound;{{ voa_rv | format_currency }}</td></tr>
+    <tr><td class="label-cell">Modelled Rateable Value</td><td class="value-cell">&pound;{{ modelled_rv | format_currency }}</td></tr>
+    <tr><td class="label-cell">Difference</td><td class="value-cell">&pound;{{ rv_delta | format_currency }} ({{ rv_delta_pct }}%)</td></tr>
     <tr>
       <td class="label-cell">Case Strength</td>
       <td class="value-cell" style="font-weight:700; color:{% if case_strength == 'High' %}#2E7D32{% elif case_strength == 'Medium' %}#D4956A{% else %}#7A8A9A{% endif %};">{{ case_strength }}</td>
