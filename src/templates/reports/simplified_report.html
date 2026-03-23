@@ -83,33 +83,40 @@ table { page-break-inside: avoid; }
 /* ── Banner boxes ── */
 .banner {
   display: flex;
-  gap: 8px;
+  gap: 6px;
   margin: 8px 0 10px 0;
+  width: 100%;
 }
 .banner-box {
-  flex: 1;
+  flex: 1 1 0;
+  min-width: 0;
   background: #F5E6D8;
-  border-radius: 6px;
-  padding: 10px 12px;
+  border-radius: 5px;
+  padding: 8px 9px;
+  overflow: hidden;
 }
 .banner-box-accent {
   border: 1.5px solid #D4956A;
 }
 .banner-label {
-  font-size: 6.5pt;
+  font-size: 6pt;
   color: #7A8A9A;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.03em;
   font-weight: 600;
-  margin-bottom: 3px;
+  margin-bottom: 2px;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .banner-value {
-  font-size: 16pt;
+  font-size: 13pt;
   font-weight: 700;
   color: #2B4360;
-  line-height: 1.15;
+  line-height: 1.2;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* ── Summary paragraph ── */
