@@ -94,13 +94,27 @@ def _format_floor_config(raw_value: Any) -> str:
 
 
 def _normalise_comparable(comp: dict[str, Any]) -> dict[str, Any]:
-    """Populate optional template fields so report rendering is resilient."""
+    """Populate optional template fields so report rendering is resilient.
+
+    rate_psm precedence (to avoid basis mismatch):
+      1. Use pre-set rate_psm if already provided (from canonical builder).
+      2. Use the engine's "rate" field (which is on the correct basis —
+         ITZA for retail/restaurant, NIA for nursery).
+      3. Only as a last resort, fall back to rv/nia_sqm (NIA basis).
+         This case should not occur when using the canonical builder.
+    """
     normalised = dict(comp)
 
-    rv = normalised.get("rv")
-    nia_sqm = normalised.get("nia_sqm")
-    if normalised.get("rate_psm") is None and rv is not None and nia_sqm:
-        normalised["rate_psm"] = round(rv / nia_sqm, 2)
+    if normalised.get("rate_psm") is None:
+        # Prefer engine "rate" field (correctly normalised by CSA)
+        engine_rate = normalised.get("rate")
+        if engine_rate is not None and float(engine_rate) > 0:
+            normalised["rate_psm"] = round(float(engine_rate), 2)
+        else:
+            rv = normalised.get("rv")
+            nia_sqm = normalised.get("nia_sqm")
+            if rv is not None and nia_sqm and float(nia_sqm) > 0:
+                normalised["rate_psm"] = round(float(rv) / float(nia_sqm), 2)
 
     similarity = normalised.get("layout_similarity_score")
     normalised["layout_similarity_score"] = float(similarity or 0)
@@ -186,7 +200,7 @@ def _build_weighting_rows(data: dict[str, Any]) -> list[dict[str, str]]:
     rows.append({
         "factor": "Overall layout alignment",
         "subject_profile": alignment,
-        "effect": "Higher-alignment comparables can carry more weight in the inferred fair RV; layout does not apply a direct subject deduction.",
+        "effect": "Higher-alignment comparables carry more weight when deriving the market tone. Layout overweighting adjusts comparable weights only — it does not change the modelled RV directly and is not a subject-level deduction or allowance.",
     })
 
     return rows

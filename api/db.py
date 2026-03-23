@@ -7,8 +7,8 @@ Schema (created by the VOA ingest pipeline — see data/INGEST_SPEC.md):
   voa_sv_header      — summary valuation header (record type 01)
   postcode_coords    — latitude/longitude per postcode (geocoded reference table)
 
-The query returns an empty list when the database does not exist or has no data,
-allowing the API to return "Insufficient Data" cleanly.
+Query failures raise DatabaseError so the caller can return an explicit 503,
+not a silent "Insufficient Data".
 """
 from __future__ import annotations
 
@@ -39,6 +39,14 @@ else:
 engine = create_engine(DATABASE_URL, **_engine_kwargs)
 
 
+class DatabaseError(Exception):
+    """Raised when a database query fails unexpectedly.
+
+    Callers should translate this into an HTTP 503 — never silently degrade
+    to "Insufficient Data".
+    """
+
+
 def get_comparables(
     lat: float,
     lon: float,
@@ -47,6 +55,7 @@ def get_comparables(
     nia_sqm: float = 0,
     size_band_pct: float = 50,
     postcode_prefix: str | None = None,
+    exclude_uarn: str | None = None,
 ) -> list[dict]:
     """
     Return comparable properties within radius_m of (lat, lon) matching scat_codes.
@@ -55,27 +64,22 @@ def get_comparables(
     restricts comparables to postcodes starting with that string, tightening
     the pool to the same local market area.
 
+    When exclude_uarn is supplied, that UARN is excluded from results to
+    prevent the subject property from acting as its own comparable.
+
     Uses a bounding-box pre-filter for performance, then returns all columns
-    needed by the CSA algorithm. Returns [] if the database is unavailable.
+    needed by the CSA algorithm.
+
+    Raises DatabaseError on any query failure so the caller can return an
+    explicit server error rather than silently degrading.
     """
     if not scat_codes:
         return []
 
-    log.warning(
-        "DB_DEBUG get_comparables lat=%s lon=%s scat_codes=%s radius_m=%s nia_sqm=%s size_band_pct=%s",
-        round(lat, 4), round(lon, 4), scat_codes, radius_m, nia_sqm, size_band_pct,
+    log.info(
+        "get_comparables lat=%.4f lon=%.4f scat_codes=%s radius_m=%s nia_sqm=%s size_band_pct=%s exclude_uarn=%s",
+        lat, lon, scat_codes, radius_m, nia_sqm, size_band_pct, exclude_uarn,
     )
-
-    # DEBUG: count rows matching SCAT only, before any distance or size filter
-    _scat_in = ", ".join(str(int(s)) for s in scat_codes)
-    try:
-        with Session(engine) as _s:
-            _scat_count = _s.execute(
-                text(f"SELECT COUNT(*) FROM voa_list_entries WHERE scat_code IN ({_scat_in}) AND rateable_value > 0"),
-            ).scalar()
-        log.debug("DB_DEBUG rows_matching_scat_only=%s", _scat_count)
-    except Exception as _e:
-        log.debug("DB_DEBUG rows_matching_scat_only=ERROR %s", _e)
 
     # Bounding-box deltas (1° lat ≈ 111 km; 1° lon ≈ 111 km × cos(lat))
     lat_delta = radius_m / 111_000
@@ -84,11 +88,13 @@ def get_comparables(
     lo_nia = nia_sqm * (1 - size_band_pct / 100)
     hi_nia = nia_sqm * (1 + size_band_pct / 100)
 
-    postcode_clause = (
-        "AND le.postcode LIKE :postcode_prefix"
-        if postcode_prefix is not None
-        else ""
-    )
+    # Build parameterized scat_code filter using numbered bind params
+    scat_binds = {f"scat_{i}": int(s) for i, s in enumerate(scat_codes)}
+    scat_placeholders = ", ".join(f":scat_{i}" for i in range(len(scat_codes)))
+
+    # Optional clauses
+    postcode_clause = "AND le.postcode LIKE :postcode_prefix" if postcode_prefix is not None else ""
+    exclude_clause = "AND le.uarn != :exclude_uarn" if exclude_uarn is not None else ""
 
     sql = text(f"""
         SELECT
@@ -107,17 +113,19 @@ def get_comparables(
         LEFT JOIN voa_sv_header svh ON le.uarn = svh.uarn
         JOIN postcode_coords pc ON le.postcode = pc.postcode
         WHERE
-            le.scat_code IN ({_scat_in})
-            AND le.composite_indicator IS DISTINCT FROM 'C'
+            le.scat_code IN ({scat_placeholders})
+            AND (le.composite_indicator IS NULL OR le.composite_indicator != 'C')
             AND le.rateable_value > 0
             AND pc.latitude  BETWEEN :lat_lo AND :lat_hi
             AND pc.longitude BETWEEN :lon_lo AND :lon_hi
             AND COALESCE(svh.total_area_or_units, :nia_fallback) BETWEEN :lo_nia AND :hi_nia
             AND (svh.unit_of_measurement IS NULL OR svh.unit_of_measurement = 'NIA')
             {postcode_clause}
+            {exclude_clause}
     """)
 
     params: dict[str, Any] = {
+        **scat_binds,
         "lat_lo": lat - lat_delta,
         "lat_hi": lat + lat_delta,
         "lon_lo": lon - lon_delta,
@@ -127,25 +135,19 @@ def get_comparables(
         "nia_fallback": nia_sqm,
     }
     if postcode_prefix is not None:
-        # Append % here so the SQL literal never contains %, avoiding psycopg2
-        # treating it as a parameter placeholder escape character.
         params["postcode_prefix"] = postcode_prefix + "%"
-
-    log.debug("DB_DEBUG sql_query=\n%s", sql.text)
-    log.debug("DB_DEBUG sql_params=%s", params)
+    if exclude_uarn is not None:
+        params["exclude_uarn"] = exclude_uarn
 
     try:
         with Session(engine) as session:
             rows = session.execute(sql, params).fetchall()
         results = [dict(r._mapping) for r in rows]
-    except Exception as _e:
-        # Database not yet populated — caller will return "Insufficient Data"
-        log.debug("DB_DEBUG query_exception=%s", _e)
-        return []
+    except Exception as exc:
+        log.error("get_comparables query failed: %s", exc, exc_info=True)
+        raise DatabaseError(f"Comparable query failed: {exc}") from exc
 
-    log.debug("DB_DEBUG rows_after_bbox_and_size_filter=%s", len(results))
-
-    log.debug("DB_DEBUG rows_after_outlier_filter=%s (final returned)", len(results))
+    log.info("get_comparables returned %d rows", len(results))
     return results
 
 
@@ -153,11 +155,8 @@ def get_sv_line_descs_batch(uarns: list[str]) -> dict[str, tuple[str, ...]]:
     """
     Return SV line descriptions keyed by UARN for a batch of subject properties.
 
-    The descriptions (e.g. 'Retail Zone A', 'Zone B', 'Remainder') come from
-    the voa_sv_lines table and are used by _classify_retail_method() to
-    distinguish ITZA-zoned high-street retail from area-based methods.
-
-    Returns an empty dict if the table is unavailable or uarns is empty.
+    Returns an empty dict if uarns is empty.
+    Raises DatabaseError on query failure.
     """
     if not uarns:
         return {}
@@ -175,8 +174,9 @@ def get_sv_line_descs_batch(uarns: list[str]) -> dict[str, tuple[str, ...]]:
         for r in rows:
             result.setdefault(r.uarn, []).append(r.description)
         return {k: tuple(v) for k, v in result.items()}
-    except Exception:
-        return {}
+    except Exception as exc:
+        log.error("get_sv_line_descs_batch failed: %s", exc, exc_info=True)
+        raise DatabaseError(f"SV line descs query failed: {exc}") from exc
 
 
 def get_sv_lines_batch(uarns: list[str]) -> dict[str, list[dict]]:
@@ -186,7 +186,8 @@ def get_sv_lines_batch(uarns: list[str]) -> dict[str, list[dict]]:
     Used by the layout overweighting layer to build layout fingerprints
     for each comparable.  Read-only query.
 
-    Returns an empty dict if the table is unavailable or uarns is empty.
+    Returns an empty dict if uarns is empty.
+    Raises DatabaseError on query failure.
     """
     if not uarns:
         return {}
@@ -208,9 +209,9 @@ def get_sv_lines_batch(uarns: list[str]) -> dict[str, list[dict]]:
                 "area": float(r.area) if r.area is not None else 0.0,
             })
         return result
-    except Exception:
-        log.warning("get_sv_lines_batch: query failed — returning empty dict")
-        return {}
+    except Exception as exc:
+        log.error("get_sv_lines_batch failed: %s", exc, exc_info=True)
+        raise DatabaseError(f"SV lines query failed: {exc}") from exc
 
 
 # ---------------------------------------------------------------------------
@@ -223,7 +224,7 @@ def get_sv_car_parking_batch(uarns: list[str]) -> dict[str, dict]:
 
     Each value contains ``cp_spaces`` and ``cp_total`` (total parking value £).
     Used by the 03-07 fit layer to detect parking presence and contribution.
-    Returns {} on failure or empty input — callers degrade gracefully.
+    Returns {} on empty input.  Raises DatabaseError on query failure.
     """
     if not uarns:
         return {}
@@ -242,8 +243,9 @@ def get_sv_car_parking_batch(uarns: list[str]) -> dict[str, dict]:
             }
             for r in rows
         }
-    except Exception:
-        return {}
+    except Exception as exc:
+        log.error("get_sv_car_parking_batch failed: %s", exc, exc_info=True)
+        raise DatabaseError(f"Car parking query failed: {exc}") from exc
 
 
 def get_sv_additions_batch(uarns: list[str]) -> dict[str, dict]:
@@ -251,9 +253,7 @@ def get_sv_additions_batch(uarns: list[str]) -> dict[str, dict]:
     Return additions summary keyed by UARN from voa_sv_additions (record type 03).
 
     Aggregates ``SUM(oa_value)`` and row count per UARN.
-    Used by the fit layer to detect additions presence and their contribution
-    relative to the comp's rateable value.
-    Returns {} on failure or empty input.
+    Returns {} on empty input.  Raises DatabaseError on query failure.
     """
     if not uarns:
         return {}
@@ -275,8 +275,9 @@ def get_sv_additions_batch(uarns: list[str]) -> dict[str, dict]:
             }
             for r in rows
         }
-    except Exception:
-        return {}
+    except Exception as exc:
+        log.error("get_sv_additions_batch failed: %s", exc, exc_info=True)
+        raise DatabaseError(f"Additions query failed: {exc}") from exc
 
 
 def get_sv_plant_machinery_batch(uarns: list[str]) -> dict[str, dict]:
@@ -285,8 +286,7 @@ def get_sv_plant_machinery_batch(uarns: list[str]) -> dict[str, dict]:
     (record type 04).
 
     Aggregates ``SUM(pm_value)`` and row count per UARN.
-    Treated as a complexity signal by the fit layer, not a direct valuation input.
-    Returns {} on failure or empty input.
+    Returns {} on empty input.  Raises DatabaseError on query failure.
     """
     if not uarns:
         return {}
@@ -308,18 +308,16 @@ def get_sv_plant_machinery_batch(uarns: list[str]) -> dict[str, dict]:
             }
             for r in rows
         }
-    except Exception:
-        return {}
+    except Exception as exc:
+        log.error("get_sv_plant_machinery_batch failed: %s", exc, exc_info=True)
+        raise DatabaseError(f"Plant machinery query failed: {exc}") from exc
 
 
 def get_sv_adjustment_totals_batch(uarns: list[str]) -> dict[str, dict]:
     """
     Return adjustment totals keyed by UARN from voa_sv_adjustment_totals (record type 07).
 
-    Preferred over voa_sv_adjustments (record type 06) because it gives a
-    ready-made total_before_adj / total_adj pair for intensity calculation.
-    Used by the fit layer as the adjustment-intensity signal.
-    Returns {} on failure or empty input — fit layer treats missing data as neutral.
+    Returns {} on empty input.  Raises DatabaseError on query failure.
     """
     if not uarns:
         return {}
@@ -338,8 +336,9 @@ def get_sv_adjustment_totals_batch(uarns: list[str]) -> dict[str, dict]:
             }
             for r in rows
         }
-    except Exception:
-        return {}
+    except Exception as exc:
+        log.error("get_sv_adjustment_totals_batch failed: %s", exc, exc_info=True)
+        raise DatabaseError(f"Adjustment totals query failed: {exc}") from exc
 
 
 def count_voa_rows() -> int:
@@ -357,15 +356,9 @@ def ensure_runtime_indexes() -> None:
     Create indexes needed for the API query path that are not created by the
     ingest pipeline.  All statements use IF NOT EXISTS — safe to call on every
     startup against an already-indexed database.
-
-    Indexes added here (beyond what data/ingest.py creates):
-      - voa_list_entries(postcode)  — used in the JOIN to postcode_coords
-      - postcode_coords(latitude, longitude) — used in the bounding-box WHERE clause
     """
     stmts = [
-        # The ingest pipeline indexes postcode_sector; the API query joins on postcode
         "CREATE INDEX IF NOT EXISTS idx_le_postcode ON voa_list_entries(postcode)",
-        # Bounding-box pre-filter scans postcode_coords on lat/lon
         "CREATE INDEX IF NOT EXISTS idx_pc_latlon ON postcode_coords(latitude, longitude)",
     ]
     with Session(engine) as session:

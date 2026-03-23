@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Optional
 
@@ -45,12 +46,12 @@ class AreasInput(BaseModel):
 
 class LayoutInputModel(BaseModel):
     """User-provided layout description for the overweighting layer."""
-    floor_config: str = "ground_only"  # ground_only / ground_lower_ground / ground_first / ground_lower_ground_first / other
+    floor_config: str = "ground_only"
     ground_floor_trading_sqm: float = 0.0
     ground_floor_storage_sqm: float = 0.0
-    lower_ground_use: str = "not_applicable"  # trading / storage / kitchen / office / not_applicable
-    upper_floor_use: str = "not_applicable"   # trading / storage / office / not_applicable
-    kitchen_on_ground: str = "no_kitchen"     # yes / no / no_kitchen (restaurants only)
+    lower_ground_use: str = "not_applicable"
+    upper_floor_use: str = "not_applicable"
+    kitchen_on_ground: str = "no_kitchen"
 
 
 class NurseryInput(BaseModel):
@@ -116,28 +117,32 @@ class PurchaseRequest(BaseModel):
 
 
 class SimplifiedReportRequest(BaseModel):
-    business_name: Optional[str] = None
-    property_address: Optional[str] = None
-    postcode: Optional[str] = None
-    business_type: Optional[str] = None
-    date_prepared: Optional[str] = None
-    voa_rv: Optional[float] = None
-    modelled_rv_low: Optional[float] = None
-    modelled_rv_high: Optional[float] = None
-    annual_saving_low: Optional[float] = None
-    annual_saving_high: Optional[float] = None
-    case_strength: Optional[str] = None
+    """Report payload — all fields are required with no defaults.
+
+    This model must be populated from actual /assess engine outputs via
+    build_report_payload_from_assess().  Placeholder/synthetic data is
+    rejected at the route level.
+    """
+    business_name: str
+    property_address: str
+    postcode: str
+    business_type: str
+    date_prepared: str
+    voa_rv: float
+    modelled_rv_low: float
+    modelled_rv_high: float
+    annual_saving_low: float
+    annual_saving_high: float
+    case_strength: str
     comparables: list[dict] = Field(default_factory=list)
-    comp_count: Optional[int] = None
+    comp_count: int
     layout_adjustment_applied: Optional[bool] = None
     summary_text: Optional[str] = None
-    estimated_rv: Optional[float] = None
-    current_rv: Optional[float] = None
-    property_type: Optional[str] = None
-    comparable_count: Optional[int] = None
-    estimated_saving: Optional[str] = None
-    overassessment_likelihood: Optional[str] = None
-    address: Optional[str] = None
+    # Engine-derived canonical fields
+    tone_rate: Optional[float] = None
+    base_estimated_rv: Optional[float] = None
+    adjusted_estimated_rv: Optional[float] = None
+    rate_basis: Optional[str] = None  # "ITZA" or "NIA" — from CSA
 
 
 class EvidenceReportRequest(SimplifiedReportRequest):
@@ -159,5 +164,93 @@ class EvidenceReportRequest(SimplifiedReportRequest):
     kitchen_area_sqm: Optional[float] = None
     kitchen_on_ground: Optional[str] = None
 
+
 class PurchaseResponse(BaseModel):
     checkout_url: str
+
+
+# ---------------------------------------------------------------------------
+# Canonical report payload builder
+# ---------------------------------------------------------------------------
+# This function produces the authoritative report payload from actual
+# /assess engine outputs.  The frontend must call this (or use the values
+# it computes) rather than inventing report fields.
+
+_SAVING_MARGIN = 0.05  # ±5% around the point estimate for low/high range
+
+
+def build_report_payload_from_assess(
+    assess_response: AssessResponse,
+    request: AssessRequest,
+) -> dict:
+    """Build a canonical simplified report payload from actual engine outputs.
+
+    This is the single authoritative mapping from engine → report.  Every
+    value in the returned dict is derived from the engine's actual outputs.
+    The frontend should pass this dict (or its JSON form) to /report/simplified.
+
+    Returns a dict suitable for SimplifiedReportRequest.model_validate().
+    """
+    voa_rv = request.property.voa_rv
+    tone_rate = assess_response.tone_rate
+    base_rv = assess_response.base_estimated_rv
+    adj_rv = assess_response.adjusted_estimated_rv
+
+    # Use adjusted RV if available, otherwise base RV
+    best_rv = adj_rv if adj_rv is not None else base_rv
+
+    # Compute low/high range as ±5% of best estimate (conservative)
+    if best_rv is not None:
+        rv_low = round(best_rv * (1 - _SAVING_MARGIN) / 100) * 100
+        rv_high = round(best_rv * (1 + _SAVING_MARGIN) / 100) * 100
+    else:
+        rv_low = None
+        rv_high = None
+
+    # Savings: difference between VOA RV and our modelled range
+    if rv_low is not None and voa_rv > 0:
+        saving_low = max(0, round(voa_rv - rv_high))
+        saving_high = max(0, round(voa_rv - rv_low))
+    else:
+        saving_low = None
+        saving_high = None
+
+    # Case strength maps directly from signal
+    signal = assess_response.signal
+    case_strength_map = {
+        "High": "Strong",
+        "Medium": "Moderate",
+        "Low": "Weak",
+        "Insufficient Data": "Insufficient Data",
+    }
+
+    # Per-comparable rate_psm: use the engine's rate field (which is on the
+    # correct basis — ITZA for retail, NIA for nursery) rather than
+    # re-deriving rv/nia_sqm which would produce a wrong-basis figure.
+    comps_for_report = []
+    for c in assess_response.rated_comps:
+        comp = dict(c)
+        # The engine's "rate" field is the correctly-normalised rate
+        if "rate" in comp and comp.get("rate_psm") is None:
+            comp["rate_psm"] = round(comp["rate"], 2)
+        comps_for_report.append(comp)
+
+    return {
+        "business_name": request.contact.business_name or request.property.address,
+        "property_address": request.property.address,
+        "postcode": request.property.postcode,
+        "business_type": request.property.business_type.value,
+        "date_prepared": datetime.now(timezone.utc).strftime("%d %B %Y"),
+        "voa_rv": voa_rv,
+        "modelled_rv_low": rv_low,
+        "modelled_rv_high": rv_high,
+        "annual_saving_low": saving_low,
+        "annual_saving_high": saving_high,
+        "case_strength": case_strength_map.get(signal, signal),
+        "comparables": comps_for_report,
+        "comp_count": assess_response.comparable_count or 0,
+        "tone_rate": tone_rate,
+        "base_estimated_rv": base_rv,
+        "adjusted_estimated_rv": adj_rv,
+        "rate_basis": None,  # set by caller from CSA result if available
+    }
