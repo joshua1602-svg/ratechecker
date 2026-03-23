@@ -51,7 +51,7 @@ async def assess(req: AssessRequest) -> AssessResponse:
     if coords is None:
         raise HTTPException(status_code=422, detail="Could not geocode postcode — check it is a valid UK postcode")
     lat, lon = coords
-    log.warning("ASSESS_DEBUG postcode=%s geocoded_lat=%s geocoded_lon=%s", req.property.postcode, round(lat, 4), round(lon, 4))
+    log.debug("ASSESS_DEBUG postcode=%s geocoded_lat=%s geocoded_lon=%s", req.property.postcode, round(lat, 4), round(lon, 4))
 
     btype = req.property.business_type.value
     rules = csa_rules()
@@ -60,7 +60,7 @@ async def assess(req: AssessRequest) -> AssessResponse:
     # DEBUG — redact password from URL for safe logging
     _db_url_safe = DATABASE_URL.split("@")[-1] if "@" in DATABASE_URL else DATABASE_URL
     _db_type = "sqlite" if "sqlite" in DATABASE_URL else "postgres/supabase"
-    log.warning(
+    log.debug(
         "ASSESS_DEBUG db_type=%s db_host=%s business_type=%s postcode=%s nia_sqm=%s voa_rv=%s scat_codes=%s",
         _db_type, _db_url_safe, btype, req.property.postcode, req.property.nia_sqm,
         req.property.voa_rv, target_scats,
@@ -82,7 +82,7 @@ async def assess(req: AssessRequest) -> AssessResponse:
         _size_band_pct = 500
     else:
         _size_band_pct = rules["filters"]["size_band_pct_fallback"]
-    log.warning(
+    log.debug(
         "ASSESS_DEBUG radius_m=%s size_band_pct=%s lat=%s lon=%s",
         _radius_m, _size_band_pct, round(lat, 4), round(lon, 4),
     )
@@ -94,7 +94,7 @@ async def assess(req: AssessRequest) -> AssessResponse:
         nia_sqm=req.property.nia_sqm,
         size_band_pct=_size_band_pct,
     )
-    log.warning("ASSESS_DEBUG rows_from_db=%s", len(rows))
+    log.debug("ASSESS_DEBUG rows_from_db=%s", len(rows))
 
     # 4. Convert DB rows → Comparable objects
     comps = [
@@ -119,7 +119,7 @@ async def assess(req: AssessRequest) -> AssessResponse:
     # web form request — they would require a UARN lookup.  The defaults
     # ("" and ()) resolve to itza_retail, which is correct for standard
     # high-street retail and restaurant subjects.
-    log.warning("ASSESS_DEBUG comps_passed_to_csa=%s", len(comps))
+    log.debug("ASSESS_DEBUG comps_passed_to_csa=%s", len(comps))
     result = run_csa(
         comps=comps,
         lat=lat,
@@ -128,7 +128,7 @@ async def assess(req: AssessRequest) -> AssessResponse:
         nia_sqm=req.property.nia_sqm,
         voa_rv=req.property.voa_rv,
     )
-    log.warning(
+    log.debug(
         "ASSESS_DEBUG csa_signal=%s comparable_count=%s insufficiency_reason=%s restaurant_rejection=%s",
         result.get("signal"), result.get("comparable_count"),
         result.get("insufficiency_reason"), result.get("restaurant_rejection_reason"),
@@ -156,7 +156,7 @@ async def assess(req: AssessRequest) -> AssessResponse:
             sv_lines_by_uarn=sv_lines,
             business_type=btype,
         )
-        log.warning(
+        log.debug(
             "ASSESS_DEBUG layout_adjustment_applied=%s",
             layout_result.get("layout_adjustment_applied"),
         )
@@ -178,7 +178,7 @@ async def assess(req: AssessRequest) -> AssessResponse:
             subject_has_parking=None,  # form field not yet added
         )
         _comps_for_response = _fit_result["comps"]
-        log.warning(
+        log.debug(
             "ASSESS_DEBUG fit_layer density_tier=%s fit_applied=%s in=%d out=%d",
             _fit_result["density_tier"], _fit_result["fit_applied"],
             _fit_result["fit_summary"]["input_count"],
