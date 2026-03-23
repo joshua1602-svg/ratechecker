@@ -213,6 +213,135 @@ def get_sv_lines_batch(uarns: list[str]) -> dict[str, list[dict]]:
         return {}
 
 
+# ---------------------------------------------------------------------------
+# 03-07 fit-layer batch queries
+# ---------------------------------------------------------------------------
+
+def get_sv_car_parking_batch(uarns: list[str]) -> dict[str, dict]:
+    """
+    Return car-parking summary keyed by UARN from voa_sv_car_parking (record type 05).
+
+    Each value contains ``cp_spaces`` and ``cp_total`` (total parking value £).
+    Used by the 03-07 fit layer to detect parking presence and contribution.
+    Returns {} on failure or empty input — callers degrade gracefully.
+    """
+    if not uarns:
+        return {}
+    sql = text("""
+        SELECT uarn, cp_spaces, cp_total
+        FROM voa_sv_car_parking
+        WHERE uarn = ANY(:uarns)
+    """)
+    try:
+        with Session(engine) as session:
+            rows = session.execute(sql, {"uarns": list(uarns)}).fetchall()
+        return {
+            str(r.uarn): {
+                "cp_spaces": float(r.cp_spaces) if r.cp_spaces is not None else None,
+                "cp_total":  float(r.cp_total)  if r.cp_total  is not None else None,
+            }
+            for r in rows
+        }
+    except Exception:
+        return {}
+
+
+def get_sv_additions_batch(uarns: list[str]) -> dict[str, dict]:
+    """
+    Return additions summary keyed by UARN from voa_sv_additions (record type 03).
+
+    Aggregates ``SUM(oa_value)`` and row count per UARN.
+    Used by the fit layer to detect additions presence and their contribution
+    relative to the comp's rateable value.
+    Returns {} on failure or empty input.
+    """
+    if not uarns:
+        return {}
+    sql = text("""
+        SELECT uarn,
+               SUM(oa_value) AS total_oa_value,
+               COUNT(*)      AS addition_count
+        FROM voa_sv_additions
+        WHERE uarn = ANY(:uarns)
+        GROUP BY uarn
+    """)
+    try:
+        with Session(engine) as session:
+            rows = session.execute(sql, {"uarns": list(uarns)}).fetchall()
+        return {
+            str(r.uarn): {
+                "total_oa_value": float(r.total_oa_value) if r.total_oa_value is not None else 0.0,
+                "addition_count": int(r.addition_count),
+            }
+            for r in rows
+        }
+    except Exception:
+        return {}
+
+
+def get_sv_plant_machinery_batch(uarns: list[str]) -> dict[str, dict]:
+    """
+    Return plant-and-machinery summary keyed by UARN from voa_sv_plant_machinery
+    (record type 04).
+
+    Aggregates ``SUM(pm_value)`` and row count per UARN.
+    Treated as a complexity signal by the fit layer, not a direct valuation input.
+    Returns {} on failure or empty input.
+    """
+    if not uarns:
+        return {}
+    sql = text("""
+        SELECT uarn,
+               SUM(pm_value) AS pm_value,
+               COUNT(*)      AS pm_count
+        FROM voa_sv_plant_machinery
+        WHERE uarn = ANY(:uarns)
+        GROUP BY uarn
+    """)
+    try:
+        with Session(engine) as session:
+            rows = session.execute(sql, {"uarns": list(uarns)}).fetchall()
+        return {
+            str(r.uarn): {
+                "pm_value": float(r.pm_value) if r.pm_value is not None else 0.0,
+                "pm_count": int(r.pm_count),
+            }
+            for r in rows
+        }
+    except Exception:
+        return {}
+
+
+def get_sv_adjustment_totals_batch(uarns: list[str]) -> dict[str, dict]:
+    """
+    Return adjustment totals keyed by UARN from voa_sv_adjustment_totals (record type 07).
+
+    Preferred over voa_sv_adjustments (record type 06) because it gives a
+    ready-made total_before_adj / total_adj pair for intensity calculation.
+    Used by the fit layer as the adjustment-intensity signal.
+    Returns {} on failure or empty input — fit layer treats missing data as neutral.
+    """
+    if not uarns:
+        return {}
+    sql = text("""
+        SELECT uarn, total_before_adj, total_adj
+        FROM voa_sv_adjustment_totals
+        WHERE uarn = ANY(:uarns)
+    """)
+    try:
+        with Session(engine) as session:
+            rows = session.execute(sql, {"uarns": list(uarns)}).fetchall()
+        return {
+            str(r.uarn): {
+                "total_before_adj": float(r.total_before_adj) if r.total_before_adj is not None else 0.0,
+                "total_adj":        float(r.total_adj)        if r.total_adj        is not None else 0.0,
+            }
+            for r in rows
+        }
+    except Exception:
+        return {}
+
+
 def count_voa_rows() -> int:
     """
     Return the number of rows in voa_list_entries.

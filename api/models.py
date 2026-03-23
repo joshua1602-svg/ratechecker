@@ -99,6 +99,7 @@ class AssessResponse(BaseModel):
     adjusted_estimated_rv: Optional[int] = None
     adjustments: Optional[AdjustmentBreakdown] = None
     adjustment_summary: Optional[str] = None
+    rated_comps: list[dict] = Field(default_factory=list)
 
 
 class PurchaseFormData(BaseModel):
