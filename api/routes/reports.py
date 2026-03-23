@@ -276,7 +276,6 @@ async def simplified_report(
         media_type="application/pdf",
         headers={"Content-Disposition": 'inline; filename="simplified_report.pdf"'},
     )
-    return JSONResponse(content=response_payload.model_dump())
 
 
 @router.post(

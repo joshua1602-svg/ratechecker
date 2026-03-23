@@ -777,7 +777,7 @@ def run_csa(
     ]
 
     if _is_restaurant:
-        _csa_log.warning("CSA_RESTAURANT_DEBUG stage=1_input_to_csa comps_in=%s filtered_after_size=%s size_pct=%s", len(comps), len(filtered), size_pct)
+        _csa_log.debug("CSA_RESTAURANT_DEBUG stage=1_input_to_csa comps_in=%s filtered_after_size=%s size_pct=%s", len(comps), len(filtered), size_pct)
 
     # --- Distance filter ---
     if business_type == "nursery":
@@ -810,18 +810,18 @@ def run_csa(
             f"pre_cap_count={_before_hard_cap}<{_RESTAURANT_LOW_DENSITY_POOL_MAX}"
             if _low_density_mode else "normal_density"
         )
-        _csa_log.warning(
+        _csa_log.debug(
             "CSA_RESTAURANT_DEBUG density_mode=%s reason=%s",
             "low" if _low_density_mode else "normal", _low_density_reason,
         )
         with_dist = [(c, d) for c, d in with_dist if d <= _distance_cap_used]
-        _csa_log.warning(
+        _csa_log.debug(
             "CSA_RESTAURANT_DEBUG stage=2_distance_filter after_radius=%s after_cap=%s cap_used=%s max_radius_used=%s",
             _before_hard_cap, len(with_dist), _distance_cap_used, max_radius,
         )
 
     if not with_dist:
-        _csa_log.warning("CSA_RESTAURANT_DEBUG stage=2_distance_filter RETURNING_INSUFFICIENT with_dist=0")
+        _csa_log.debug("CSA_RESTAURANT_DEBUG stage=2_distance_filter RETURNING_INSUFFICIENT with_dist=0")
         return _insufficient_data()
 
     # --- Extract effective Zone A rates and combined weights ---
@@ -867,11 +867,11 @@ def run_csa(
         rated.append((c, d, rate, w_prox * w_src * w_size))
 
     if not rated:
-        _csa_log.warning("CSA_RESTAURANT_DEBUG stage=3_rate_extraction RETURNING_INSUFFICIENT rated=0 excluded_no_rate=%s", excluded_no_rate)
+        _csa_log.debug("CSA_RESTAURANT_DEBUG stage=3_rate_extraction RETURNING_INSUFFICIENT rated=0 excluded_no_rate=%s", excluded_no_rate)
         return _insufficient_data()
 
     if _is_restaurant:
-        _csa_log.warning("CSA_RESTAURANT_DEBUG stage=3_rate_extraction rated=%s excluded_no_rate=%s", len(rated), excluded_no_rate)
+        _csa_log.debug("CSA_RESTAURANT_DEBUG stage=3_rate_extraction rated=%s excluded_no_rate=%s", len(rated), excluded_no_rate)
 
     # Restaurant path: in normal-density markets use the standard floor (3);
     # in low-density mode accept 2 rated comps so rural cases are not
@@ -881,13 +881,13 @@ def run_csa(
             _RESTAURANT_LOW_DENSITY_MIN_COMPS if _low_density_mode
             else _MIN_COMPS_FOR_VALUATION
         )
-        _csa_log.warning(
+        _csa_log.debug(
             "CSA_RESTAURANT_DEBUG stage=3_min_comps normal_threshold=%s low_density_threshold=%s threshold_applied=%s low_density_mode=%s",
             _MIN_COMPS_FOR_VALUATION, _RESTAURANT_LOW_DENSITY_MIN_COMPS,
             _min_comps_restaurant, _low_density_mode,
         )
         if len(rated) < _min_comps_restaurant:
-            _csa_log.warning(
+            _csa_log.debug(
                 "CSA_RESTAURANT_DEBUG stage=3_rate_extraction RETURNING_INSUFFICIENT rated=%s < MIN_COMPS=%s",
                 len(rated), _min_comps_restaurant,
             )
@@ -928,11 +928,11 @@ def run_csa(
         rated = [(c, d, r, w) for c, d, r, w in rated if lo <= r <= hi]
 
     if not rated:
-        _csa_log.warning("CSA_RESTAURANT_DEBUG stage=4_outlier_trim RETURNING_INSUFFICIENT rated=0")
+        _csa_log.debug("CSA_RESTAURANT_DEBUG stage=4_outlier_trim RETURNING_INSUFFICIENT rated=0")
         return _insufficient_data()
 
     if _is_restaurant:
-        _csa_log.warning("CSA_RESTAURANT_DEBUG stage=4_outlier_trim rated_after_trim=%s", len(rated))
+        _csa_log.debug("CSA_RESTAURANT_DEBUG stage=4_outlier_trim rated_after_trim=%s", len(rated))
         # In dense cities a restaurant pool can be 50–100 comps; cap after trim
         # to prevent one dense pitch cluster from dominating the tone estimate.
         if len(rated) > _RESTAURANT_POOL_CAP:
@@ -957,12 +957,12 @@ def run_csa(
             _median_gate_m = _RESTAURANT_MEDIAN_GATE_SMALL
         else:
             _median_gate_m = _RESTAURANT_MEDIAN_GATE_RURAL
-        _csa_log.warning(
+        _csa_log.debug(
             "CSA_RESTAURANT_DEBUG stage=5_median_distance median_m=%s gate_m=%s density_count=%s",
             round(_median_distance_m, 1), _median_gate_m, _before_hard_cap,
         )
         if _median_distance_m > _median_gate_m:
-            _csa_log.warning("CSA_RESTAURANT_DEBUG stage=5_median_distance RETURNING_INSUFFICIENT median_too_far")
+            _csa_log.debug("CSA_RESTAURANT_DEBUG stage=5_median_distance RETURNING_INSUFFICIENT median_too_far")
             return _insufficient_data()
 
     # --- Nursery nearest-N cap ---
@@ -1342,14 +1342,14 @@ def run_csa(
             _debug["restaurant_rejection_reason"] = restaurant_rejection_reason
             _debug["restaurant_quality_gate_passed"] = restaurant_quality_gate_passed
 
-        _csa_log.warning(
+        _csa_log.debug(
             "CSA_RESTAURANT_DEBUG stage=6_quality_gate passed=%s rejection_reason=%s rated_final=%s tone=%s rate_distance=%s",
             restaurant_quality_gate_passed, restaurant_rejection_reason, len(rated),
             round(tone, 2),
             round(_rate_distance_to_subject, 2) if _rate_distance_to_subject is not None else None,
         )
         if not restaurant_quality_gate_passed:
-            _csa_log.warning("CSA_RESTAURANT_DEBUG stage=6_quality_gate RETURNING_INSUFFICIENT reason=%s", restaurant_rejection_reason)
+            _csa_log.debug("CSA_RESTAURANT_DEBUG stage=6_quality_gate RETURNING_INSUFFICIENT reason=%s", restaurant_rejection_reason)
             _ins = _insufficient_data()
             if _debug:
                 _ins["_debug"] = _debug

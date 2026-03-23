@@ -73,9 +73,9 @@ def get_comparables(
             _scat_count = _s.execute(
                 text(f"SELECT COUNT(*) FROM voa_list_entries WHERE scat_code IN ({_scat_in}) AND rateable_value > 0"),
             ).scalar()
-        log.warning("DB_DEBUG rows_matching_scat_only=%s", _scat_count)
+        log.debug("DB_DEBUG rows_matching_scat_only=%s", _scat_count)
     except Exception as _e:
-        log.warning("DB_DEBUG rows_matching_scat_only=ERROR %s", _e)
+        log.debug("DB_DEBUG rows_matching_scat_only=ERROR %s", _e)
 
     # Bounding-box deltas (1° lat ≈ 111 km; 1° lon ≈ 111 km × cos(lat))
     lat_delta = radius_m / 111_000
@@ -131,8 +131,8 @@ def get_comparables(
         # treating it as a parameter placeholder escape character.
         params["postcode_prefix"] = postcode_prefix + "%"
 
-    log.warning("DB_DEBUG sql_query=\n%s", sql.text)
-    log.warning("DB_DEBUG sql_params=%s", params)
+    log.debug("DB_DEBUG sql_query=\n%s", sql.text)
+    log.debug("DB_DEBUG sql_params=%s", params)
 
     try:
         with Session(engine) as session:
@@ -140,12 +140,12 @@ def get_comparables(
         results = [dict(r._mapping) for r in rows]
     except Exception as _e:
         # Database not yet populated — caller will return "Insufficient Data"
-        log.warning("DB_DEBUG query_exception=%s", _e)
+        log.debug("DB_DEBUG query_exception=%s", _e)
         return []
 
-    log.warning("DB_DEBUG rows_after_bbox_and_size_filter=%s", len(results))
+    log.debug("DB_DEBUG rows_after_bbox_and_size_filter=%s", len(results))
 
-    log.warning("DB_DEBUG rows_after_outlier_filter=%s (final returned)", len(results))
+    log.debug("DB_DEBUG rows_after_outlier_filter=%s (final returned)", len(results))
     return results
 
 
