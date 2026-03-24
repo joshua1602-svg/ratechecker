@@ -370,6 +370,11 @@ async def download_report(session_id: str, request: Request) -> Response:
     else:
         report_data = build_report_payload_from_assess(assess_resp, assess_req)
 
+    # Inject paid_intake fields that don't map to AssessRequest sub-models.
+    paid_intake = draft.get("paid_intake") or {}
+    if paid_intake.get("has_parking") is not None:
+        report_data["has_parking"] = paid_intake["has_parking"]
+
     # ── 5. Generate the PDF ──
     _comps = report_data.get("comparables") or []
     logger.info(
