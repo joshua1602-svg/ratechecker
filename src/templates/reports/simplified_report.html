@@ -3,15 +3,32 @@
 <head>
 <meta charset="UTF-8">
 <title>Business Rates Assessment — {{ business_name }}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
 /* ── Page setup ── */
 @page {
   size: A4;
-  margin: 16mm 18mm 20mm 18mm;
+  margin: 16mm 18mm 28mm 18mm;
+  background: #FDF5EE;
   @bottom-right {
     content: "Page " counter(page) " of " counter(pages);
+    font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
     font-size: 8pt;
     color: #666666;
+  }
+  @bottom-left {
+    content: "Prepared by RateCheck  |  ratecheck.uk";
+    font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
+    font-size: 7pt;
+    color: #7A8A9A;
+  }
+  @bottom-center {
+    content: "This report is based on publicly available VOA data and does not constitute professional surveying or legal advice.";
+    font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
+    font-size: 7pt;
+    color: #A0A8B0;
   }
 }
 
@@ -20,7 +37,7 @@
 
 /* ── Base ── */
 body {
-  font-family: 'Segoe UI', Arial, Helvetica, sans-serif;
+  font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
   font-size: 9.5pt;
   line-height: 1.5;
   color: #2B4360;
@@ -31,6 +48,7 @@ body {
 
 /* ── Typography ── */
 h1 {
+  font-family: 'Outfit', system-ui, sans-serif;
   font-size: 11pt;
   font-weight: 700;
   color: #2B4360;
@@ -40,6 +58,7 @@ h1 {
   letter-spacing: -0.01em;
 }
 h2 {
+  font-family: 'Outfit', system-ui, sans-serif;
   font-size: 10pt;
   font-weight: 700;
   color: #2B4360;
@@ -61,6 +80,7 @@ table { page-break-inside: avoid; }
 
 /* ── Wordmark ── */
 .wordmark {
+  font-family: 'Outfit', system-ui, sans-serif;
   letter-spacing: -0.02em;
 }
 .wordmark-rate { font-weight: 700; color: #2B4360; }
@@ -76,6 +96,7 @@ table { page-break-inside: avoid; }
   background: #F5E6D8;
 }
 .cover-title {
+  font-family: 'Outfit', system-ui, sans-serif;
   font-size: 24pt;
   font-weight: 700;
   color: #2B4360;
@@ -152,13 +173,14 @@ table { page-break-inside: avoid; }
 .banner-box {
   display: table-cell;
   width: 25%;
-  background: #F5E6D8;
-  border: 1px solid #E8DDD4;
+  background: #EAF0F7;
+  border: 1px solid #2B4360;
   border-radius: 4px;
   padding: 10px 8px;
   vertical-align: top;
 }
 .banner-box-accent {
+  background: #F5E6D8;
   border: 1.5px solid #D4956A;
 }
 .banner-label {
@@ -243,37 +265,7 @@ table { page-break-inside: avoid; }
   margin-bottom: 4px;
 }
 
-/* ── Footer ── */
-.page-footer {
-  position: running(pageFooter);
-  border-top: 1px solid #E8DDD4;
-  padding-top: 4px;
-  font-size: 7pt;
-  color: #7A8A9A;
-}
-@page {
-  @bottom-left {
-    content: element(pageFooter);
-  }
-}
-@media screen {
-  .page-footer {
-    position: fixed;
-    bottom: 0;
-    left: 0;
-    right: 0;
-  }
-}
-.footer-row {
-  display: flex;
-  justify-content: space-between;
-}
-.footer-disclaimer {
-  text-align: center;
-  font-size: 7pt;
-  color: #A0A8B0;
-  margin-top: 2px;
-}
+/* ── Footer — handled by @page margin boxes above ── */
 </style>
 </head>
 <body>
@@ -359,7 +351,6 @@ table { page-break-inside: avoid; }
 <!-- ═══ COMPARABLES ═══ -->
 <div class="section">
   <h1>Your Key Comparables</h1>
-  <p class="intro-line">The following properties formed the primary basis for this assessment.</p>
 
   <table class="comp-table">
     <thead>
@@ -375,6 +366,7 @@ table { page-break-inside: avoid; }
     </thead>
     <tbody>
       {% for comp in comparables[:5] %}
+      {% if comp.address | upper != property_address | upper %}
       <tr>
         <td>{{ comp.address }}</td>
         <td>{{ comp.nia_sqm }}</td>
@@ -388,6 +380,7 @@ table { page-break-inside: avoid; }
         </td>
         {% endif %}
       </tr>
+      {% endif %}
       {% endfor %}
     </tbody>
   </table>
@@ -408,13 +401,7 @@ table { page-break-inside: avoid; }
   </div>
 </div>
 
-<!-- ═══ FOOTER ═══ -->
-<div class="page-footer">
-  <div class="footer-row">
-    <span>Prepared by RateCheck&nbsp;&nbsp;|&nbsp;&nbsp;ratecheck.uk</span>
-  </div>
-  <div class="footer-disclaimer">This report is based on publicly available VOA data and does not constitute professional surveying or legal advice.</div>
-</div>
+<!-- footer handled by @page @bottom-left / @bottom-center / @bottom-right -->
 
 </body>
 </html>
