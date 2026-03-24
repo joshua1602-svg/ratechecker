@@ -1,5 +1,8 @@
 """POST /report/simplified and /report/evidence — PDF generation endpoints.
 
+Also provides GET /report/download/{session_id} for the paid flow:
+  load a persisted draft, verify payment, build the report from backend truth.
+
 Production safety:
   - No placeholder or synthetic data.  All fields must be provided by the caller.
   - Payloads are validated strictly — missing required fields return 422.
@@ -15,7 +18,15 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import Response
-from api.models import EvidenceReportRequest, SimplifiedReportRequest
+from api.models import (
+    AssessRequest,
+    AssessResponse,
+    EvidenceReportRequest,
+    SimplifiedReportRequest,
+    build_evidence_payload_from_assess,
+    build_report_payload_from_assess,
+)
+from api.pending_reports import get_draft
 from api.reports.pdf_generator import generate_evidence_pack, generate_simplified_report
 
 router = APIRouter()
@@ -217,6 +228,126 @@ async def evidence_report(
 
     biz = _sanitise_filename(report_data.get("business_name", "Report")) or "Report"
     filename = f"{biz}_RateChecker_Evidence.pdf"
+
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+# ---------------------------------------------------------------------------
+# Paid-flow report download
+# ---------------------------------------------------------------------------
+
+def _merge_paid_intake(assess_request_dict: dict, paid_intake: dict) -> dict:
+    """Merge second-screen paid intake data into the assess request.
+
+    paid_intake keys mirror the AssessRequest structure:
+      - "property": dict of PropertyInput overrides (address, uprn, frontage_m, ...)
+      - "layout": dict of LayoutInputModel fields
+      - "areas": dict of AreasInput fields
+      - "nursery": dict of NurseryInput fields
+      - "flags": dict of FlagsInput updates
+
+    For dict-valued keys, the merge is shallow (paid_intake values override
+    assess_request values at the sub-key level).  For non-dict keys, the
+    paid_intake value replaces the assess_request value outright.
+    """
+    merged = dict(assess_request_dict)
+    for key, value in paid_intake.items():
+        if value is None:
+            continue
+        existing = merged.get(key)
+        if isinstance(existing, dict) and isinstance(value, dict):
+            merged[key] = {**existing, **value}
+        else:
+            merged[key] = value
+    return merged
+
+
+@router.get(
+    "/report/download/{session_id}",
+    response_class=Response,
+    response_model=None,
+    response_description="Generated paid report PDF.",
+    responses={
+        200: {
+            "description": "Generated paid report PDF.",
+            "content": {
+                "application/pdf": {
+                    "schema": {"type": "string", "format": "binary"},
+                }
+            },
+        }
+    },
+)
+async def download_report(session_id: str, request: Request) -> Response:
+    """Generate a paid report from a persisted draft.
+
+    Flow: frontend redirects here after Stripe success.  The backend loads the
+    draft, verifies payment, merges paid_intake into the assess request, builds
+    the report payload from backend truth, and returns the PDF.
+    """
+    _check_rate_limit(request.client.host if request.client else "unknown")
+
+    # ── 1. Load the persisted draft ──
+    draft = get_draft(session_id)
+    if draft is None:
+        raise HTTPException(status_code=404, detail="Report session not found")
+
+    if not draft["paid"]:
+        raise HTTPException(status_code=402, detail="Payment not yet confirmed")
+
+    # ── 2. Merge paid_intake into the assess request ──
+    merged_request_dict = _merge_paid_intake(
+        draft["assess_request"],
+        draft["paid_intake"],
+    )
+
+    # ── 3. Parse back into typed models ──
+    try:
+        assess_req = AssessRequest.model_validate(merged_request_dict)
+    except Exception as exc:
+        logger.error("Failed to parse stored assess_request: %s", exc)
+        raise HTTPException(
+            status_code=500,
+            detail="Stored report data is invalid — cannot generate report.",
+        ) from exc
+
+    try:
+        assess_resp = AssessResponse.model_validate(draft["assess_response"])
+    except Exception as exc:
+        logger.error("Failed to parse stored assess_response: %s", exc)
+        raise HTTPException(
+            status_code=500,
+            detail="Stored engine data is invalid — cannot generate report.",
+        ) from exc
+
+    # ── 4. Build the report payload from backend truth ──
+    product = draft["product"]
+    if product == "evidence":
+        report_data = build_evidence_payload_from_assess(assess_resp, assess_req)
+    else:
+        report_data = build_report_payload_from_assess(assess_resp, assess_req)
+
+    # ── 5. Generate the PDF ──
+    logger.info(
+        "Generating paid %s report. session_id=%s business_name=%s",
+        product, session_id, report_data.get("business_name"),
+    )
+
+    try:
+        if product == "evidence":
+            pdf_bytes = generate_evidence_pack(report_data)
+        else:
+            pdf_bytes = generate_simplified_report(report_data)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    biz = _sanitise_filename(report_data.get("business_name", "Report")) or "Report"
+    suffix = "Evidence" if product == "evidence" else "Simplified"
+    filename = f"{biz}_RateChecker_{suffix}.pdf"
 
     return Response(
         content=pdf_bytes,

@@ -104,6 +104,7 @@ class AssessResponse(BaseModel):
 
 
 class PurchaseFormData(BaseModel):
+    """Legacy purchase form — retained for reference."""
     contact: ContactInput
     property: PropertyInput
     areas: Optional[AreasInput] = None
@@ -111,9 +112,36 @@ class PurchaseFormData(BaseModel):
     flags: FlagsInput
 
 
+class PaidIntakeData(BaseModel):
+    """Second-screen paid intake data captured after the free /assess step.
+
+    These fields enrich the final paid report beyond what was submitted to
+    /assess on screen 1.  The structure mirrors AssessRequest sub-models so
+    paid_intake can be cleanly merged into the stored assess_request before
+    report generation.
+    """
+    # Property enrichments
+    property: Optional[dict] = None   # partial PropertyInput overrides (address, uprn, frontage_m, depth_m, floors)
+    # Sub-model overrides / additions
+    layout: Optional[dict] = None     # LayoutInputModel fields
+    areas: Optional[dict] = None      # AreasInput fields
+    nursery: Optional[dict] = None    # NurseryInput fields
+    flags: Optional[dict] = None      # FlagsInput updates
+
+
 class PurchaseRequest(BaseModel):
+    """Purchase request — persists full report draft before Stripe checkout.
+
+    The frontend must send:
+      - product: "report" or "evidence"
+      - assess_request: the full AssessRequest JSON used for the free /assess call
+      - assess_response: the full AssessResponse JSON returned by /assess
+      - paid_intake: second-screen paid intake data (layout, areas, property enrichments)
+    """
     product: str  # "report" or "evidence"
-    form_data: PurchaseFormData
+    assess_request: dict  # Full AssessRequest JSON from screen 1
+    assess_response: dict  # Full AssessResponse JSON from /assess
+    paid_intake: PaidIntakeData = Field(default_factory=PaidIntakeData)
 
 
 class SimplifiedReportRequest(BaseModel):
@@ -177,6 +205,7 @@ class EvidenceReportRequest(SimplifiedReportRequest):
 
 class PurchaseResponse(BaseModel):
     checkout_url: str
+    session_id: str  # pending_reports draft ID — use for /report/download/{session_id}
 
 
 # ---------------------------------------------------------------------------
