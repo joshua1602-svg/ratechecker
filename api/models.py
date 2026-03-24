@@ -149,7 +149,7 @@ class EvidenceReportRequest(SimplifiedReportRequest):
     """Evidence pack payload — fields required by _EVIDENCE_REQUIRED_FIELDS
     are non-optional so Pydantic catches missing values before the route does.
     """
-    uprn: str
+    uprn: Optional[str] = ""
     voa_description: str
     nia_sqm: float
     modelled_rv: float

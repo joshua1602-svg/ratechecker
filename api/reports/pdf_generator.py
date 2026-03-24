@@ -39,7 +39,6 @@ _SIMPLIFIED_REQUIRED = [
 ]
 
 _EVIDENCE_EXTRA_REQUIRED = [
-    "uprn",
     "voa_description",
     "nia_sqm",
     "modelled_rv",
