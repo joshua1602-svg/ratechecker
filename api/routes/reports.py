@@ -244,18 +244,46 @@ def _merge_paid_intake(assess_request_dict: dict, paid_intake: dict) -> dict:
     """Merge second-screen paid intake data into the assess request.
 
     paid_intake keys mirror the AssessRequest structure:
+      - "contact": dict of ContactInput overrides (business_name, email)
       - "property": dict of PropertyInput overrides (address, uprn, frontage_m, ...)
       - "layout": dict of LayoutInputModel fields
       - "areas": dict of AreasInput fields
       - "nursery": dict of NurseryInput fields
       - "flags": dict of FlagsInput updates
 
+    The frontend may also send flat convenience keys at the top level
+    (business_name, address, postcode, nia_sqm, voa_rv).  These are
+    re-routed into the correct nested position before the main merge.
+
     For dict-valued keys, the merge is shallow (paid_intake values override
     assess_request values at the sub-key level).  For non-dict keys, the
     paid_intake value replaces the assess_request value outright.
     """
+    # Re-route flat convenience keys into the correct nested positions.
+    intake = dict(paid_intake)
+
+    # business_name → contact.business_name
+    flat_biz = intake.pop("business_name", None)
+    if flat_biz:
+        contact_overrides = intake.get("contact") or {}
+        contact_overrides.setdefault("business_name", flat_biz)
+        intake["contact"] = contact_overrides
+
+    # address, postcode, nia_sqm, voa_rv → property.*
+    _FLAT_TO_PROPERTY = ("address", "postcode", "nia_sqm", "voa_rv")
+    property_overrides = dict(intake.get("property") or {})
+    any_property_flat = False
+    for flat_key in _FLAT_TO_PROPERTY:
+        flat_val = intake.pop(flat_key, None)
+        if flat_val is not None:
+            property_overrides.setdefault(flat_key, flat_val)
+            any_property_flat = True
+    if any_property_flat:
+        intake["property"] = property_overrides
+
+    # Main merge: nested dicts are shallow-merged; scalars replaced outright.
     merged = dict(assess_request_dict)
-    for key, value in paid_intake.items():
+    for key, value in intake.items():
         if value is None:
             continue
         existing = merged.get(key)
@@ -343,9 +371,19 @@ async def download_report(session_id: str, request: Request) -> Response:
         report_data = build_report_payload_from_assess(assess_resp, assess_req)
 
     # ── 5. Generate the PDF ──
+    _comps = report_data.get("comparables") or []
     logger.info(
-        "Generating paid %s report. session_id=%s business_name=%s",
-        product, session_id, report_data.get("business_name"),
+        "Generating paid %s report. session_id=%s business_name=%r "
+        "property_address=%r postcode=%r comp_count=%s len(comparables)=%s "
+        "first_comp=%r",
+        product,
+        session_id,
+        report_data.get("business_name"),
+        report_data.get("property_address"),
+        report_data.get("postcode"),
+        report_data.get("comp_count"),
+        len(_comps),
+        _comps[0] if _comps else None,
     )
 
     try:
