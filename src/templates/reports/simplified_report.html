@@ -24,7 +24,7 @@ body {
   font-size: 9.5pt;
   line-height: 1.5;
   color: #2B4360;
-  background: #FFFFFF;
+  background: #FDF5EE;
   -webkit-print-color-adjust: exact;
   print-color-adjust: exact;
 }
@@ -45,11 +45,74 @@ h2 {
   color: #2B4360;
   margin: 10px 0 4px 0;
 }
-p { margin: 0 0 5px 0; }
+p { margin: 0 0 5px 0; text-align: justify; }
 
 /* ── No page breaks — single page ── */
 .section { page-break-inside: avoid; }
 table { page-break-inside: avoid; }
+.page-break { page-break-after: always; }
+
+/* ── Logo SVG ── */
+.logo-icon {
+  display: inline-block;
+  vertical-align: middle;
+  margin-right: 6px;
+}
+
+/* ── Wordmark ── */
+.wordmark {
+  letter-spacing: -0.02em;
+}
+.wordmark-rate { font-weight: 700; color: #2B4360; }
+.wordmark-check { font-weight: 400; color: #2B4360; }
+.wordmark-lg { font-size: 28pt; }
+
+/* ── Cover page ── */
+.cover {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-height: 100vh;
+  background: #F5E6D8;
+}
+.cover-title {
+  font-size: 24pt;
+  font-weight: 700;
+  color: #2B4360;
+  margin-top: 32px;
+  letter-spacing: -0.02em;
+}
+.cover-subtitle {
+  font-size: 11pt;
+  color: #7A8A9A;
+  margin-top: 6px;
+}
+.cover-rule {
+  border: none;
+  border-top: 2px solid #D4956A;
+  margin: 24px 0;
+}
+.cover-details {
+  border-collapse: collapse;
+  font-size: 10pt;
+}
+.cover-details td {
+  padding: 5px 14px 5px 0;
+  vertical-align: top;
+}
+.cover-details .label {
+  font-weight: 600;
+  color: #7A8A9A;
+  white-space: nowrap;
+  text-transform: uppercase;
+  font-size: 8pt;
+  letter-spacing: 0.04em;
+  padding-top: 7px;
+}
+.cover-details .value {
+  color: #2B4360;
+  font-weight: 500;
+}
 
 /* ── Header ── */
 .report-header {
@@ -60,12 +123,10 @@ table { page-break-inside: avoid; }
   border-bottom: 2px solid #D4956A;
   margin-bottom: 4px;
 }
-.wordmark {
+.wordmark-sm {
   font-size: 16pt;
   letter-spacing: -0.02em;
 }
-.wordmark-rate { font-weight: 700; color: #2B4360; }
-.wordmark-checker { font-weight: 400; color: #2B4360; }
 .report-type {
   font-size: 9pt;
   font-weight: 600;
@@ -91,8 +152,8 @@ table { page-break-inside: avoid; }
 .banner-box {
   display: table-cell;
   width: 25%;
-  background: #E8EEF4;
-  border: 1px solid #CCCCCC;
+  background: #F5E6D8;
+  border: 1px solid #E8DDD4;
   border-radius: 4px;
   padding: 10px 8px;
   vertical-align: top;
@@ -102,7 +163,7 @@ table { page-break-inside: avoid; }
 }
 .banner-label {
   font-size: 7.5pt;
-  color: #1B3A5C;
+  color: #2B4360;
   text-transform: uppercase;
   letter-spacing: 0.04em;
   font-weight: 600;
@@ -161,6 +222,7 @@ table { page-break-inside: avoid; }
   font-size: 8.5pt;
   margin-bottom: 6px;
   line-height: 1.45;
+  text-align: left;
 }
 
 /* ── Callout ── */
@@ -183,11 +245,24 @@ table { page-break-inside: avoid; }
 
 /* ── Footer ── */
 .page-footer {
-  margin-top: 10px;
+  position: running(pageFooter);
   border-top: 1px solid #E8DDD4;
   padding-top: 4px;
   font-size: 7pt;
   color: #7A8A9A;
+}
+@page {
+  @bottom-left {
+    content: element(pageFooter);
+  }
+}
+@media screen {
+  .page-footer {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+  }
 }
 .footer-row {
   display: flex;
@@ -203,9 +278,36 @@ table { page-break-inside: avoid; }
 </head>
 <body>
 
+<!-- ═══ COVER PAGE ═══ -->
+<div class="cover page-break">
+  <div>
+    <svg width="36" height="36" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" class="logo-icon"><rect x="2" y="18" width="6" height="12" rx="1.5" fill="#D4956A" opacity="0.45"/><rect x="10" y="12" width="6" height="18" rx="1.5" fill="#D4956A" opacity="0.65"/><rect x="18" y="6" width="6" height="24" rx="1.5" fill="#D4956A" opacity="0.85"/><path d="M22 4 L27 9 L30 3" stroke="#D4956A" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
+    <span class="wordmark wordmark-lg"><span class="wordmark-rate">Rate</span><span class="wordmark-check">Check</span></span>
+  </div>
+
+  <div class="cover-title">Business Rates Assessment</div>
+  <div class="cover-subtitle">An indicative assessment of your property's rateable value</div>
+
+  <hr class="cover-rule">
+
+  <table class="cover-details">
+    <tr><td class="label">Business:</td><td class="value">{{ business_name }}</td></tr>
+    <tr><td class="label">Address:</td><td class="value">{{ property_address }}</td></tr>
+    <tr><td class="label">Sector:</td><td class="value">{{ business_type | capitalize }}</td></tr>
+    <tr><td class="label">Date:</td><td class="value">{{ date_prepared }}</td></tr>
+    <tr>
+      <td class="label">Case Strength:</td>
+      <td class="value" style="font-weight:700; color:{% if case_strength == 'High' %}#2E7D32{% elif case_strength == 'Medium' %}#D4956A{% else %}#7A8A9A{% endif %};">{{ case_strength }}</td>
+    </tr>
+  </table>
+</div>
+
 <!-- ═══ HEADER ═══ -->
 <div class="report-header">
-  <span class="wordmark"><span class="wordmark-rate">Rate</span><span class="wordmark-checker">Checker</span></span>
+  <span>
+    <svg width="24" height="24" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" class="logo-icon"><rect x="2" y="18" width="6" height="12" rx="1.5" fill="#D4956A" opacity="0.45"/><rect x="10" y="12" width="6" height="18" rx="1.5" fill="#D4956A" opacity="0.65"/><rect x="18" y="6" width="6" height="24" rx="1.5" fill="#D4956A" opacity="0.85"/><path d="M22 4 L27 9 L30 3" stroke="#D4956A" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
+    <span class="wordmark wordmark-sm"><span class="wordmark-rate">Rate</span><span class="wordmark-check">Check</span></span>
+  </span>
   <span class="report-type">Business Rates Assessment</span>
 </div>
 <div class="header-meta">{{ business_name }} &nbsp;&bull;&nbsp; {{ property_address }} &nbsp;&bull;&nbsp; Prepared: {{ date_prepared }}</div>
@@ -295,7 +397,7 @@ table { page-break-inside: avoid; }
 <div class="section">
   <h1>How to Challenge</h1>
 
-  <p class="step-item"><strong>1.</strong> Find your property at <strong>gov.uk/find-business-rates</strong></p>
+  <p class="step-item"><strong>1.</strong> Find your property at gov.uk/find-business-rates</p>
   <p class="step-item"><strong>2.</strong> Select 'Check your rateable value' and sign in or create a business rates valuation account</p>
   <p class="step-item"><strong>3.</strong> Submit a Check — confirm the facts about your property are correct</p>
   <p class="step-item"><strong>4.</strong> If the Check does not resolve it, submit a Challenge using the comparables in this report as evidence</p>
@@ -309,7 +411,7 @@ table { page-break-inside: avoid; }
 <!-- ═══ FOOTER ═══ -->
 <div class="page-footer">
   <div class="footer-row">
-    <span>Prepared by RateChecker&nbsp;&nbsp;|&nbsp;&nbsp;ratechecker.co.uk</span>
+    <span>Prepared by RateCheck&nbsp;&nbsp;|&nbsp;&nbsp;ratecheck.uk</span>
   </div>
   <div class="footer-disclaimer">This report is based on publicly available VOA data and does not constitute professional surveying or legal advice.</div>
 </div>
