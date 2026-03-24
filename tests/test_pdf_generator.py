@@ -95,8 +95,8 @@ class TestEvidencePack:
 
     def test_missing_required_field_raises(self):
         data = _base_report_data()
-        del data["uprn"]
-        with pytest.raises(ValueError, match="uprn"):
+        del data["voa_description"]
+        with pytest.raises(ValueError, match="voa_description"):
             generate_evidence_pack(data)
 
     def test_optional_field_none_no_error(self):

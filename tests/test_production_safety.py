@@ -680,7 +680,7 @@ class TestEvidencePayloadBuilder:
         payload = build_evidence_payload_from_assess(resp, req)
         # Should not raise
         model = EvidenceReportRequest.model_validate(payload)
-        assert model.uprn == "UPRN123"
+        assert model.uprn == "UPRN123"  # populated when available
         assert model.nia_sqm == 120
         assert model.modelled_rv == 14200
 

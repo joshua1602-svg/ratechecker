@@ -69,7 +69,6 @@ _SIMPLIFIED_REQUIRED_FIELDS = {
 }
 
 _EVIDENCE_REQUIRED_FIELDS = _SIMPLIFIED_REQUIRED_FIELDS | {
-    "uprn",
     "voa_description",
     "nia_sqm",
     "modelled_rv",
