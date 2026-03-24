@@ -119,14 +119,27 @@ class PaidIntakeData(BaseModel):
     /assess on screen 1.  The structure mirrors AssessRequest sub-models so
     paid_intake can be cleanly merged into the stored assess_request before
     report generation.
+
+    The frontend may also send flat top-level convenience keys (e.g.
+    business_name, address, postcode, nia_sqm, voa_rv) which are re-routed
+    into the correct nested position by _merge_paid_intake().
     """
-    # Property enrichments
+    # Sub-model overrides (nested dicts matching AssessRequest structure)
+    contact: Optional[dict] = None    # ContactInput overrides (business_name, email)
     property: Optional[dict] = None   # partial PropertyInput overrides (address, uprn, frontage_m, depth_m, floors)
-    # Sub-model overrides / additions
     layout: Optional[dict] = None     # LayoutInputModel fields
     areas: Optional[dict] = None      # AreasInput fields
     nursery: Optional[dict] = None    # NurseryInput fields
     flags: Optional[dict] = None      # FlagsInput updates
+
+    # Flat convenience keys — the frontend may send these at the top level
+    # instead of nesting them under contact/property.  _merge_paid_intake()
+    # re-routes them into the correct nested position.
+    business_name: Optional[str] = None
+    address: Optional[str] = None
+    postcode: Optional[str] = None
+    nia_sqm: Optional[float] = None
+    voa_rv: Optional[float] = None
 
 
 class PurchaseRequest(BaseModel):
@@ -274,6 +287,10 @@ def build_report_payload_from_assess(
             comp["rate_psm"] = round(comp["rate"], 2)
         comps_for_report.append(comp)
 
+    # comp_count must always match the actual comparables list to prevent
+    # the banner showing a non-zero count while the table renders no rows.
+    comp_count = len(comps_for_report)
+
     return {
         "business_name": request.contact.business_name or request.property.address,
         "property_address": request.property.address,
@@ -287,7 +304,7 @@ def build_report_payload_from_assess(
         "annual_saving_high": saving_high,
         "case_strength": case_strength_map.get(signal, signal),
         "comparables": comps_for_report,
-        "comp_count": assess_response.comparable_count or 0,
+        "comp_count": comp_count,
         "tone_rate": tone_rate,
         "base_estimated_rv": base_rv,
         "adjusted_estimated_rv": adj_rv,
