@@ -10,30 +10,7 @@
 /* ── Page setup ── */
 @page {
   size: A4;
-  margin: 0;
-  background: #FDF5EE;
-}
-
-/* ── Reset ── */
-*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
-/* ── Base ── */
-body {
-  font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
-  font-size: 9.5pt;
-  line-height: 1.5;
-  color: #2B4360;
-  background: #FDF5EE;
-  -webkit-print-color-adjust: exact;
-  print-color-adjust: exact;
-  padding: 18mm;
-  padding-bottom: 28mm;
-}
-
-/* ── Page number via @page (WeasyPrint) ── */
-@page {
-  size: A4;
-  margin: 18mm 18mm 28mm 18mm;
+  margin: 16mm 18mm 28mm 18mm;
   background: #FDF5EE;
   @bottom-right {
     content: "Page " counter(page) " of " counter(pages);
@@ -53,6 +30,20 @@ body {
     font-size: 7pt;
     color: #A0A8B0;
   }
+}
+
+/* ── Reset ── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+/* ── Base ── */
+body {
+  font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
+  font-size: 9.5pt;
+  line-height: 1.5;
+  color: #2B4360;
+  background: #FDF5EE;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
 }
 
 /* ── Typography ── */
@@ -77,7 +68,6 @@ p { margin: 0 0 6px 0; text-align: justify; }
 
 /* ── Page breaks ── */
 .section { page-break-inside: avoid; }
-.section + .section h1 { page-break-before: always; }
 .page-break { page-break-after: always; }
 table { page-break-inside: avoid; }
 .callout { page-break-inside: avoid; }
@@ -87,6 +77,12 @@ table { page-break-inside: avoid; }
   display: inline-block;
   vertical-align: middle;
   margin-right: 8px;
+  position: relative;
+  top: -2px;
+}
+.logo-header {
+  display: flex;
+  align-items: center;
 }
 .wordmark {
   font-family: 'Outfit', system-ui, sans-serif;
@@ -403,7 +399,7 @@ table { page-break-inside: avoid; }
      COVER PAGE
      ═══════════════════════════════════════════════════════════════════ -->
 <div class="cover page-break">
-  <div>
+  <div class="logo-header">
     <svg class="logo-svg" width="36" height="36" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
       <rect x="2" y="22" width="8" height="14" rx="2" fill="#D4956A"/>
       <rect x="14" y="14" width="8" height="22" rx="2" fill="#2B4360"/>
