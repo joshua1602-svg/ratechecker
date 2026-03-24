@@ -26,7 +26,7 @@ from api.models import (
     build_evidence_payload_from_assess,
     build_report_payload_from_assess,
 )
-from api.pending_reports import get_draft
+from api.pending_reports import get_draft, get_draft_payment_status
 from api.reports.pdf_generator import generate_evidence_pack, generate_simplified_report
 
 router = APIRouter()
@@ -289,15 +289,26 @@ async def download_report(session_id: str, request: Request) -> Response:
     draft, verifies payment, merges paid_intake into the assess request, builds
     the report payload from backend truth, and returns the PDF.
     """
-    _check_rate_limit(request.client.host if request.client else "unknown")
-
     # ── 1. Load the persisted draft ──
     draft = get_draft(session_id)
     if draft is None:
+        logger.warning("Paid download requested for missing session_id=%s", session_id)
         raise HTTPException(status_code=404, detail="Report session not found")
 
     if not draft["paid"]:
-        raise HTTPException(status_code=402, detail="Payment not yet confirmed")
+        logger.info(
+            "Paid download requested before payment confirmation. session_id=%s stripe_session_id=%s",
+            session_id,
+            draft.get("stripe_session_id"),
+        )
+        raise HTTPException(
+            status_code=402,
+            detail="Payment not yet confirmed",
+            headers={"Retry-After": "3"},
+        )
+
+    # Rate limit only expensive PDF-generation requests after payment is confirmed.
+    _check_rate_limit(request.client.host if request.client else "unknown")
 
     # ── 2. Merge paid_intake into the assess request ──
     merged_request_dict = _merge_paid_intake(
@@ -354,3 +365,19 @@ async def download_report(session_id: str, request: Request) -> Response:
         media_type="application/pdf",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+@router.get("/report/status/{session_id}")
+async def report_status(session_id: str) -> dict[str, Any]:
+    """Return paid status for a pending report draft for debugging/polling."""
+    draft = get_draft_payment_status(session_id)
+    if draft is None:
+        raise HTTPException(status_code=404, detail="Report session not found")
+
+    return {
+        "session_id": draft["session_id"],
+        "product": draft["product"],
+        "paid": draft["paid"],
+        "stripe_session_id": draft["stripe_session_id"],
+        "created_at": draft["created_at"],
+    }
