@@ -523,8 +523,9 @@ table { page-break-inside: avoid; }
 <div class="section">
   <h1>Valuation Calculation</h1>
 
-  {% if business_type in ['retail', 'restaurant'] %}
+  {% if business_type in ['retail', 'hair_beauty', 'restaurant_cafe', 'pub'] %}
   <h2>Zoning Schedule</h2>
+  {% if zoning_rows %}
   <table class="calc-table">
     <thead>
       <tr>
@@ -540,25 +541,28 @@ table { page-break-inside: avoid; }
       {% for row in (zoning_rows or []) %}
       <tr>
         <td>{{ row.zone }}</td>
-        <td class="num">{{ row.area_sqm }}</td>
-        <td class="num">{{ row.relativity }}</td>
-        <td class="num">{{ row.area_type_weight }}</td>
-        <td class="num">&pound;{{ row.tone }}</td>
+        <td class="num">{{ row.area_sqm if row.area_sqm is defined else row.area }}</td>
+        <td class="num">{{ row.relativity if row.relativity is defined else row.depth }}</td>
+        <td class="num">{{ row.area_type_weight if row.area_type_weight is defined else "—" }}</td>
+        <td class="num">&pound;{{ row.tone if row.tone is defined else row.rate }}</td>
         <td class="num">&pound;{{ row.value | format_currency }}</td>
       </tr>
       {% endfor %}
     </tbody>
   </table>
+  {% else %}
+  <p>No row-level zoning schedule was generated for this property from the backend valuation engine output.</p>
+  {% endif %}
   <div class="calc-totals">
-    <p><strong>Subtotal (pre-allowances):</strong> &pound;{{ subtotal_pre | format_currency }}</p>
-    <p><strong>Allowances:</strong> {{ allowances_summary }}</p>
+    <p><strong>Subtotal (pre-allowances):</strong> {% if subtotal_pre is not none %}&pound;{{ subtotal_pre | format_currency }}{% else %}Not provided{% endif %}</p>
+    <p><strong>Allowances:</strong> {{ allowances_summary or "No explicit allowances supplied in payload." }}</p>
     <p><strong>Modelled Rateable Value:</strong> &pound;{{ modelled_rv | format_currency }}</p>
   </div>
   {% endif %}
 
   {% if business_type == 'nursery' %}
   <h2>NIA Calculation</h2>
-  <p>{{ nia_sqm }} sqm &times; &pound;{{ final_tone_psm }}/m&sup2; = &pound;{{ subtotal_pre | format_currency }}</p>
+  <p>{{ nia_sqm }} sqm &times; &pound;{{ final_tone_psm }}/m&sup2; = {% if subtotal_pre is not none %}&pound;{{ subtotal_pre | format_currency }}{% else %}Not provided{% endif %}</p>
   <p><strong>Adjustments:</strong> {{ nursery_adjustments }}</p>
   <p><strong>Modelled Rateable Value:</strong> &pound;{{ modelled_rv | format_currency }}</p>
   {% endif %}

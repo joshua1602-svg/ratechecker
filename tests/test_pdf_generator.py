@@ -145,6 +145,15 @@ class TestBusinessTypeBranching:
         assert isinstance(result, bytes)
         assert result[:4] == b"%PDF"
 
+    def test_nursery_with_missing_subtotal_still_renders(self):
+        data = _base_report_data()
+        data["business_type"] = "nursery"
+        data["zoning_rows"] = []
+        data["subtotal_pre"] = None
+        result = generate_evidence_pack(data)
+        assert isinstance(result, bytes)
+        assert result[:4] == b"%PDF"
+
     def test_retail_missing_zoning_rows_no_longer_required(self):
         data = _base_report_data()
         data["business_type"] = "retail"
@@ -197,3 +206,21 @@ class TestPdfTemplateRendering:
         assert "Restaurant_cafe" in html
         assert "Comparable evidence is set out on page" in html
         assert "Submission-Ready Narrative" in html
+
+    def test_evidence_pack_restaurant_cafe_renders_zoning_section(self):
+        data = pdf_generator._derive_fields(_base_report_data())
+        html = pdf_generator._load_template(
+            pdf_generator._get_env(),
+            "evidence_pack.html",
+        ).render(**data)
+        assert "Zoning Schedule" in html
+
+    def test_evidence_pack_shows_no_detail_message_when_rows_absent(self):
+        data = _base_report_data()
+        data["business_type"] = "retail"
+        data["zoning_rows"] = []
+        html = pdf_generator._load_template(
+            pdf_generator._get_env(),
+            "evidence_pack.html",
+        ).render(**pdf_generator._derive_fields(data))
+        assert "No row-level zoning schedule was generated" in html

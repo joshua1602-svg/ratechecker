@@ -17,6 +17,8 @@ import math
 import os
 from typing import Any
 
+from api.engine.subject_exclusion import normalise_address, normalise_postcode
+
 log = logging.getLogger(__name__)
 
 from dotenv import load_dotenv
@@ -115,6 +117,7 @@ def get_comparables(
         SELECT
             le.uarn,
             le.full_property_identifier           AS address,
+            le.postcode                           AS postcode,
             le.scat_code,
             le.rateable_value                     AS rv,
             le.primary_description_text           AS description,
@@ -171,6 +174,58 @@ def get_comparables(
 
     log.info("get_comparables returned %d rows", len(results))
     return results
+
+
+def resolve_subject_uarn(
+    *,
+    postcode: str,
+    address: str,
+    scat_codes: list[int] | None = None,
+) -> str | None:
+    """Resolve a subject UARN by postcode + normalised address matching.
+
+    Used only as an internal helper so subject exclusion can use hard-ID
+    filtering even when the user did not provide a UPRN/UARN explicitly.
+    """
+    norm_postcode = normalise_postcode(postcode)
+    norm_address = normalise_address(address)
+    if not norm_postcode or not norm_address:
+        return None
+
+    sql_filter = ""
+    params: dict[str, Any] = {"postcode_norm": norm_postcode}
+    if scat_codes:
+        scat_binds = {f"scat_{i}": int(s) for i, s in enumerate(scat_codes)}
+        scat_placeholders = ", ".join(f":scat_{i}" for i in range(len(scat_codes)))
+        sql_filter = f"AND le.scat_code IN ({scat_placeholders})"
+        params.update(scat_binds)
+
+    sql = text(f"""
+        SELECT le.uarn, le.full_property_identifier AS address, le.postcode
+        FROM voa_list_entries le
+        WHERE REPLACE(UPPER(le.postcode), ' ', '') = :postcode_norm
+          {sql_filter}
+    """)
+    try:
+        with Session(engine) as session:
+            rows = session.execute(sql, params).fetchall()
+    except Exception as exc:
+        log.error("resolve_subject_uarn query failed: %s", exc, exc_info=True)
+        raise DatabaseError(f"Subject resolution query failed: {exc}") from exc
+
+    matched = []
+    for row in rows:
+        if (
+            normalise_postcode(row.postcode) == norm_postcode
+            and normalise_address(row.address) == norm_address
+        ):
+            matched.append(str(row.uarn))
+
+    if not matched:
+        return None
+    if len(matched) > 1:
+        log.info("resolve_subject_uarn found multiple matches for postcode=%s; using first", postcode)
+    return matched[0]
 
 
 def get_sv_line_descs_batch(uarns: list[str]) -> dict[str, tuple[str, ...]]:
