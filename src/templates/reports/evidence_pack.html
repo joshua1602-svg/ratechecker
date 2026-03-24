@@ -3,16 +3,15 @@
 <head>
 <meta charset="UTF-8">
 <title>Rateable Value Evidence Pack — {{ business_name }}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
 /* ── Page setup ── */
 @page {
   size: A4;
-  margin: 18mm 18mm 22mm 18mm;
-  @bottom-right {
-    content: "Page " counter(page) " of " counter(pages);
-    font-size: 8pt;
-    color: #666666;
-  }
+  margin: 0;
+  background: #FDF5EE;
 }
 
 /* ── Reset ── */
@@ -20,17 +19,45 @@
 
 /* ── Base ── */
 body {
-  font-family: 'Segoe UI', Arial, Helvetica, sans-serif;
+  font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
   font-size: 9.5pt;
   line-height: 1.5;
   color: #2B4360;
   background: #FDF5EE;
   -webkit-print-color-adjust: exact;
   print-color-adjust: exact;
+  padding: 18mm;
+  padding-bottom: 28mm;
+}
+
+/* ── Page number via @page (WeasyPrint) ── */
+@page {
+  size: A4;
+  margin: 18mm 18mm 28mm 18mm;
+  background: #FDF5EE;
+  @bottom-right {
+    content: "Page " counter(page) " of " counter(pages);
+    font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
+    font-size: 8pt;
+    color: #666666;
+  }
+  @bottom-left {
+    content: "Prepared by RateCheck  |  ratecheck.uk";
+    font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
+    font-size: 7pt;
+    color: #7A8A9A;
+  }
+  @bottom-center {
+    content: "This report is based on publicly available VOA data and does not constitute professional surveying or legal advice.";
+    font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
+    font-size: 7pt;
+    color: #A0A8B0;
+  }
 }
 
 /* ── Typography ── */
 h1 {
+  font-family: 'Outfit', system-ui, sans-serif;
   font-size: 14pt;
   font-weight: 700;
   color: #2B4360;
@@ -40,6 +67,7 @@ h1 {
   letter-spacing: -0.01em;
 }
 h2 {
+  font-family: 'Outfit', system-ui, sans-serif;
   font-size: 11pt;
   font-weight: 700;
   color: #2B4360;
@@ -61,6 +89,7 @@ table { page-break-inside: avoid; }
   margin-right: 8px;
 }
 .wordmark {
+  font-family: 'Outfit', system-ui, sans-serif;
   letter-spacing: -0.02em;
 }
 .wordmark-rate { font-weight: 700; color: #2B4360; }
@@ -89,6 +118,7 @@ table { page-break-inside: avoid; }
   margin-bottom: 16px;
 }
 .cover-title {
+  font-family: 'Outfit', system-ui, sans-serif;
   font-size: 24pt;
   font-weight: 700;
   color: #2B4360;
@@ -185,13 +215,14 @@ table { page-break-inside: avoid; }
 .banner-box {
   display: table-cell;
   width: 25%;
-  background: #E8EEF4;
-  border: 1px solid #CCCCCC;
+  background: #EAF0F7;
+  border: 1px solid #2B4360;
   border-radius: 4px;
   padding: 10px 8px;
   vertical-align: top;
 }
 .banner-box-accent {
+  background: #F5E6D8;
   border: 1.5px solid #D4956A;
 }
 .banner-label {
@@ -326,7 +357,7 @@ table { page-break-inside: avoid; }
 
 /* ── Preformatted narrative ── */
 .narrative-pre {
-  font-family: 'Segoe UI', Arial, Helvetica, sans-serif;
+  font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
   font-size: 9.5pt;
   line-height: 1.6;
   white-space: pre-wrap;
@@ -532,7 +563,6 @@ table { page-break-inside: avoid; }
      ═══════════════════════════════════════════════════════════════════ -->
 <div class="section">
   <h1>Comparable Evidence</h1>
-  <p class="intro-line">The following properties were identified from VOA bulk data as comparable to the subject property. {% if layout_adjustment_applied %}Properties with higher layout similarity have been given greater weight in deriving the estimated valuation range.{% else %}Properties were selected based on location, business type, and floor area.{% endif %}</p>
 
   <table class="comp-table">
     <thead>
@@ -552,6 +582,7 @@ table { page-break-inside: avoid; }
     </thead>
     <tbody>
       {% for comp in comparables[:20] %}
+      {% if comp.address | upper != property_address | upper %}
       <tr>
         <td>{{ comp.address }}</td>
         <td style="white-space:nowrap;">{{ comp.uarn }}</td>
@@ -569,6 +600,7 @@ table { page-break-inside: avoid; }
         <td>{{ comp.fit_class | capitalize if comp.fit_class else "—" }}</td>
         <td class="num">{{ comp.weight_pct }}</td>
       </tr>
+      {% endif %}
       {% endfor %}
     </tbody>
   </table>
@@ -786,15 +818,7 @@ Comparable evidence is set out on page 4 of this document.</pre>
   </div>
 </div>
 
-<!-- ═══════════════════════════════════════════════════════════════════
-     FOOTER
-     ═══════════════════════════════════════════════════════════════════ -->
-<div class="page-footer">
-  <div class="footer-row">
-    <span>Prepared by RateCheck&nbsp;&nbsp;|&nbsp;&nbsp;ratecheck.uk</span>
-  </div>
-  <div class="footer-disclaimer">This report is based on publicly available VOA data and does not constitute professional surveying or legal advice.</div>
-</div>
+<!-- footer handled by @page @bottom-left / @bottom-center / @bottom-right -->
 
 </body>
 </html>
