@@ -668,29 +668,67 @@ table { page-break-inside: avoid; }
      SECTION 5 — METHODOLOGY
      ═══════════════════════════════════════════════════════════════════ -->
 <div class="section">
-  <h1>Methodology</h1>
+  <h1>Valuation Methodology</h1>
 
-  <h2>Data Source</h2>
-  <p>All comparable data is drawn from the Valuation Office Agency's published bulk data, which contains the rateable values and property characteristics used to compile the 2026 rating list. This is the same dataset the VOA uses internally when assessing rateable values.</p>
+  <h2>Comparable Evidence</h2>
+  <p>
+    Comparable hereditaments have been identified and analysed in accordance with established rating valuation principles, having regard to location, use (VOA Special Category), and physical characteristics.
+    Primary emphasis is placed on geographic proximity to the subject property, reflecting the principle that rental tone is most reliably evidenced by nearby properties.
+    {% if business_type == 'retail' or business_type == 'hair_beauty' %}
+    For retail hereditaments, greatest weight is given to properties located on the same parade or street where a consistent body of evidence exists, before extending to the wider postcode sector and surrounding locality where required.
+    {% else %}
+    The geographic scope is expanded as necessary to ensure a sufficient and representative body of evidence, reflecting typical market density for the property type.
+    {% endif %}
+    Comparables are restricted to those within a relevant range of net internal area (NIA), and the dataset is reviewed to exclude anomalous observations, ensuring that the analysis reflects the prevailing tone of the list rather than isolated outliers.
+  </p>
 
-  <h2>Selection Criteria</h2>
-  <p>Comparable properties were selected based on geographic proximity, matching business type classification, and similar net internal area. The selection algorithm identifies properties within the same billing authority area first, then expands the search radius if insufficient comparables are found locally.</p>
+  <h2>Assessment of Tone and Rateable Value</h2>
+  <p>
+    The assessment of rateable value is derived from analysis of comparable rental tones, expressed as £/m², having regard to the tone of the list.
+    In determining the appropriate tone, reliance is placed on the central body of consistent evidence, with a weighted approach applied to reflect the relative evidential strength of each comparable.
+    Weighting reflects proximity, alignment of floor area, and quality of evidence, with greater reliance placed on directly evidenced VOA assessments.
+    The adopted tone is applied to the subject property's net internal area to form an opinion of rateable value.
+  </p>
 
-  <h2>Valuation Approach</h2>
-  <p>The estimated rateable value is derived using a weighted average of comparable rates per square metre, applied to the subject property's floor area. Weights are assigned based on similarity across multiple dimensions including size, location, and — where layout data is provided — structural configuration.</p>
+  <h2>Physical Characteristics and Layout</h2>
+  <p>
+    Consideration is given to the physical configuration of the subject property and its comparability to available evidence.
+    The subject property is assessed in terms of the proportion of trading space relative to ancillary/storage accommodation, together with overall floor configuration, including the presence of basement or upper floor areas.
+    Where comparable properties include equivalent VOA survey detail, their internal configuration has been reviewed against that of the subject property, with greater reliance placed on hereditaments demonstrating a higher degree of functional and structural similarity.
+    {% if business_type == 'restaurant_cafe' %}
+    For restaurant and café hereditaments, specific regard is given to the positioning of the kitchen, with ground floor kitchen arrangements typically providing stronger comparability due to their impact on trading efficiency and value.
+    {% endif %}
+  </p>
+
+  <h2>Data Source and Valuation Basis</h2>
+  <p>
+    This assessment is informed by analysis of the Valuation Office Agency’s published rating list and bulk data underpinning the 2026 Rating List, including rateable values and associated property attributes relied upon in the compilation of assessments.
+    The valuation is undertaken by reference to <strong>1 April 2024</strong>, being the statutory antecedent valuation date applicable to the 2026 Rating List.
+    All conclusions therefore reflect market conditions at that date, in accordance with the statutory hypothesis and established principles of rating valuation.
+  </p>
+
+  <h2>Assumptions and Limitations</h2>
+  <p>
+    This analysis is based on publicly available VOA data and information provided by the ratepayer.
+    No inspection of the subject property or the comparable hereditaments has been undertaken, and reliance has been placed on the accuracy and completeness of the available records.
+    While a structured and evidence-based methodology has been applied, the assessment remains dependent on the quality and scope of underlying data.
+    Matters not apparent from published records — including property condition, specific layout nuances, or recent physical or occupational changes — have not been taken into account unless expressly stated.
+    This report is provided for the purpose of supporting a potential <strong>Check, Challenge, Appeal</strong> submission and represents an analytical opinion of rateable value having regard to the available evidence.
+    It does not constitute a formal Red Book valuation, nor professional advice from a Chartered Surveyor or regulated valuer.
+    No responsibility is accepted for decisions taken solely on the basis of this report without further professional advice or independent verification.
+  </p>
 
   {% if layout_adjustment_applied %}
-  <h2>Layout Weighting</h2>
-  <p>The ratepayer provided detailed layout information for the subject property. This data was used to calculate a structural fingerprint comprising storage-to-trading ratios, floor configuration, and kitchen positioning. Each comparable was scored against this fingerprint, and comparables with higher structural similarity received greater weight in the valuation model. This approach ensures the estimated rateable value more closely reflects the economic characteristics of the subject property rather than relying solely on headline floor area.</p>
+  <h2>Structural Alignment Analysis</h2>
+  <p>
+    Detailed layout information provided by the ratepayer has been considered in assessing comparability.
+    A structural profile of the subject property has been established, including the relative proportions of trading and ancillary space and overall floor configuration.
+    Where comparable VOA survey data is available, hereditaments demonstrating closer structural alignment have been afforded greater evidential weight.
+    This ensures that the assessment reflects not only headline floor area, but also the functional characteristics influencing rental tone.
+  </p>
   {% endif %}
 
-  <h2>Antecedent Valuation Date</h2>
-  <p>All values reflect market conditions as of 1 April 2024, the antecedent valuation date prescribed by the VOA for the 2026 rating list. This is the reference date against which all rateable values in the current list are assessed.</p>
-
-  <h2>Limitations</h2>
-  <p>This analysis is based on publicly available data and information provided by the ratepayer. It does not include a physical inspection of the subject property or any of the comparable properties. The estimated rateable value is indicative and intended to support a Check Challenge Appeal submission. It does not constitute a formal valuation by a qualified surveyor.</p>
 </div>
-
 <!-- ═══════════════════════════════════════════════════════════════════
      SECTION 6 — CONCLUSION AND RECOMMENDATION
      ═══════════════════════════════════════════════════════════════════ -->
