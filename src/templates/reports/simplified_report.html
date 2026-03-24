@@ -67,7 +67,8 @@ h2 {
 p { margin: 0 0 5px 0; text-align: justify; }
 
 /* ── No page breaks — single page ── */
-.section { page-break-inside: avoid; }
+.section { page-break-inside: avoid; margin-top: 28px; }
+.section:first-of-type { margin-top: 0; }
 table { page-break-inside: avoid; }
 .page-break { page-break-after: always; }
 
