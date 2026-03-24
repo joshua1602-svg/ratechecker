@@ -427,6 +427,42 @@ table { page-break-inside: avoid; }
     {% if kitchen_on_ground is defined %}
     <tr><td class="label-cell">Kitchen on Ground Floor</td><td class="value-cell">{% if kitchen_on_ground == 'yes' %}Yes{% elif kitchen_on_ground == 'no_kitchen' %}No dedicated kitchen{% elif kitchen_on_ground == 'no' %}No — kitchen on another floor{% else %}{{ kitchen_on_ground }}{% endif %}</td></tr>
     {% endif %}
+    {% if sales_area_sqm %}
+    <tr><td class="label-cell">Sales / Trading Area</td><td class="value-cell">{{ sales_area_sqm }} sqm</td></tr>
+    {% endif %}
+    {% if visible_kitchen_sqm %}
+    <tr><td class="label-cell">Visible Kitchen Area</td><td class="value-cell">{{ visible_kitchen_sqm }} sqm</td></tr>
+    {% endif %}
+    {% if storage_sqm %}
+    <tr><td class="label-cell">Storage Area</td><td class="value-cell">{{ storage_sqm }} sqm</td></tr>
+    {% endif %}
+    {% if basement_sqm %}
+    <tr><td class="label-cell">Basement Area</td><td class="value-cell">{{ basement_sqm }} sqm</td></tr>
+    {% endif %}
+    {% if upper_sqm %}
+    <tr><td class="label-cell">Upper Floor Area</td><td class="value-cell">{{ upper_sqm }} sqm</td></tr>
+    {% endif %}
+    {% if outdoor_seating %}
+    <tr><td class="label-cell">Outdoor Seating</td><td class="value-cell">Yes</td></tr>
+    {% endif %}
+    {% if has_parking is defined and has_parking %}
+    <tr><td class="label-cell">Dedicated Car Parking</td><td class="value-cell">Yes</td></tr>
+    {% endif %}
+    {% if nursery_purpose_built is defined and nursery_purpose_built %}
+    <tr><td class="label-cell">Purpose-Built Nursery</td><td class="value-cell">Yes</td></tr>
+    {% endif %}
+    {% if nursery_outdoor_play is defined and nursery_outdoor_play %}
+    <tr><td class="label-cell">Outdoor Play Area</td><td class="value-cell">Yes</td></tr>
+    {% endif %}
+    {% if layout_flag is defined and layout_flag %}
+    <tr><td class="label-cell">Layout Notes</td><td class="value-cell">Awkward or irregular layout</td></tr>
+    {% endif %}
+    {% if cramped_flag is defined and cramped_flag %}
+    <tr><td class="label-cell">Space Notes</td><td class="value-cell">Cramped relative to size</td></tr>
+    {% endif %}
+    {% if fitout_year %}
+    <tr><td class="label-cell">Year of Last Fit-Out</td><td class="value-cell">{{ fitout_year }}</td></tr>
+    {% endif %}
     {% if voa_rv %}
     <tr><td class="label-cell">Current Rateable Value</td><td class="value-cell">&pound;{{ voa_rv | format_currency }}</td></tr>
     {% endif %}

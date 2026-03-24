@@ -44,10 +44,19 @@ async def purchase(req: PurchaseRequest) -> PurchaseResponse:
         raise HTTPException(status_code=500, detail="Stripe is not configured")
 
     # ── 1. Persist the full report draft before redirecting to Stripe ──
+    # Defensive merge: the frontend may store rated_comps separately from
+    # assess_response (e.g. in a sibling ratedComps state field).  If the
+    # assess_response is missing rated_comps, merge them from the top-level
+    # field so the downstream report builder has the full comparable pool.
+    assess_response = dict(req.assess_response)
+    if req.rated_comps and not assess_response.get("rated_comps"):
+        assess_response["rated_comps"] = req.rated_comps
+        log.info("Merged %d rated_comps into assess_response from top-level field", len(req.rated_comps))
+
     session_id = create_draft(
         product=product,
         assess_request=req.assess_request,
-        assess_response=req.assess_response,
+        assess_response=assess_response,
         paid_intake=req.paid_intake.model_dump(exclude_none=True),
     )
 

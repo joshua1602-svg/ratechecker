@@ -140,6 +140,7 @@ class PaidIntakeData(BaseModel):
     postcode: Optional[str] = None
     nia_sqm: Optional[float] = None
     voa_rv: Optional[float] = None
+    has_parking: Optional[bool] = None
 
 
 class PurchaseRequest(BaseModel):
@@ -150,11 +151,16 @@ class PurchaseRequest(BaseModel):
       - assess_request: the full AssessRequest JSON used for the free /assess call
       - assess_response: the full AssessResponse JSON returned by /assess
       - paid_intake: second-screen paid intake data (layout, areas, property enrichments)
+
+    The frontend may also pass rated_comps as a top-level sibling field if
+    it stores them separately from the assess response.  The purchase handler
+    merges them into assess_response before persisting.
     """
     product: str  # "report" or "evidence"
     assess_request: dict  # Full AssessRequest JSON from screen 1
     assess_response: dict  # Full AssessResponse JSON from /assess
     paid_intake: PaidIntakeData = Field(default_factory=PaidIntakeData)
+    rated_comps: Optional[list[dict]] = None  # Fallback if frontend stores comps separately
 
 
 class SimplifiedReportRequest(BaseModel):
@@ -421,5 +427,30 @@ def build_evidence_payload_from_assess(
             "ground_floor_storage_sqm": request.layout.ground_floor_storage_sqm,
             "kitchen_on_ground": request.layout.kitchen_on_ground,
         })
+
+    # Area breakdown from second-screen intake
+    if request.areas is not None:
+        payload.update({
+            "sales_area_sqm": request.areas.sales_area_sqm or None,
+            "visible_kitchen_sqm": request.areas.visible_kitchen_sqm or None,
+            "storage_sqm": request.areas.storage_sqm or None,
+            "basement_sqm": request.areas.basement_sqm or None,
+            "upper_sqm": request.areas.upper_sqm or None,
+            "outdoor_seating": request.areas.outdoor_seating,
+        })
+
+    # Nursery-specific fields
+    if request.nursery is not None:
+        payload.update({
+            "nursery_purpose_built": request.nursery.purpose_built,
+            "nursery_outdoor_play": request.nursery.outdoor_play,
+        })
+
+    # Flags from intake
+    if request.flags is not None:
+        payload["layout_flag"] = request.flags.layout_flag
+        payload["cramped_flag"] = request.flags.cramped_flag
+        if request.flags.fitout_year:
+            payload["fitout_year"] = request.flags.fitout_year
 
     return payload
