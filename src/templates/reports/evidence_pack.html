@@ -24,7 +24,7 @@ body {
   font-size: 9.5pt;
   line-height: 1.5;
   color: #2B4360;
-  background: #FFFFFF;
+  background: #FDF5EE;
   -webkit-print-color-adjust: exact;
   print-color-adjust: exact;
 }
@@ -45,7 +45,7 @@ h2 {
   color: #2B4360;
   margin: 16px 0 6px 0;
 }
-p { margin: 0 0 6px 0; }
+p { margin: 0 0 6px 0; text-align: justify; }
 
 /* ── Page breaks ── */
 .section { page-break-inside: avoid; }
@@ -54,12 +54,17 @@ p { margin: 0 0 6px 0; }
 table { page-break-inside: avoid; }
 .callout { page-break-inside: avoid; }
 
-/* ── Wordmark ── */
+/* ── Logo ── */
+.logo-svg {
+  display: inline-block;
+  vertical-align: middle;
+  margin-right: 8px;
+}
 .wordmark {
   letter-spacing: -0.02em;
 }
 .wordmark-rate { font-weight: 700; color: #2B4360; }
-.wordmark-checker { font-weight: 400; color: #2B4360; }
+.wordmark-check { font-weight: 400; color: #2B4360; }
 .wordmark-lg { font-size: 28pt; }
 .wordmark-sm { font-size: 16pt; }
 
@@ -69,6 +74,7 @@ table { page-break-inside: avoid; }
   flex-direction: column;
   justify-content: center;
   min-height: 100vh;
+  background: #FDF5EE;
 }
 .cover-badge {
   display: inline-block;
@@ -326,6 +332,7 @@ table { page-break-inside: avoid; }
   white-space: pre-wrap;
   word-wrap: break-word;
   color: #2B4360;
+  text-align: justify;
 }
 
 /* ── Footer ── */
@@ -365,7 +372,15 @@ table { page-break-inside: avoid; }
      COVER PAGE
      ═══════════════════════════════════════════════════════════════════ -->
 <div class="cover page-break">
-  <span class="wordmark wordmark-lg"><span class="wordmark-rate">Rate</span><span class="wordmark-checker">Checker</span></span>
+  <div>
+    <svg class="logo-svg" width="36" height="36" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <rect x="2" y="22" width="8" height="14" rx="2" fill="#D4956A"/>
+      <rect x="14" y="14" width="8" height="22" rx="2" fill="#2B4360"/>
+      <rect x="26" y="6" width="8" height="30" rx="2" fill="#D4956A"/>
+      <path d="M11 30l5 5 12-14" stroke="#2B4360" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+    </svg>
+    <span class="wordmark wordmark-lg"><span class="wordmark-rate">Rate</span><span class="wordmark-check">Check</span></span>
+  </div>
 
   <div class="cover-title">Rateable Value Evidence Pack</div>
   <div class="cover-subtitle">Prepared in support of a Check Challenge Appeal submission</div>
@@ -413,7 +428,7 @@ table { page-break-inside: avoid; }
     <tr><td class="label-cell">Total Floor Area (NIA)</td><td class="value-cell">{{ nia_sqm }} sqm</td></tr>
     {% endif %}
     {% if floor_config %}
-    <tr><td class="label-cell">Floor Configuration</td><td class="value-cell">{% if floor_config == 'ground_only' %}Ground floor only{% elif floor_config == 'ground_and_basement' %}Ground + Basement{% elif floor_config == 'ground_and_first' %}Ground + First floor{% elif floor_config == 'ground_basement_first' %}Ground + Basement + First{% else %}{{ floor_config }}{% endif %}</td></tr>
+    <tr><td class="label-cell">Floor Configuration</td><td class="value-cell">{% if floor_config == 'ground_only' %}Ground floor only{% elif floor_config == 'ground_lower_ground' %}Ground + Lower Ground{% elif floor_config == 'ground_first' %}Ground + First Floor{% elif floor_config == 'ground_lower_ground_first' %}Ground + Lower Ground + First{% elif floor_config == 'ground_and_basement' %}Ground + Basement{% elif floor_config == 'ground_and_first' %}Ground + First floor{% elif floor_config == 'ground_basement_first' %}Ground + Basement + First{% else %}{{ floor_config }}{% endif %}</td></tr>
     {% endif %}
     {% if ground_floor_trading_sqm %}
     <tr><td class="label-cell">Ground Floor Trading Area</td><td class="value-cell">{{ ground_floor_trading_sqm }} sqm</td></tr>
@@ -421,11 +436,17 @@ table { page-break-inside: avoid; }
     {% if ground_floor_storage_sqm %}
     <tr><td class="label-cell">Ground Floor Storage</td><td class="value-cell">{{ ground_floor_storage_sqm }} sqm</td></tr>
     {% endif %}
+    {% if lower_ground_use is defined and lower_ground_use and lower_ground_use != 'not_applicable' %}
+    <tr><td class="label-cell">Lower Ground Floor Use</td><td class="value-cell">{{ lower_ground_use | capitalize }}</td></tr>
+    {% endif %}
+    {% if upper_floor_use is defined and upper_floor_use and upper_floor_use != 'not_applicable' %}
+    <tr><td class="label-cell">Upper Floor Use</td><td class="value-cell">{{ upper_floor_use | capitalize }}</td></tr>
+    {% endif %}
     {% if kitchen_area_sqm %}
     <tr><td class="label-cell">Kitchen Area</td><td class="value-cell">{{ kitchen_area_sqm }} sqm</td></tr>
     {% endif %}
-    {% if kitchen_on_ground is defined %}
-    <tr><td class="label-cell">Kitchen on Ground Floor</td><td class="value-cell">{% if kitchen_on_ground == 'yes' %}Yes{% elif kitchen_on_ground == 'no_kitchen' %}No dedicated kitchen{% elif kitchen_on_ground == 'no' %}No — kitchen on another floor{% else %}{{ kitchen_on_ground }}{% endif %}</td></tr>
+    {% if kitchen_on_ground is defined and kitchen_on_ground and kitchen_on_ground != 'no_kitchen' %}
+    <tr><td class="label-cell">Kitchen on Ground Floor</td><td class="value-cell">{% if kitchen_on_ground == 'yes' %}Yes{% elif kitchen_on_ground == 'no' %}No — kitchen on another floor{% else %}{{ kitchen_on_ground }}{% endif %}</td></tr>
     {% endif %}
     {% if sales_area_sqm %}
     <tr><td class="label-cell">Sales / Trading Area</td><td class="value-cell">{{ sales_area_sqm }} sqm</td></tr>
@@ -702,7 +723,7 @@ table { page-break-inside: avoid; }
 
   <h2>Data Source and Valuation Basis</h2>
   <p>
-    This assessment is informed by analysis of the Valuation Office Agency’s published rating list and bulk data underpinning the 2026 Rating List, including rateable values and associated property attributes relied upon in the compilation of assessments.
+    This assessment is informed by analysis of the Valuation Office Agency's published rating list and bulk data underpinning the 2026 Rating List, including rateable values and associated property attributes relied upon in the compilation of assessments.
     The valuation is undertaken by reference to <strong>1 April 2024</strong>, being the statutory antecedent valuation date applicable to the 2026 Rating List.
     All conclusions therefore reflect market conditions at that date, in accordance with the statutory hypothesis and established principles of rating valuation.
   </p>
@@ -770,7 +791,7 @@ Comparable evidence is set out on page 4 of this document.</pre>
      ═══════════════════════════════════════════════════════════════════ -->
 <div class="page-footer">
   <div class="footer-row">
-    <span>Prepared by RateChecker&nbsp;&nbsp;|&nbsp;&nbsp;ratechecker.co.uk</span>
+    <span>Prepared by RateCheck&nbsp;&nbsp;|&nbsp;&nbsp;ratecheck.uk</span>
   </div>
   <div class="footer-disclaimer">This report is based on publicly available VOA data and does not constitute professional surveying or legal advice.</div>
 </div>
