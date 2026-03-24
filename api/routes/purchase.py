@@ -1,4 +1,10 @@
-"""POST /purchase — create a Stripe Checkout session."""
+"""POST /purchase — persist report draft, then create a Stripe Checkout session.
+
+The full assess request, assess response, and second-screen paid intake data
+are durably stored in pending_reports *before* the Stripe redirect.  Only the
+draft session_id is passed in Stripe metadata, keeping the metadata payload
+small and making the final report recoverable from backend truth alone.
+"""
 from __future__ import annotations
 
 import logging
@@ -7,9 +13,10 @@ import os
 import stripe
 from fastapi import APIRouter, HTTPException
 
-log = logging.getLogger(__name__)
-
 from api.models import PurchaseRequest, PurchaseResponse
+from api.pending_reports import create_draft
+
+log = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -36,21 +43,31 @@ async def purchase(req: PurchaseRequest) -> PurchaseResponse:
     if not stripe.api_key:
         raise HTTPException(status_code=500, detail="Stripe is not configured")
 
+    # ── 1. Persist the full report draft before redirecting to Stripe ──
+    session_id = create_draft(
+        product=product,
+        assess_request=req.assess_request,
+        assess_response=req.assess_response,
+        paid_intake=req.paid_intake.model_dump(exclude_none=True),
+    )
+
+    # ── 2. Extract customer email for Stripe (best-effort) ──
+    customer_email = (
+        req.assess_request.get("contact", {}).get("email")
+        or None
+    )
+
+    # ── 3. Create Stripe checkout session with only session_id in metadata ──
     try:
-        session = stripe.checkout.Session.create(
+        checkout = stripe.checkout.Session.create(
             payment_method_types=["card"],
             line_items=[{"price": price_id, "quantity": 1}],
             mode="payment",
-            customer_email=req.form_data.contact.email or None,
-            success_url=f"{BASE_URL}/success?session_id={{CHECKOUT_SESSION_ID}}",
-            cancel_url=f"{BASE_URL}/cancel",
+            customer_email=customer_email,
+            success_url=f"{BASE_URL}/success?session_id={session_id}",
+            cancel_url=f"{BASE_URL}/cancel?session_id={session_id}",
             metadata={
-                "product": product,
-                "business_name": req.form_data.contact.business_name,
-                "postcode": req.form_data.property.postcode,
-                "business_type": req.form_data.property.business_type.value,
-                "nia_sqm": str(req.form_data.property.nia_sqm),
-                "voa_rv": str(req.form_data.property.voa_rv),
+                "ratechecker_session_id": session_id,
             },
         )
     except stripe.StripeError as exc:
@@ -60,4 +77,4 @@ async def purchase(req: PurchaseRequest) -> PurchaseResponse:
             detail="Payment service is temporarily unavailable. Please try again.",
         ) from exc
 
-    return PurchaseResponse(checkout_url=session.url)
+    return PurchaseResponse(checkout_url=checkout.url, session_id=session_id)

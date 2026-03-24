@@ -8,6 +8,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from api.db import count_voa_rows, ensure_runtime_indexes
+from api.pending_reports import ensure_table as ensure_pending_reports_table
 
 log = logging.getLogger(__name__)
 
@@ -49,10 +50,12 @@ app.add_middleware(
 from api.routes.assess import router as assess_router  # noqa: E402
 from api.routes.purchase import router as purchase_router  # noqa: E402
 from api.routes.reports import router as reports_router  # noqa: E402
+from api.routes.webhook import router as webhook_router  # noqa: E402
 
 app.include_router(assess_router)
 app.include_router(purchase_router)
 app.include_router(reports_router)
+app.include_router(webhook_router)
 
 
 @app.get("/", tags=["ops"])
@@ -68,12 +71,17 @@ def root() -> dict:
 
 @app.on_event("startup")
 def startup() -> None:
-    """Create any missing runtime indexes on the VOA tables."""
+    """Create any missing runtime indexes on the VOA tables and ensure
+    the pending_reports table exists for the paid report flow."""
     try:
         ensure_runtime_indexes()
     except Exception:
         # Tables may not exist yet in a fresh dev environment — not fatal
         pass
+    try:
+        ensure_pending_reports_table()
+    except Exception:
+        log.warning("Could not create pending_reports table — paid flow will fail")
 
 
 @app.get("/health", tags=["ops"])
