@@ -518,10 +518,10 @@ table { page-break-inside: avoid; }
 </div>
 
 <!-- ═══════════════════════════════════════════════════════════════════
-     SECTION 4 — VALUATION CALCULATION
+     SECTION 4 — VALUATION ESTIMATE
      ═══════════════════════════════════════════════════════════════════ -->
 <div class="section">
-  <h1>Valuation Calculation</h1>
+  <h1>Valuation Estimate</h1>
 
   {% if business_type in ['retail', 'hair_beauty', 'restaurant_cafe', 'pub'] %}
   <h2>Zoning Schedule</h2>
@@ -530,15 +530,15 @@ table { page-break-inside: avoid; }
     <thead>
       <tr>
         <th>Zone</th>
+        <th class="num">Depth (m)</th>
         <th class="num">Area (sqm)</th>
         <th class="num">Relativity</th>
-        <th class="num">Area Type Weight</th>
         <th class="num">Tone (&pound;/m&sup2;)</th>
         <th class="num">Value (&pound;)</th>
       </tr>
     </thead>
     <tbody>
-      {% for row in (zoning_rows or []) %}
+      {% for row in zoning_rows %}
       <tr>
         <td>{{ row.zone }}</td>
         <td class="num">{{ row.area_sqm if row.area_sqm is defined else row.area }}</td>
