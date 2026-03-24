@@ -157,8 +157,15 @@ class EvidenceReportRequest(SimplifiedReportRequest):
     tone_basis: str
     confidence: str
     recommendation_text: str
+    # Valuation detail (dynamic, business-type-aware)
+    valuation_method: str = "zoning"
+    valuation_basis: str = "ITZA"
+    valuation_basis_sqm: Optional[float] = None
+    geometry_assumed: bool = False
     zoning_rows: list[dict] = Field(default_factory=list)
     nursery_adjustments: list[dict] = Field(default_factory=list)
+    adjustment_items: list[dict] = Field(default_factory=list)
+    adjustment_factor: float = 1.0
     allowances_summary: Optional[str] = None
     subtotal_pre: Optional[float] = None
     floor_config: Optional[str] = None
@@ -265,10 +272,6 @@ def build_evidence_payload_from_assess(
     *,
     tone_basis: str = "Weighted median",
     recommendation_text: str | None = None,
-    zoning_rows: list[dict] | None = None,
-    nursery_adjustments: list[dict] | None = None,
-    allowances_summary: str | None = None,
-    subtotal_pre: float | None = None,
 ) -> dict:
     """Build a canonical evidence pack payload from actual engine outputs.
 
@@ -276,8 +279,13 @@ def build_evidence_payload_from_assess(
     EvidenceReportRequest and validated by _EVIDENCE_REQUIRED_FIELDS in
     the /report/evidence route.
 
+    The valuation calculation detail (zoning rows, NIA summary, adjustments)
+    is built dynamically from real engine data via build_valuation_detail().
+
     Returns a dict suitable for EvidenceReportRequest.model_validate().
     """
+    from api.engine.valuation import build_valuation_detail
+
     # Start from the simplified payload (all shared fields)
     payload = build_report_payload_from_assess(assess_response, request)
 
@@ -316,20 +324,46 @@ def build_evidence_payload_from_assess(
                 "Monitor for future revaluations or additional comparable data."
             )
 
+    # Build valuation detail from real engine data
+    tone_rate = assess_response.tone_rate or 0.0
+    adj_breakdown = assess_response.adjustments
+    if adj_breakdown is not None:
+        adj_applied = [item.model_dump() for item in adj_breakdown.applied]
+        adj_factor = adj_breakdown.total_adjustment_factor
+    else:
+        adj_applied = []
+        adj_factor = 1.0
+
+    valuation_detail = build_valuation_detail(
+        property=request.property,
+        tone_rate=tone_rate,
+        adjusted_rv=best_rv or 0,
+        adjustments_applied=adj_applied,
+        adjustment_factor=adj_factor,
+        business_type=request.property.business_type.value,
+    )
+
     # Evidence-specific required fields
     payload.update({
         "uprn": request.property.uprn or "",
         "voa_description": f"{request.property.business_type.value.replace('_', ' ').title()} and Premises",
         "nia_sqm": request.property.nia_sqm,
         "modelled_rv": best_rv,
-        "final_tone_psm": assess_response.tone_rate or 0.0,
+        "final_tone_psm": tone_rate,
         "tone_basis": tone_basis,
         "confidence": confidence_map.get(assess_response.signal, assess_response.signal),
         "recommendation_text": recommendation_text,
-        "zoning_rows": zoning_rows or [],
-        "nursery_adjustments": nursery_adjustments or [],
-        "allowances_summary": allowances_summary,
-        "subtotal_pre": subtotal_pre,
+        # Valuation detail — all from engine truth
+        "valuation_method": valuation_detail["valuation_method"],
+        "valuation_basis": valuation_detail["valuation_basis"],
+        "valuation_basis_sqm": valuation_detail["valuation_basis_sqm"],
+        "geometry_assumed": valuation_detail["geometry_assumed"],
+        "zoning_rows": valuation_detail["zoning_rows"],
+        "nursery_adjustments": valuation_detail.get("nursery_adjustments", []),
+        "adjustment_items": valuation_detail["adjustment_items"],
+        "adjustment_factor": valuation_detail["adjustment_factor"],
+        "allowances_summary": valuation_detail["allowances_summary"],
+        "subtotal_pre": valuation_detail["subtotal_pre"],
     })
 
     # Layout fields from the request if provided

@@ -6,6 +6,7 @@ Applies per-property allowances from the relevant business-type rule file.
 """
 from __future__ import annotations
 
+import math
 import re
 from typing import Optional
 
@@ -332,4 +333,176 @@ def apply_adjustments(
             "total_adjustment_factor": total_factor,
         },
         "adjustment_summary": summary,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Evidence-pack valuation detail builder
+# ---------------------------------------------------------------------------
+
+def build_valuation_detail(
+    property: PropertyInput,
+    tone_rate: float,
+    adjusted_rv: int,
+    adjustments_applied: list[dict],
+    adjustment_factor: float,
+    business_type: str,
+) -> dict:
+    """Build the valuation calculation detail for the evidence pack.
+
+    Reconstructs the per-zone breakdown (for zoning types) or NIA calculation
+    (for nurseries) using the same maths the engine applied, so the evidence
+    pack can display truthful intermediate steps.
+
+    Parameters
+    ----------
+    property : PropertyInput
+        Subject property (NIA, optional frontage/depth).
+    tone_rate : float
+        Derived market tone (£/m²) — ITZA basis for retail/restaurant, NIA for nursery.
+    adjusted_rv : int
+        Final modelled RV after adjustments.
+    adjustments_applied : list[dict]
+        Each dict has keys: name, source, factor, triggered.
+    adjustment_factor : float
+        Cumulative multiplicative factor (e.g. 0.874).
+    business_type : str
+        One of the supported business types.
+
+    Returns a dict with keys needed by the evidence pack template.
+    """
+    rules = business_rules(business_type)
+    method = rules.get("valuation_method", "zoning")
+
+    if method == "nia_only":
+        return _build_nia_detail(
+            property, tone_rate, adjusted_rv,
+            adjustments_applied, adjustment_factor, rules,
+        )
+    return _build_zoning_detail(
+        property, tone_rate, adjusted_rv,
+        adjustments_applied, adjustment_factor, rules,
+    )
+
+
+def _build_zoning_detail(
+    property: PropertyInput,
+    tone_rate: float,
+    adjusted_rv: int,
+    adjustments_applied: list[dict],
+    adjustment_factor: float,
+    rules: dict,
+) -> dict:
+    zone_depth = rules.get("zoning", {}).get("zone_depth_m", 6.1)
+    relativities = rules.get("zoning", {}).get("relativities", {})
+
+    # Determine geometry — mirrors _zoning_rv() logic exactly
+    if property.frontage_m and property.depth_m:
+        width = property.frontage_m
+        depth = property.depth_m
+        geometry_assumed = False
+    else:
+        aspect_ratio = 3.0
+        width = math.sqrt(property.nia_sqm / aspect_ratio)
+        depth = property.nia_sqm / width
+        geometry_assumed = True
+
+    # Build zone rows (same maths as itza_from_geometry)
+    zone_defs = [
+        ("Zone A", zone_depth, relativities.get("zone_a", 1.0)),
+        ("Zone B", zone_depth, relativities.get("zone_b", 0.5)),
+        ("Zone C", zone_depth, relativities.get("zone_c", 0.25)),
+        ("Remainder", float("inf"), relativities.get("remainder", 0.125)),
+    ]
+
+    zoning_rows: list[dict] = []
+    remaining = depth
+    itza_total = 0.0
+    for zone_name, z_depth, relativity in zone_defs:
+        if remaining <= 0:
+            break
+        used = min(remaining, z_depth)
+        area = width * used
+        itza_contrib = area * relativity
+        value = itza_contrib * tone_rate
+        itza_total += itza_contrib
+        zoning_rows.append({
+            "zone": zone_name,
+            "area_sqm": round(area, 1),
+            "depth_m": round(used, 1),
+            "relativity": relativity,
+            "tone": round(tone_rate, 2),
+            "value": round(value, 2),
+        })
+        remaining -= used
+
+    subtotal_pre = round(itza_total * tone_rate, 2)
+
+    # Build allowances summary from triggered adjustments
+    triggered = [a for a in adjustments_applied if a.get("triggered")]
+    if triggered:
+        parts = [
+            f"{a['name'].replace('_', ' ').title()} ({a['factor'] * 100:+.0f}%)"
+            for a in triggered
+        ]
+        allowances_summary = (
+            "; ".join(parts)
+            + f" — cumulative factor {adjustment_factor:.4f}"
+        )
+    else:
+        allowances_summary = "No allowances applied — base RV unchanged."
+
+    return {
+        "valuation_method": "zoning",
+        "valuation_basis": "ITZA",
+        "valuation_basis_sqm": round(itza_total, 2),
+        "geometry_assumed": geometry_assumed,
+        "zoning_rows": zoning_rows,
+        "subtotal_pre": subtotal_pre,
+        "adjustment_items": adjustments_applied,
+        "adjustment_factor": adjustment_factor,
+        "allowances_summary": allowances_summary,
+    }
+
+
+def _build_nia_detail(
+    property: PropertyInput,
+    tone_rate: float,
+    adjusted_rv: int,
+    adjustments_applied: list[dict],
+    adjustment_factor: float,
+    rules: dict,
+) -> dict:
+    nia = property.nia_sqm
+    subtotal_pre = round(tone_rate * nia, 2)
+
+    triggered = [a for a in adjustments_applied if a.get("triggered")]
+    if triggered:
+        adj_parts = [
+            {
+                "name": a["name"].replace("_", " ").title(),
+                "pct": f"{a['factor'] * 100:+.0f}%",
+                "triggered": True,
+            }
+            for a in triggered
+        ]
+        allowances_summary = (
+            "; ".join(f"{p['name']} ({p['pct']})" for p in adj_parts)
+            + f" — cumulative factor {adjustment_factor:.4f}"
+        )
+    else:
+        adj_parts = []
+        allowances_summary = "No adjustments applied — base RV unchanged."
+
+    return {
+        "valuation_method": "nia_only",
+        "valuation_basis": "NIA",
+        "valuation_basis_sqm": round(nia, 2),
+        "geometry_assumed": False,
+        "zoning_rows": [],
+        "subtotal_pre": subtotal_pre,
+        "nursery_adjustments": adj_parts,
+        "adjustment_items": adjustments_applied,
+        "adjustment_factor": adjustment_factor,
+        "allowances_summary": allowances_summary,
     }

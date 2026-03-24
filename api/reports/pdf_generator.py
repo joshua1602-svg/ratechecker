@@ -46,6 +46,8 @@ _EVIDENCE_EXTRA_REQUIRED = [
     "tone_basis",
     "confidence",
     "recommendation_text",
+    "valuation_method",
+    "valuation_basis",
 ]
 
 
