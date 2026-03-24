@@ -22,6 +22,9 @@ from api.db import engine
 
 log = logging.getLogger(__name__)
 
+# Stripe Checkout metadata key used to round-trip the pending draft ID.
+RATECHECKER_SESSION_METADATA_KEY = "ratechecker_session_id"
+
 # ---------------------------------------------------------------------------
 # Table DDL
 # ---------------------------------------------------------------------------
@@ -134,4 +137,26 @@ def get_draft(session_id: str) -> dict | None:
         "created_at": row["created_at"],
         "stripe_session_id": row["stripe_session_id"],
         "paid": bool(row["paid"]),
+    }
+
+
+def get_draft_payment_status(session_id: str) -> dict | None:
+    """Return payment-focused fields for a draft, or None if missing."""
+    with Session(engine) as db:
+        row = db.execute(
+            text(
+                "SELECT session_id, product, paid, stripe_session_id, created_at "
+                "FROM pending_reports WHERE session_id = :sid"
+            ),
+            {"sid": session_id},
+        ).mappings().first()
+
+    if not row:
+        return None
+    return {
+        "session_id": row["session_id"],
+        "product": row["product"],
+        "paid": bool(row["paid"]),
+        "stripe_session_id": row["stripe_session_id"],
+        "created_at": row["created_at"],
     }

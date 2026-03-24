@@ -14,7 +14,7 @@ import stripe
 from fastapi import APIRouter, HTTPException
 
 from api.models import PurchaseRequest, PurchaseResponse
-from api.pending_reports import create_draft
+from api.pending_reports import RATECHECKER_SESSION_METADATA_KEY, create_draft
 
 log = logging.getLogger(__name__)
 
@@ -67,7 +67,7 @@ async def purchase(req: PurchaseRequest) -> PurchaseResponse:
             success_url=f"{BASE_URL}/success?session_id={session_id}",
             cancel_url=f"{BASE_URL}/cancel?session_id={session_id}",
             metadata={
-                "ratechecker_session_id": session_id,
+                RATECHECKER_SESSION_METADATA_KEY: session_id,
             },
         )
     except stripe.StripeError as exc:
