@@ -52,8 +52,14 @@ def test_no_clean_user_building_number_falls_back_to_street():
     assert len(filtered) == 2
 
 
-def test_complex_voa_identifier_returns_no_clean_number():
-    assert db._extract_voa_building_number("GND & 1ST FLR 24, HIGH STREET, WIMBLEDON, LONDON") is None
+def test_complex_voa_identifier_extracts_trailing_building_number():
+    # 'GND & 1ST FLR 24' → trailing standalone 24 is the building number
+    assert db._extract_voa_building_number("GND & 1ST FLR 24, HIGH STREET, WIMBLEDON, LONDON") == 24
+    # Comma-separated building number
+    assert db._extract_voa_building_number("GND FLR, 22") == 22
+    assert db._extract_voa_building_number("SHOP A, 22, HIGH STREET") == 22
+    # No building number at all
+    assert db._extract_voa_building_number("HIGH STREET, WIMBLEDON, LONDON") is None
 
 
 def test_no_naive_full_address_substring_matching_before_structured_fields():

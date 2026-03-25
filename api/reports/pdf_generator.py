@@ -268,12 +268,23 @@ def _derive_fields(report_data: dict) -> dict:
             data.setdefault("rv_delta_pct", round((rv_delta / voa_rv) * 100, 1))
 
     # Per-comparable normalisation (rate_psm, layout_similarity_score defaults)
+    # Also strip out any comparable that matches the subject property — this
+    # catches cases where the backend structured-matching exclusion missed it.
     comps = data.get("comparables")
+    property_address = data.get("property_address", "")
     if comps:
-        data["comparables"] = [
-            _normalise_comparable(comp) if isinstance(comp, dict) else comp
-            for comp in comps
-        ]
+        normalised: list[dict] = []
+        for comp in comps:
+            if not isinstance(comp, dict):
+                normalised.append(comp)
+                continue
+            addr = comp.get("address", "")
+            if property_address and _is_subject_comp_jinja(addr, property_address):
+                continue
+            normalised.append(_normalise_comparable(comp))
+        data["comparables"] = normalised
+        # Keep comp_count in sync after subject-property removal
+        data["comp_count"] = len(normalised)
 
     # Pool-level weight normalisation: convert raw weight floats to share-of-pool %.
     # Handles both 'adjusted_weight' (layout path) and 'weight' (CSA-only path).
@@ -333,7 +344,34 @@ def _get_env() -> Environment:
         autoescape=True,
     )
     env.filters["format_currency"] = lambda v: f"{int(float(str(v).replace(',', ''))):,}"
+    env.tests["subject_comp"] = _is_subject_comp_jinja
     return env
+
+
+def _normalise_addr_tokens(value: str | None) -> set[str]:
+    """Reduce an address to a set of uppercase alphanumeric tokens."""
+    text = str(value or "").upper()
+    cleaned = "".join(ch if ch.isalnum() or ch.isspace() else " " for ch in text)
+    return set(cleaned.split())
+
+
+def _is_subject_comp_jinja(comp_address: str, property_address: str) -> bool:
+    """Jinja2 test: True when a comparable's address appears to be the subject.
+
+    Checks whether all significant tokens from the comparable's VOA
+    ``full_property_identifier`` (e.g. "22" or "GND FLR, 22") appear
+    inside the user-supplied property address (e.g. "22 High Street, London").
+    """
+    comp_tokens = _normalise_addr_tokens(comp_address)
+    prop_tokens = _normalise_addr_tokens(property_address)
+    # Ignore common VOA noise tokens that would cause false positives
+    noise = {"GND", "FLR", "FLOOR", "1ST", "2ND", "3RD", "PT", "PART",
+             "UNIT", "SHOP", "OFFICE", "SUITE", "REAR", "UPPER", "LOWER",
+             "AND", "AT", "OF", "THE"}
+    significant = comp_tokens - noise
+    if not significant:
+        return False
+    return significant <= prop_tokens
 
 
 def _load_template(env: Environment, template_name: str):
