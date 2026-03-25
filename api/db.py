@@ -382,14 +382,102 @@ def get_sv_adjustment_totals_batch(uarns: list[str]) -> dict[str, dict]:
 
 
 
-def get_subject_voa_record(uarn: str | None) -> dict[str, Any] | None:
-    """Return mapped VOA subject record for a single UARN.
 
-    Includes list-entry SCAT/description, total NIA (where available), and
-    floor-level SV areas (ground/basement) for reconciliation diagnostics.
-    Returns None when UARN is missing/invalid or not found.
-    Raises DatabaseError on query failure.
+
+def _normalise_postcode(value: str | None) -> str:
+    """Normalise postcode for deterministic equality comparison."""
+    return "".join(str(value or "").upper().split())
+
+
+def _normalise_address(value: str | None) -> str:
+    """Normalise address string for deterministic matching."""
+    text_value = str(value or "").upper()
+    cleaned = "".join(ch if ch.isalnum() or ch.isspace() else " " for ch in text_value)
+    return " ".join(cleaned.split())
+
+
+def _build_subject_record_from_row(row: Any, floor_rows: list[dict]) -> dict[str, Any]:
+    floor_areas = {"ground": 0.0, "basement": 0.0}
+    for item in floor_rows:
+        floor_label = str(item.get("floor") or "").lower()
+        area = float(item.get("area") or 0.0)
+        if "ground" in floor_label and "lower" not in floor_label:
+            floor_areas["ground"] += area
+        elif "lower ground" in floor_label or "basement" in floor_label:
+            floor_areas["basement"] += area
+
+    total = float(row.total_area_or_units) if row.total_area_or_units is not None else None
+    if row.unit_of_measurement and str(row.unit_of_measurement).upper() != "NIA":
+        total = None
+
+    return {
+        "uarn": str(row.uarn),
+        "scat_code": int(row.scat_code) if row.scat_code is not None else None,
+        "description": row.description,
+        "total_area_sqm": total,
+        "floor_areas": floor_areas,
+    }
+
+
+
+
+def get_subject_voa_record_by_reference(reference: str | None) -> dict[str, Any] | None:
+    """Resolve a VOA subject record from an optional bill/property reference.
+
+    Current implementation supports numeric references that map to VOA UARN.
+    Invalid/unresolvable references return None.
     """
+    if not reference:
+        return None
+    digits = "".join(ch for ch in str(reference) if ch.isdigit())
+    if not digits:
+        return None
+    return get_subject_voa_record(digits)
+
+
+def get_subject_voa_candidates_by_address_postcode(address: str, postcode: str) -> list[dict[str, Any]]:
+    """Return all exact-normalised address+postcode VOA candidates."""
+    normalised_postcode = _normalise_postcode(postcode)
+    normalised_address = _normalise_address(address)
+    if not normalised_postcode or not normalised_address:
+        return []
+
+    sql = text("""
+        SELECT
+            le.uarn,
+            le.scat_code,
+            le.primary_description_text AS description,
+            svh.total_area_or_units AS total_area_or_units,
+            svh.unit_of_measurement AS unit_of_measurement,
+            le.full_property_identifier AS full_property_identifier
+        FROM voa_list_entries le
+        LEFT JOIN voa_sv_header svh ON le.uarn = svh.uarn
+        WHERE REPLACE(UPPER(le.postcode), ' ', '') = :postcode
+        ORDER BY le.uarn
+    """)
+    try:
+        with Session(engine) as session:
+            rows = session.execute(sql, {"postcode": normalised_postcode}).fetchall()
+
+        candidates: list[dict[str, Any]] = []
+        for row in rows:
+            if _normalise_address(row.full_property_identifier) == normalised_address:
+                floor_rows = get_sv_lines_batch([str(row.uarn)]).get(str(row.uarn), [])
+                candidates.append(_build_subject_record_from_row(row, floor_rows))
+        return candidates
+    except Exception as exc:
+        log.error("get_subject_voa_candidates_by_address_postcode failed: %s", exc, exc_info=True)
+        raise DatabaseError(f"Subject candidate query failed: {exc}") from exc
+
+def get_subject_voa_record_by_address_postcode(address: str, postcode: str) -> dict[str, Any] | None:
+    """Return a VOA subject record only when address+postcode yields one exact candidate."""
+    candidates = get_subject_voa_candidates_by_address_postcode(address, postcode)
+    if len(candidates) == 1:
+        return candidates[0]
+    return None
+
+def get_subject_voa_record(uarn: str | None) -> dict[str, Any] | None:
+    """Return mapped VOA subject record for a single UARN."""
     if not uarn:
         return None
     try:
@@ -415,28 +503,8 @@ def get_subject_voa_record(uarn: str | None) -> dict[str, Any] | None:
             row = session.execute(sql, {"uarn": int_uarn}).fetchone()
         if row is None:
             return None
-
         floor_rows = get_sv_lines_batch([str(int_uarn)]).get(str(int_uarn), [])
-        floor_areas = {"ground": 0.0, "basement": 0.0}
-        for item in floor_rows:
-            floor_label = str(item.get("floor") or "").lower()
-            area = float(item.get("area") or 0.0)
-            if "ground" in floor_label and "lower" not in floor_label:
-                floor_areas["ground"] += area
-            elif "lower ground" in floor_label or "basement" in floor_label:
-                floor_areas["basement"] += area
-
-        total = float(row.total_area_or_units) if row.total_area_or_units is not None else None
-        if row.unit_of_measurement and str(row.unit_of_measurement).upper() != "NIA":
-            total = None
-
-        return {
-            "uarn": str(row.uarn),
-            "scat_code": int(row.scat_code) if row.scat_code is not None else None,
-            "description": row.description,
-            "total_area_sqm": total,
-            "floor_areas": floor_areas,
-        }
+        return _build_subject_record_from_row(row, floor_rows)
     except Exception as exc:
         log.error("get_subject_voa_record failed: %s", exc, exc_info=True)
         raise DatabaseError(f"Subject VOA record query failed: {exc}") from exc
