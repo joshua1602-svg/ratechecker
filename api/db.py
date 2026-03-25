@@ -116,6 +116,8 @@ def get_comparables(
         SELECT
             le.uarn,
             le.full_property_identifier           AS address,
+            le.postcode                          AS postcode,
+            le.street                            AS street,
             le.scat_code,
             le.rateable_value                     AS rv,
             le.primary_description_text           AS description,
@@ -442,6 +444,82 @@ def _extract_voa_building_number(full_property_identifier: str | None) -> int | 
     return _extract_leading_clean_int(full_property_identifier)
 
 
+def _structured_identity_from_subject(
+    *,
+    subject_record: dict[str, Any] | None,
+    subject_address: str | None,
+    subject_postcode: str | None,
+) -> dict[str, Any]:
+    """Build structured subject identity using the same address parsing basis."""
+    derived_street, derived_number = _derive_user_street_and_number(subject_address)
+    record = subject_record or {}
+    return {
+        "uarn": str(record.get("uarn") or "").strip() or None,
+        "postcode": _normalise_postcode(record.get("postcode") or subject_postcode),
+        "street": _normalise_street(record.get("street")) or derived_street,
+        "building_number": (
+            record.get("building_number")
+            if record.get("building_number") is not None
+            else derived_number
+        ),
+    }
+
+
+def _structured_identity_from_comp(comp: dict[str, Any]) -> dict[str, Any]:
+    """Build structured comparable identity from raw comparable row payload."""
+    return {
+        "uarn": str(comp.get("uarn") or "").strip() or None,
+        "postcode": _normalise_postcode(comp.get("postcode")),
+        "street": _normalise_street(comp.get("street")) or None,
+        "building_number": _extract_voa_building_number(comp.get("address")),
+    }
+
+
+def exclude_subject_from_comparables(
+    rows: list[dict[str, Any]],
+    *,
+    subject_record: dict[str, Any] | None,
+    subject_address: str | None,
+    subject_postcode: str | None,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Exclude subject property from comparable rows using structured identity.
+
+    Matching order:
+      1) canonical VOA record identifier (UARN) equality
+      2) postcode + street + building-number equality
+    """
+    subject_identity = _structured_identity_from_subject(
+        subject_record=subject_record,
+        subject_address=subject_address,
+        subject_postcode=subject_postcode,
+    )
+    filtered: list[dict[str, Any]] = []
+    excluded: list[dict[str, Any]] = []
+
+    for row in rows:
+        comp_identity = _structured_identity_from_comp(row)
+        basis: str | None = None
+
+        if subject_identity["uarn"] and comp_identity["uarn"] == subject_identity["uarn"]:
+            basis = "canonical_uarn"
+        elif (
+            subject_identity["postcode"]
+            and subject_identity["street"]
+            and subject_identity["building_number"] is not None
+            and comp_identity["postcode"] == subject_identity["postcode"]
+            and comp_identity["street"] == subject_identity["street"]
+            and comp_identity["building_number"] == subject_identity["building_number"]
+        ):
+            basis = "postcode_street_number"
+
+        if basis is not None:
+            excluded.append({"row": row, "basis": basis})
+        else:
+            filtered.append(row)
+
+    return filtered, excluded
+
+
 def _filter_structured_subject_candidates(rows: list[Any], *, user_street: str | None, user_number: int | None) -> tuple[list[Any], int, int]:
     """Filter postcode candidates by structured street and building-number keys."""
     street_filtered = []
@@ -551,6 +629,7 @@ def get_subject_voa_candidates_by_address_postcode(address: str, postcode: str) 
         for row in filtered_rows:
             floor_rows = get_sv_lines_batch([str(row.uarn)]).get(str(row.uarn), [])
             record = _build_subject_record_from_row(row, floor_rows)
+            record["postcode"] = normalised_postcode
             record["street"] = _normalise_street(getattr(row, "street", None)) or None
             record["building_number"] = _extract_voa_building_number(getattr(row, "full_property_identifier", None))
             candidates.append(record)
@@ -580,6 +659,9 @@ def get_subject_voa_record(uarn: str | None) -> dict[str, Any] | None:
             le.uarn,
             le.scat_code,
             le.primary_description_text AS description,
+            le.postcode AS postcode,
+            le.street AS street,
+            le.full_property_identifier AS full_property_identifier,
             svh.total_area_or_units AS total_area_or_units,
             svh.unit_of_measurement AS unit_of_measurement
         FROM voa_list_entries le
@@ -594,7 +676,11 @@ def get_subject_voa_record(uarn: str | None) -> dict[str, Any] | None:
         if row is None:
             return None
         floor_rows = get_sv_lines_batch([str(int_uarn)]).get(str(int_uarn), [])
-        return _build_subject_record_from_row(row, floor_rows)
+        record = _build_subject_record_from_row(row, floor_rows)
+        record["postcode"] = _normalise_postcode(getattr(row, "postcode", None)) or None
+        record["street"] = _normalise_street(getattr(row, "street", None)) or None
+        record["building_number"] = _extract_voa_building_number(getattr(row, "full_property_identifier", None))
+        return record
     except Exception as exc:
         log.error("get_subject_voa_record failed: %s", exc, exc_info=True)
         raise DatabaseError(f"Subject VOA record query failed: {exc}") from exc
