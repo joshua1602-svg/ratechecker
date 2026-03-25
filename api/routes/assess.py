@@ -9,6 +9,7 @@ from api.captcha import verify_turnstile
 from api.db import (
     DATABASE_URL,
     DatabaseError,
+    exclude_subject_from_comparables,
     get_comparables,
     get_sv_lines_batch,
     get_sv_car_parking_batch,
@@ -22,7 +23,12 @@ from api.engine.fit_layer import apply_fit_layer
 from api.engine.layout_overweight import LayoutInput, apply_layout_overweighting
 from api.engine.rules import csa_rules
 from api.engine.valuation import apply_adjustments
-from api.models import AdjustmentBreakdown, AdjustmentItem, AssessRequest, AssessResponse
+from api.models import (
+    AdjustmentBreakdown,
+    AdjustmentItem,
+    AssessRequest,
+    AssessResponse,
+)
 
 log = logging.getLogger(__name__)
 
@@ -87,6 +93,26 @@ async def assess(req: AssessRequest) -> AssessResponse:
             status_code=503,
             detail="Database is temporarily unavailable. Please try again shortly.",
         ) from exc
+
+    subject_record = {"uarn": req.property.uprn} if req.property.uprn else None
+    rows, excluded_subject_rows = exclude_subject_from_comparables(
+        rows,
+        subject_record=subject_record,
+        subject_address=req.property.address,
+        subject_postcode=req.property.postcode,
+    )
+    log.debug(
+        "comparable subject exclusion subject_uarn=%s excluded_count=%s",
+        (subject_record or {}).get("uarn"),
+        len(excluded_subject_rows),
+    )
+    for item in excluded_subject_rows:
+        row = item["row"]
+        log.debug(
+            "excluded comparable as subject comp_uarn=%s basis=%s",
+            row.get("uarn"),
+            item.get("basis"),
+        )
 
     # 4. Convert DB rows → Comparable objects
     comps = [

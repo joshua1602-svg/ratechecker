@@ -210,6 +210,14 @@ class TestPdfTemplateRendering:
         assert "Comparable evidence is set out on page" in html
         assert "Submission-Ready Narrative" in html
 
+    def test_evidence_pack_does_not_render_floor_config_comps_column(self):
+        data = pdf_generator._derive_fields(_base_report_data())
+        html = pdf_generator._load_template(
+            pdf_generator._get_env(),
+            "evidence_pack.html",
+        ).render(**data)
+        assert ">Floor Config<" not in html
+
 
 class TestVoaReconciliationRendering:
     def test_simplified_report_has_summary_row_only(self):

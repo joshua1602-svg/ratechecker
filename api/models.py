@@ -308,14 +308,38 @@ def _resolve_subject_candidate(
 
 def _build_voa_reconciliation(request: AssessRequest) -> dict | None:
     """Build supplementary VOA reconciliation diagnostics for report rendering."""
-    from api.db import (
-        DatabaseError,
-        get_subject_voa_candidates_by_address_postcode,
-        get_subject_voa_record,
-        get_subject_voa_record_by_reference,
-    )
     from api.services.voa_reconciliation import reconcile_subject_against_voa
 
+    normalized_facts, user_payload, user_total = _build_voa_reconciliation_inputs(request)
+    voa_record, lookup_path = resolve_subject_voa_record(request, normalized_facts, user_total)
+
+    logger.info(
+        "VOA reconciliation subject lookup path=%s found=%s subject_id=%s scat_code=%s total_nia=%s ground_sqm=%s basement_sqm=%s",
+        lookup_path,
+        bool(voa_record),
+        (voa_record or {}).get("uarn"),
+        (voa_record or {}).get("scat_code"),
+        (voa_record or {}).get("total_area_sqm"),
+        ((voa_record or {}).get("floor_areas") or {}).get("ground"),
+        ((voa_record or {}).get("floor_areas") or {}).get("basement"),
+    )
+
+    if voa_record is None:
+        voa_record = {
+            "total_area_sqm": None,
+            "floor_areas": {"ground": None, "basement": None},
+            "scat_code": None,
+            "description": None,
+        }
+
+    return reconcile_subject_against_voa(
+        user_payload=user_payload,
+        voa_subject_record=voa_record,
+        normalized_facts=normalized_facts,
+    )["voa_reconciliation"]
+
+
+def _build_voa_reconciliation_inputs(request: AssessRequest) -> tuple[dict, dict, float | None]:
     user_total = request.property.nia_sqm
     floor_config = request.layout.floor_config if request.layout is not None else None
     user_basement = bool(request.areas and (request.areas.basement_sqm or 0) > 0)
@@ -335,6 +359,26 @@ def _build_voa_reconciliation(request: AssessRequest) -> dict | None:
         "business_type": request.property.business_type.value,
         "total_area_sqm": user_total,
     }
+    return normalized_facts, user_payload, user_total
+
+
+def resolve_subject_voa_record(
+    request: AssessRequest,
+    normalized_facts: dict | None = None,
+    user_total_area_sqm: float | None = None,
+) -> tuple[dict | None, str]:
+    """Resolve the matched VOA subject record using the structured lookup path."""
+    from api.db import (
+        DatabaseError,
+        get_subject_voa_candidates_by_address_postcode,
+        get_subject_voa_record,
+        get_subject_voa_record_by_reference,
+    )
+
+    if normalized_facts is None:
+        normalized_facts, _, _ = _build_voa_reconciliation_inputs(request)
+    if user_total_area_sqm is None:
+        user_total_area_sqm = request.property.nia_sqm
 
     voa_record = None
     lookup_path = "none"
@@ -365,7 +409,7 @@ def _build_voa_reconciliation(request: AssessRequest) -> dict | None:
                 business_type=request.property.business_type.value,
                 user_ground=normalized_facts.get("ground_present"),
                 user_basement=normalized_facts.get("basement_present"),
-                user_total_area_sqm=user_total,
+                user_total_area_sqm=user_total_area_sqm,
             )
             if voa_record is not None:
                 lookup_path = f"address_postcode_{signal}"
@@ -377,30 +421,7 @@ def _build_voa_reconciliation(request: AssessRequest) -> dict | None:
     except DatabaseError:
         voa_record = None
 
-    logger.info(
-        "VOA reconciliation subject lookup path=%s found=%s subject_id=%s scat_code=%s total_nia=%s ground_sqm=%s basement_sqm=%s",
-        lookup_path,
-        bool(voa_record),
-        (voa_record or {}).get("uarn"),
-        (voa_record or {}).get("scat_code"),
-        (voa_record or {}).get("total_area_sqm"),
-        ((voa_record or {}).get("floor_areas") or {}).get("ground"),
-        ((voa_record or {}).get("floor_areas") or {}).get("basement"),
-    )
-
-    if voa_record is None:
-        voa_record = {
-            "total_area_sqm": None,
-            "floor_areas": {"ground": None, "basement": None},
-            "scat_code": None,
-            "description": None,
-        }
-
-    return reconcile_subject_against_voa(
-        user_payload=user_payload,
-        voa_subject_record=voa_record,
-        normalized_facts=normalized_facts,
-    )["voa_reconciliation"]
+    return voa_record, lookup_path
 
 
 def build_report_payload_from_assess(

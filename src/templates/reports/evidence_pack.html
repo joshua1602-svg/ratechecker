@@ -573,12 +573,11 @@ table { page-break-inside: avoid; }
         <th style="width:10%;" class="num">Floor Area sqm</th>
         <th style="width:12%;" class="num">Rateable Value &pound;</th>
         <th style="width:10%;" class="num">Rate &pound;/sqm</th>
-        <th style="width:10%;">Floor Config</th>
         {% if layout_adjustment_applied %}
-        <th style="width:8%;">Similarity</th>
+        <th style="width:12%;">Similarity</th>
         {% endif %}
         <th style="width:6%;">Fit</th>
-        <th style="width:8%;" class="num">Weight %</th>
+        <th style="width:10%;" class="num">Weight %</th>
       </tr>
     </thead>
     <tbody>
@@ -590,7 +589,6 @@ table { page-break-inside: avoid; }
         <td class="num">{{ comp.nia_sqm }}</td>
         <td class="num">&pound;{{ comp.rv | format_currency }}</td>
         <td class="num">&pound;{{ comp.rate_psm }}</td>
-        <td>{% if comp.floor_config == 'ground_only' %}Ground only{% elif comp.floor_config == 'ground_and_basement' %}Ground + Basement{% elif comp.floor_config == 'ground_and_first' %}Ground + First{% elif comp.floor_config == 'ground_basement_first' %}G + Basement + First{% else %}{{ comp.floor_config }}{% endif %}</td>
         {% if layout_adjustment_applied %}
         <td>
           {% if comp.layout_similarity_score >= 0.7 %}High
