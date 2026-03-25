@@ -381,6 +381,66 @@ def get_sv_adjustment_totals_batch(uarns: list[str]) -> dict[str, dict]:
         raise DatabaseError(f"Adjustment totals query failed: {exc}") from exc
 
 
+
+def get_subject_voa_record(uarn: str | None) -> dict[str, Any] | None:
+    """Return mapped VOA subject record for a single UARN.
+
+    Includes list-entry SCAT/description, total NIA (where available), and
+    floor-level SV areas (ground/basement) for reconciliation diagnostics.
+    Returns None when UARN is missing/invalid or not found.
+    Raises DatabaseError on query failure.
+    """
+    if not uarn:
+        return None
+    try:
+        int_uarn = int(uarn)
+    except (TypeError, ValueError):
+        return None
+
+    sql = text("""
+        SELECT
+            le.uarn,
+            le.scat_code,
+            le.primary_description_text AS description,
+            svh.total_area_or_units AS total_area_or_units,
+            svh.unit_of_measurement AS unit_of_measurement
+        FROM voa_list_entries le
+        LEFT JOIN voa_sv_header svh ON le.uarn = svh.uarn
+        WHERE le.uarn = :uarn
+        LIMIT 1
+    """)
+
+    try:
+        with Session(engine) as session:
+            row = session.execute(sql, {"uarn": int_uarn}).fetchone()
+        if row is None:
+            return None
+
+        floor_rows = get_sv_lines_batch([str(int_uarn)]).get(str(int_uarn), [])
+        floor_areas = {"ground": 0.0, "basement": 0.0}
+        for item in floor_rows:
+            floor_label = str(item.get("floor") or "").lower()
+            area = float(item.get("area") or 0.0)
+            if "ground" in floor_label and "lower" not in floor_label:
+                floor_areas["ground"] += area
+            elif "lower ground" in floor_label or "basement" in floor_label:
+                floor_areas["basement"] += area
+
+        total = float(row.total_area_or_units) if row.total_area_or_units is not None else None
+        if row.unit_of_measurement and str(row.unit_of_measurement).upper() != "NIA":
+            total = None
+
+        return {
+            "uarn": str(row.uarn),
+            "scat_code": int(row.scat_code) if row.scat_code is not None else None,
+            "description": row.description,
+            "total_area_sqm": total,
+            "floor_areas": floor_areas,
+        }
+    except Exception as exc:
+        log.error("get_subject_voa_record failed: %s", exc, exc_info=True)
+        raise DatabaseError(f"Subject VOA record query failed: {exc}") from exc
+
 def count_voa_rows() -> int:
     """
     Return the number of rows in voa_list_entries.
