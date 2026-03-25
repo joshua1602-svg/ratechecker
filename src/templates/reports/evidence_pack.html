@@ -609,24 +609,9 @@ table { page-break-inside: avoid; }
 <div class="section">
   <h1>Valuation Estimate</h1>
 
-  <!-- ── Summary: always rendered for every business type ── -->
-  <h2>Valuation Summary</h2>
-  <table class="facts-table">
-    <tr><td class="label-cell">Current VOA Rateable Value</td><td class="value-cell">&pound;{{ voa_rv | format_currency }}</td></tr>
-    <tr><td class="label-cell">Modelled Rateable Value</td><td class="value-cell">&pound;{{ modelled_rv | format_currency }}</td></tr>
-    <tr><td class="label-cell">Valuation Basis</td><td class="value-cell">{{ valuation_basis }} ({{ valuation_method | replace('_', ' ') | title }})</td></tr>
-    <tr><td class="label-cell">Subject Area ({{ valuation_basis }})</td><td class="value-cell">{{ valuation_basis_sqm }} sqm</td></tr>
-    <tr><td class="label-cell">Derived Tone / Rate</td><td class="value-cell">&pound;{{ final_tone_psm }}/m&sup2; {{ valuation_basis }} ({{ tone_basis }})</td></tr>
-    {% if geometry_assumed and valuation_method == 'zoning' %}
-    <tr><td class="label-cell">Geometry</td><td class="value-cell">Assumed 1:3 width-to-depth aspect ratio (measured frontage/depth not provided)</td></tr>
-    {% elif valuation_method == 'zoning' %}
-    <tr><td class="label-cell">Geometry</td><td class="value-cell">Based on provided frontage and depth measurements</td></tr>
-    {% endif %}
-  </table>
-
-  <!-- ── Zoning schedule: retail / hair_beauty / restaurant_cafe ── -->
-  {% if valuation_method == 'zoning' and zoning_rows %}
+  {% if business_type in ['retail', 'hair_beauty', 'restaurant_cafe', 'pub'] %}
   <h2>Zoning Schedule</h2>
+  {% if zoning_rows %}
   <table class="calc-table">
     <thead>
       <tr>
@@ -642,75 +627,30 @@ table { page-break-inside: avoid; }
       {% for row in zoning_rows %}
       <tr>
         <td>{{ row.zone }}</td>
-        <td class="num">{{ row.depth_m }}</td>
-        <td class="num">{{ row.area_sqm }}</td>
-        <td class="num">{{ row.relativity }}</td>
-        <td class="num">&pound;{{ row.tone }}</td>
+        <td class="num">{{ row.area_sqm if row.area_sqm is defined else row.area }}</td>
+        <td class="num">{{ row.relativity if row.relativity is defined else row.depth }}</td>
+        <td class="num">{{ row.area_type_weight if row.area_type_weight is defined else "—" }}</td>
+        <td class="num">&pound;{{ row.tone if row.tone is defined else row.rate }}</td>
         <td class="num">&pound;{{ row.value | format_currency }}</td>
       </tr>
       {% endfor %}
     </tbody>
   </table>
+  {% else %}
+  <p>No row-level zoning schedule was generated for this property from the backend valuation engine output.</p>
   {% endif %}
-
-  <!-- ── NIA calculation: nursery ── -->
-  {% if valuation_method == 'nia_only' %}
-  <h2>NIA-Based Calculation</h2>
-  <p>{{ nia_sqm }} sqm &times; &pound;{{ final_tone_psm }}/m&sup2; = &pound;{{ subtotal_pre | format_currency }}</p>
-  {% endif %}
-
-  <!-- ── Pre-allowances subtotal (all types) ── -->
-  {% if subtotal_pre %}
   <div class="calc-totals">
-    <p><strong>Subtotal (pre-allowances):</strong> &pound;{{ subtotal_pre | format_currency }}</p>
-    <p><strong>Allowances / Adjustments:</strong> {{ allowances_summary | default('None applied') }}</p>
-    {% if adjustment_factor is defined and adjustment_factor != 1.0 %}
-    <p><strong>Adjustment Factor:</strong> {{ adjustment_factor }}</p>
-    {% endif %}
+    <p><strong>Subtotal (pre-allowances):</strong> {% if subtotal_pre is not none %}&pound;{{ subtotal_pre | format_currency }}{% else %}Not provided{% endif %}</p>
+    <p><strong>Allowances:</strong> {{ allowances_summary or "No explicit allowances supplied in payload." }}</p>
     <p><strong>Modelled Rateable Value:</strong> &pound;{{ modelled_rv | format_currency }}</p>
   </div>
   {% endif %}
 
-  <!-- ── Adjustment detail (nursery) ── -->
-  {% if valuation_method == 'nia_only' and nursery_adjustments %}
-  <h2>Adjustments Applied</h2>
-  <table class="calc-table">
-    <thead>
-      <tr>
-        <th>Adjustment</th>
-        <th class="num">Effect</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for adj in nursery_adjustments %}
-      <tr>
-        <td>{{ adj.name }}</td>
-        <td class="num">{{ adj.pct }}</td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
-  {% endif %}
-
-  <!-- ── Annual saving calculation: always shown ── -->
-  <h2>Annual Saving Calculation</h2>
-  <table class="facts-table">
-    <tr><td class="label-cell">Current VOA RV</td><td class="value-cell">&pound;{{ voa_rv | format_currency }}</td></tr>
-    <tr><td class="label-cell">Modelled RV</td><td class="value-cell">&pound;{{ modelled_rv | format_currency }}</td></tr>
-    <tr><td class="label-cell">Annual Saving (point estimate)</td><td class="value-cell">&pound;{{ rv_delta | format_currency }}</td></tr>
-    <tr><td class="label-cell">Estimated Saving Range</td><td class="value-cell">&pound;{{ annual_saving_low | format_currency }}&ndash;&pound;{{ annual_saving_high | format_currency }}</td></tr>
-  </table>
-  <p style="font-size:8pt; color:#7A8A9A; margin-top:4px;">
-    The point estimate is calculated as Current VOA RV minus Modelled RV.
-    The saving range reflects a &plusmn;5% confidence margin around the modelled RV.
-    Lower saving = VOA RV minus upper modelled estimate; upper saving = VOA RV minus lower modelled estimate.
-  </p>
-
-  <!-- ── Layout weighting clarification ── -->
-  {% if layout_adjustment_applied %}
-  <p style="font-size:8pt; color:#7A8A9A; margin-top:6px;">
-    <strong>Layout weighting note:</strong> Layout details (floor configuration, storage balance, kitchen position) were used to adjust comparable weighting and confidence only. They did not directly change the modelled RV as a subject-level deduction or allowance.
-  </p>
+  {% if business_type == 'nursery' %}
+  <h2>NIA Calculation</h2>
+  <p>{{ nia_sqm }} sqm &times; &pound;{{ final_tone_psm }}/m&sup2; = {% if subtotal_pre is not none %}&pound;{{ subtotal_pre | format_currency }}{% else %}Not provided{% endif %}</p>
+  <p><strong>Adjustments:</strong> {{ nursery_adjustments }}</p>
+  <p><strong>Modelled Rateable Value:</strong> &pound;{{ modelled_rv | format_currency }}</p>
   {% endif %}
 </div>
 

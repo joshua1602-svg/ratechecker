@@ -86,13 +86,12 @@ class TestSubjectExclusion:
         sig = inspect.signature(get_comparables)
         assert "exclude_uarn" in sig.parameters
 
-    def test_assess_passes_uprn_as_exclude(self):
-        """Verify that assess.py passes req.property.uprn as exclude_uarn."""
-        import ast
+    def test_assess_passes_resolved_subject_identifier_as_exclude(self):
+        """Verify that assess.py passes a resolved subject id as exclude_uarn."""
         with open("api/routes/assess.py") as f:
             source = f.read()
-        # The source must contain exclude_uarn=req.property.uprn
-        assert "exclude_uarn=req.property.uprn" in source
+        # The source must contain exclude_uarn=resolved_subject_uarn
+        assert "exclude_uarn=resolved_subject_uarn" in source
 
 
 # ---------------------------------------------------------------------------

@@ -10,6 +10,7 @@ from api.db import (
     DATABASE_URL,
     DatabaseError,
     get_comparables,
+    resolve_subject_uarn,
     get_sv_lines_batch,
     get_sv_car_parking_batch,
     get_sv_additions_batch,
@@ -18,6 +19,7 @@ from api.db import (
 )
 from api.engine.csa import Comparable, run_csa
 from api.engine.geocoding import postcode_to_coords
+from api.engine.subject_exclusion import exclude_subject_rows
 from api.engine.fit_layer import apply_fit_layer
 from api.engine.layout_overweight import LayoutInput, apply_layout_overweighting
 from api.engine.rules import csa_rules
@@ -72,6 +74,11 @@ async def assess(req: AssessRequest) -> AssessResponse:
         _size_band_pct = rules["filters"]["size_band_pct_fallback"]
 
     try:
+        resolved_subject_uarn = req.property.uprn or resolve_subject_uarn(
+            postcode=req.property.postcode,
+            address=req.property.address,
+            scat_codes=target_scats,
+        )
         rows = get_comparables(
             lat=lat,
             lon=lon,
@@ -79,8 +86,16 @@ async def assess(req: AssessRequest) -> AssessResponse:
             radius_m=_radius_m,
             nia_sqm=req.property.nia_sqm,
             size_band_pct=_size_band_pct,
-            exclude_uarn=req.property.uprn,
+            exclude_uarn=resolved_subject_uarn,
         )
+        rows, exclusion_stats = exclude_subject_rows(
+            rows,
+            subject_id=resolved_subject_uarn,
+            subject_address=req.property.address,
+            subject_postcode=req.property.postcode,
+        )
+        if exclusion_stats["removed_by_id"] or exclusion_stats["removed_by_address"]:
+            log.info("Subject exclusion applied: %s", exclusion_stats)
     except DatabaseError as exc:
         log.error("Database failure in /assess: %s", exc)
         raise HTTPException(
