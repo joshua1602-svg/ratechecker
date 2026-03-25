@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import logging
 from enum import Enum
 from typing import Optional
 
 from pydantic import BaseModel, Field
+
+logger = logging.getLogger(__name__)
 
 
 class BusinessType(str, Enum):
@@ -25,6 +28,7 @@ class PropertyInput(BaseModel):
     address: str = ""
     postcode: str
     uprn: Optional[str] = None
+    property_reference: Optional[str] = None
     business_type: BusinessType
     voa_rv: float = 0
     nia_sqm: float
@@ -190,6 +194,7 @@ class SimplifiedReportRequest(BaseModel):
     base_estimated_rv: Optional[float] = None
     adjusted_estimated_rv: Optional[float] = None
     rate_basis: Optional[str] = None  # "ITZA" or "NIA" — from CSA
+    voa_reconciliation: Optional[dict] = None
 
 
 class EvidenceReportRequest(SimplifiedReportRequest):
@@ -220,6 +225,7 @@ class EvidenceReportRequest(SimplifiedReportRequest):
     ground_floor_storage_sqm: Optional[float] = None
     kitchen_area_sqm: Optional[float] = None
     kitchen_on_ground: Optional[str] = None
+    voa_reconciliation: Optional[dict] = None
 
 
 class PurchaseResponse(BaseModel):
@@ -235,6 +241,166 @@ class PurchaseResponse(BaseModel):
 # it computes) rather than inventing report fields.
 
 _SAVING_MARGIN = 0.05  # ±5% around the point estimate for low/high range
+
+
+def _candidate_floor_presence(candidate: dict) -> tuple[bool, bool]:
+    floor = candidate.get("floor_areas") or {}
+    return (bool((floor.get("ground") or 0) > 0), bool((floor.get("basement") or 0) > 0))
+
+
+def _resolve_subject_candidate(
+    *,
+    candidates: list[dict],
+    business_type: str,
+    user_ground: bool | None,
+    user_basement: bool | None,
+    user_total_area_sqm: float | None,
+) -> tuple[dict | None, str]:
+    """Resolve ambiguous address candidates deterministically.
+
+    Priority: retail SCAT filter -> floor presence -> area proximity -> stable tie-break.
+    Returns (candidate, resolution_signal).
+    """
+    if not candidates:
+        return None, "no_candidates"
+    if len(candidates) == 1:
+        return candidates[0], "single_candidate"
+
+    pool = list(candidates)
+    if business_type == "retail":
+        retail = [c for c in pool if c.get("scat_code") in {249, 251}]
+        if retail:
+            pool = retail
+            if len(pool) == 1:
+                return pool[0], "retail_scat_filter"
+
+    scored: list[tuple[int, float, str, dict]] = []
+    has_floor_signal = user_ground is not None and user_basement is not None
+    has_area_signal = user_total_area_sqm is not None
+    for c in pool:
+        floor_score = 0
+        cand_ground, cand_basement = _candidate_floor_presence(c)
+        if has_floor_signal:
+            floor_score += 1 if cand_ground == user_ground else 0
+            floor_score += 1 if cand_basement == user_basement else 0
+        total = c.get("total_area_sqm")
+        if has_area_signal and total is not None:
+            area_diff = abs(float(total) - float(user_total_area_sqm))
+        else:
+            area_diff = float("inf")
+        scored.append((floor_score, area_diff, str(c.get("uarn") or ""), c))
+
+    scored.sort(key=lambda item: (-item[0], item[1], item[2]))
+    best = scored[0]
+
+    # If we had no floor/area signal and still many, treat as unresolved ambiguity.
+    if len(scored) > 1 and not has_floor_signal and not has_area_signal:
+        return None, "ambiguous_unresolved"
+
+    if len(scored) > 1:
+        runner_up = scored[1]
+        if best[0] != runner_up[0]:
+            return best[3], "floor_presence"
+        if best[1] != runner_up[1]:
+            return best[3], "floor_area_proximity"
+    return best[3], "deterministic_tie_breaker"
+
+
+def _build_voa_reconciliation(request: AssessRequest) -> dict | None:
+    """Build supplementary VOA reconciliation diagnostics for report rendering."""
+    from api.db import (
+        DatabaseError,
+        get_subject_voa_candidates_by_address_postcode,
+        get_subject_voa_record,
+        get_subject_voa_record_by_reference,
+    )
+    from api.services.voa_reconciliation import reconcile_subject_against_voa
+
+    user_total = request.property.nia_sqm
+    floor_config = request.layout.floor_config if request.layout is not None else None
+    user_basement = bool(request.areas and (request.areas.basement_sqm or 0) > 0)
+    if floor_config in {"ground_lower_ground", "ground_lower_ground_first", "ground_and_basement", "ground_basement_first"}:
+        user_basement = True
+    user_ground = True if floor_config is not None else None
+
+    normalized_facts = {
+        "ground_present": user_ground,
+        "basement_present": user_basement if user_ground is not None else None,
+        "floor_areas": {
+            "ground": (request.areas.sales_area_sqm if request.areas is not None else None),
+            "basement": (request.areas.basement_sqm if request.areas is not None else None),
+        },
+    }
+    user_payload = {
+        "business_type": request.property.business_type.value,
+        "total_area_sqm": user_total,
+    }
+
+    voa_record = None
+    lookup_path = "none"
+    optional_reference = request.property.property_reference or None
+
+    try:
+        logger.info("VOA reconciliation lookup optional_reference_supplied=%s", bool(optional_reference))
+
+        if optional_reference:
+            voa_record = get_subject_voa_record_by_reference(optional_reference)
+            if voa_record is not None:
+                lookup_path = "reference_override"
+            else:
+                logger.info("VOA reconciliation reference override did not resolve; falling back to address/postcode")
+
+        if voa_record is None:
+            candidates = get_subject_voa_candidates_by_address_postcode(
+                address=request.property.address,
+                postcode=request.property.postcode,
+            )
+            logger.info(
+                "VOA reconciliation address/postcode candidate_count=%s disambiguation_needed=%s",
+                len(candidates),
+                len(candidates) > 1,
+            )
+            voa_record, signal = _resolve_subject_candidate(
+                candidates=candidates,
+                business_type=request.property.business_type.value,
+                user_ground=normalized_facts.get("ground_present"),
+                user_basement=normalized_facts.get("basement_present"),
+                user_total_area_sqm=user_total,
+            )
+            if voa_record is not None:
+                lookup_path = f"address_postcode_{signal}"
+
+        if voa_record is None and request.property.uprn:
+            voa_record = get_subject_voa_record(request.property.uprn)
+            if voa_record is not None:
+                lookup_path = "uprn_internal_fallback"
+    except DatabaseError:
+        voa_record = None
+
+    logger.info(
+        "VOA reconciliation subject lookup path=%s found=%s subject_id=%s scat_code=%s total_nia=%s ground_sqm=%s basement_sqm=%s",
+        lookup_path,
+        bool(voa_record),
+        (voa_record or {}).get("uarn"),
+        (voa_record or {}).get("scat_code"),
+        (voa_record or {}).get("total_area_sqm"),
+        ((voa_record or {}).get("floor_areas") or {}).get("ground"),
+        ((voa_record or {}).get("floor_areas") or {}).get("basement"),
+    )
+
+    if voa_record is None:
+        voa_record = {
+            "total_area_sqm": None,
+            "floor_areas": {"ground": None, "basement": None},
+            "scat_code": None,
+            "description": None,
+        }
+
+    return reconcile_subject_against_voa(
+        user_payload=user_payload,
+        voa_subject_record=voa_record,
+        normalized_facts=normalized_facts,
+    )["voa_reconciliation"]
 
 
 def build_report_payload_from_assess(
@@ -315,6 +481,7 @@ def build_report_payload_from_assess(
         "base_estimated_rv": base_rv,
         "adjusted_estimated_rv": adj_rv,
         "rate_basis": None,  # set by caller from CSA result if available
+        "voa_reconciliation": _build_voa_reconciliation(request),
     }
 
 
