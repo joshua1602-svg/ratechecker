@@ -268,23 +268,12 @@ def _derive_fields(report_data: dict) -> dict:
             data.setdefault("rv_delta_pct", round((rv_delta / voa_rv) * 100, 1))
 
     # Per-comparable normalisation (rate_psm, layout_similarity_score defaults)
-    # Also strip out any comparable that matches the subject property — this
-    # catches cases where the backend structured-matching exclusion missed it.
     comps = data.get("comparables")
-    property_address = data.get("property_address", "")
     if comps:
-        normalised: list[dict] = []
-        for comp in comps:
-            if not isinstance(comp, dict):
-                normalised.append(comp)
-                continue
-            addr = comp.get("address", "")
-            if property_address and _is_subject_comp_jinja(addr, property_address):
-                continue
-            normalised.append(_normalise_comparable(comp))
-        data["comparables"] = normalised
-        # Keep comp_count in sync after subject-property removal
-        data["comp_count"] = len(normalised)
+        data["comparables"] = [
+            _normalise_comparable(comp) if isinstance(comp, dict) else comp
+            for comp in comps
+        ]
 
     # Pool-level weight normalisation: convert raw weight floats to share-of-pool %.
     # Handles both 'adjusted_weight' (layout path) and 'weight' (CSA-only path).
