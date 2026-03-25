@@ -6,6 +6,7 @@ from enum import Enum
 from typing import Optional
 
 from pydantic import BaseModel, Field
+from api.reports.narrative import build_rendered_narrative
 
 logger = logging.getLogger(__name__)
 
@@ -226,6 +227,10 @@ class EvidenceReportRequest(SimplifiedReportRequest):
     kitchen_area_sqm: Optional[float] = None
     kitchen_on_ground: Optional[str] = None
     voa_reconciliation: Optional[dict] = None
+    evidence_interpretation: Optional[str] = None
+    case_assessment: Optional[str] = None
+    recommended_action: Optional[str] = None
+    narrative_signals: Optional[dict] = None
 
 
 class PurchaseResponse(BaseModel):
@@ -640,5 +645,7 @@ def build_evidence_payload_from_assess(
         payload["cramped_flag"] = request.flags.cramped_flag
         if request.flags.fitout_year:
             payload["fitout_year"] = request.flags.fitout_year
+
+    payload.update(build_rendered_narrative(payload))
 
     return payload

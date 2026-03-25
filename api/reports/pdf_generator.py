@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from jinja2 import Environment, FileSystemLoader, TemplateNotFound
+from api.reports.narrative import build_rendered_narrative
 
 try:
     from weasyprint import HTML
@@ -295,6 +296,8 @@ def _derive_fields(report_data: dict) -> dict:
     reconciliation = data.get("voa_reconciliation") or {}
     data.setdefault("voa_record_match", _format_reconciliation_status(reconciliation.get("overall_status")))
     data.setdefault("voa_reconciliation_no_rows", _build_reconciliation_detail_rows(reconciliation))
+    if not data.get("evidence_interpretation") or not data.get("case_assessment") or not data.get("recommended_action"):
+        data.update(build_rendered_narrative(data))
 
     # Submission narrative (evidence pack)
     if data.get("modelled_rv") is not None:
