@@ -190,6 +190,7 @@ class SimplifiedReportRequest(BaseModel):
     base_estimated_rv: Optional[float] = None
     adjusted_estimated_rv: Optional[float] = None
     rate_basis: Optional[str] = None  # "ITZA" or "NIA" — from CSA
+    voa_reconciliation: Optional[dict] = None
 
 
 class EvidenceReportRequest(SimplifiedReportRequest):
@@ -220,6 +221,7 @@ class EvidenceReportRequest(SimplifiedReportRequest):
     ground_floor_storage_sqm: Optional[float] = None
     kitchen_area_sqm: Optional[float] = None
     kitchen_on_ground: Optional[str] = None
+    voa_reconciliation: Optional[dict] = None
 
 
 class PurchaseResponse(BaseModel):
@@ -235,6 +237,51 @@ class PurchaseResponse(BaseModel):
 # it computes) rather than inventing report fields.
 
 _SAVING_MARGIN = 0.05  # ±5% around the point estimate for low/high range
+
+
+def _build_voa_reconciliation(request: AssessRequest) -> dict | None:
+    """Build supplementary VOA reconciliation diagnostics for report rendering."""
+    from api.db import DatabaseError, get_subject_voa_record
+    from api.services.voa_reconciliation import reconcile_subject_against_voa
+
+    user_total = request.property.nia_sqm
+    floor_config = request.layout.floor_config if request.layout is not None else None
+    user_basement = bool(request.areas and (request.areas.basement_sqm or 0) > 0)
+    if floor_config in {"ground_lower_ground", "ground_lower_ground_first", "ground_and_basement", "ground_basement_first"}:
+        user_basement = True
+    user_ground = floor_config is not None
+
+    normalized_facts = {
+        "ground_present": user_ground,
+        "basement_present": user_basement,
+        "floor_areas": {
+            "ground": (request.areas.sales_area_sqm if request.areas is not None else None),
+            "basement": (request.areas.basement_sqm if request.areas is not None else None),
+        },
+    }
+    user_payload = {
+        "business_type": request.property.business_type.value,
+        "total_area_sqm": user_total,
+    }
+
+    try:
+        voa_record = get_subject_voa_record(request.property.uprn)
+    except DatabaseError:
+        voa_record = None
+
+    if voa_record is None:
+        voa_record = {
+            "total_area_sqm": None,
+            "floor_areas": {"ground": None, "basement": None},
+            "scat_code": None,
+            "description": None,
+        }
+
+    return reconcile_subject_against_voa(
+        user_payload=user_payload,
+        voa_subject_record=voa_record,
+        normalized_facts=normalized_facts,
+    )["voa_reconciliation"]
 
 
 def build_report_payload_from_assess(
@@ -315,6 +362,7 @@ def build_report_payload_from_assess(
         "base_estimated_rv": base_rv,
         "adjusted_estimated_rv": adj_rv,
         "rate_basis": None,  # set by caller from CSA result if available
+        "voa_reconciliation": _build_voa_reconciliation(request),
     }
 
 
