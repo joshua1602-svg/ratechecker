@@ -518,6 +518,10 @@ table { page-break-inside: avoid; }
     {% if rate_psm %}
     <tr><td class="label-cell">Current Rate per sqm</td><td class="value-cell">&pound;{{ rate_psm }} /sqm</td></tr>
     {% endif %}
+    <tr><td class="label-cell">VOA Record Match</td><td class="value-cell">{{ voa_record_match }}</td></tr>
+    {% for row in voa_reconciliation_no_rows %}
+    <tr><td class="label-cell">{{ row.label }}</td><td class="value-cell">{{ row.value }}</td></tr>
+    {% endfor %}
   </table>
 </div>
 

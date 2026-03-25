@@ -207,6 +207,38 @@ def _build_weighting_rows(data: dict[str, Any]) -> list[dict[str, str]]:
     return rows
 
 
+
+
+def _format_reconciliation_status(value: Any) -> str:
+    mapping = {
+        "yes": "Yes",
+        "no": "No",
+        "unknown": "Unknown",
+        "partially": "Partial",
+    }
+    return mapping.get(str(value or "").lower(), "Unknown")
+
+
+def _build_reconciliation_detail_rows(reconciliation: dict[str, Any] | None) -> list[dict[str, str]]:
+    if not reconciliation:
+        return []
+    checks = reconciliation.get("checks") or {}
+    rows: list[dict[str, str]] = []
+    labels = {
+        "gross_floor_space": "Floor Area Difference",
+        "floor_plan_configuration": "Floor Plan Difference",
+        "floor_split": "Floor Split Difference",
+        "business_type": "Business Type Difference",
+    }
+    for key in ("gross_floor_space", "floor_plan_configuration", "floor_split", "business_type"):
+        check = checks.get(key) or {}
+        if check.get("status") == "no":
+            rows.append({
+                "label": labels[key],
+                "value": check.get("detail_text") or check.get("summary_text") or "Does not match VOA record",
+            })
+    return rows
+
 def _to_title_case(value: Any) -> str:
     text = str(value or "").strip()
     if not text:
@@ -259,6 +291,10 @@ def _derive_fields(report_data: dict) -> dict:
                         _c["weight_pct"] = round(float(_raw) / _weight_sum * 100, 1)
 
     data.setdefault("weighting_rows", _build_weighting_rows(data))
+
+    reconciliation = data.get("voa_reconciliation") or {}
+    data.setdefault("voa_record_match", _format_reconciliation_status(reconciliation.get("overall_status")))
+    data.setdefault("voa_reconciliation_no_rows", _build_reconciliation_detail_rows(reconciliation))
 
     # Submission narrative (evidence pack)
     if data.get("modelled_rv") is not None:
