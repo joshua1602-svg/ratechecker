@@ -28,7 +28,6 @@ from api.models import (
     AdjustmentItem,
     AssessRequest,
     AssessResponse,
-    resolve_subject_voa_record,
 )
 
 log = logging.getLogger(__name__)
@@ -95,8 +94,7 @@ async def assess(req: AssessRequest) -> AssessResponse:
             detail="Database is temporarily unavailable. Please try again shortly.",
         ) from exc
 
-    subject_record, subject_lookup_path = resolve_subject_voa_record(req)
-    subject_uarn = (subject_record or {}).get("uarn")
+    subject_record = {"uarn": req.property.uprn} if req.property.uprn else None
     rows, excluded_subject_rows = exclude_subject_from_comparables(
         rows,
         subject_record=subject_record,
@@ -104,9 +102,8 @@ async def assess(req: AssessRequest) -> AssessResponse:
         subject_postcode=req.property.postcode,
     )
     log.debug(
-        "comparable subject exclusion subject_uarn=%s lookup_path=%s excluded_count=%s",
-        subject_uarn,
-        subject_lookup_path,
+        "comparable subject exclusion subject_uarn=%s excluded_count=%s",
+        (subject_record or {}).get("uarn"),
         len(excluded_subject_rows),
     )
     for item in excluded_subject_rows:
