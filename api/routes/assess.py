@@ -11,6 +11,7 @@ from api.db import (
     DatabaseError,
     exclude_subject_from_comparables,
     get_comparables,
+    get_subject_voa_candidates_by_address_postcode,
     get_sv_lines_batch,
     get_sv_car_parking_batch,
     get_sv_additions_batch,
@@ -63,7 +64,31 @@ async def assess(req: AssessRequest) -> AssessResponse:
     rules = csa_rules()
     target_scats = _scat_codes(btype, rules)
 
-    # 3. Query comparables from VOA database
+    # 3. Resolve the subject's real VOA UARN(s) using postcode + address
+    #    so we can exclude the customer's own property by exact identity.
+    subject_uarns: set[str] = set()
+    if req.property.uprn:
+        subject_uarns.add(str(req.property.uprn).strip())
+    if req.property.address and req.property.postcode:
+        try:
+            voa_candidates = get_subject_voa_candidates_by_address_postcode(
+                req.property.address, req.property.postcode,
+            )
+            for cand in voa_candidates:
+                if cand.get("uarn"):
+                    subject_uarns.add(str(cand["uarn"]).strip())
+            log.info(
+                "subject VOA lookup address=%r postcode=%r candidates=%d uarns=%s",
+                req.property.address, req.property.postcode,
+                len(voa_candidates), subject_uarns,
+            )
+        except DatabaseError:
+            log.warning("subject VOA lookup failed — falling back to UPRN only")
+
+    # Pick the best single UARN for the SQL-level exclusion (first resolved VOA UARN)
+    _primary_exclude_uarn = next(iter(subject_uarns), None)
+
+    # 4. Query comparables from VOA database
     if btype == "restaurant_cafe":
         _radius_m = 3000
     elif btype == "nursery":
@@ -85,7 +110,7 @@ async def assess(req: AssessRequest) -> AssessResponse:
             radius_m=_radius_m,
             nia_sqm=req.property.nia_sqm,
             size_band_pct=_size_band_pct,
-            exclude_uarn=req.property.uprn,
+            exclude_uarn=_primary_exclude_uarn,
         )
     except DatabaseError as exc:
         log.error("Database failure in /assess: %s", exc)
@@ -94,24 +119,30 @@ async def assess(req: AssessRequest) -> AssessResponse:
             detail="Database is temporarily unavailable. Please try again shortly.",
         ) from exc
 
-    subject_record = {"uarn": req.property.uprn} if req.property.uprn else None
+    # 5. Post-filter: remove any remaining subject UARNs the SQL missed
+    #    (e.g. when the VOA lookup returned multiple candidate UARNs)
+    if subject_uarns:
+        before_count = len(rows)
+        rows = [r for r in rows if str(r.get("uarn", "")).strip() not in subject_uarns]
+        excluded_count = before_count - len(rows)
+        if excluded_count:
+            log.info("post-filter excluded %d subject comp(s) by UARN set %s", excluded_count, subject_uarns)
+
+    # 6. Structured fallback for edge cases the UARN lookup missed entirely
+    subject_record = (
+        {"uarn": _primary_exclude_uarn} if _primary_exclude_uarn
+        else None
+    )
     rows, excluded_subject_rows = exclude_subject_from_comparables(
         rows,
         subject_record=subject_record,
         subject_address=req.property.address,
         subject_postcode=req.property.postcode,
     )
-    log.debug(
-        "comparable subject exclusion subject_uarn=%s excluded_count=%s",
-        (subject_record or {}).get("uarn"),
-        len(excluded_subject_rows),
-    )
-    for item in excluded_subject_rows:
-        row = item["row"]
-        log.debug(
-            "excluded comparable as subject comp_uarn=%s basis=%s",
-            row.get("uarn"),
-            item.get("basis"),
+    if excluded_subject_rows:
+        log.info(
+            "structured fallback excluded %d additional comp(s)",
+            len(excluded_subject_rows),
         )
 
     # 4. Convert DB rows → Comparable objects
