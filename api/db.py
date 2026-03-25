@@ -15,6 +15,7 @@ from __future__ import annotations
 import logging
 import math
 import os
+import re
 from typing import Any
 
 log = logging.getLogger(__name__)
@@ -382,14 +383,191 @@ def get_sv_adjustment_totals_batch(uarns: list[str]) -> dict[str, dict]:
 
 
 
-def get_subject_voa_record(uarn: str | None) -> dict[str, Any] | None:
-    """Return mapped VOA subject record for a single UARN.
 
-    Includes list-entry SCAT/description, total NIA (where available), and
-    floor-level SV areas (ground/basement) for reconciliation diagnostics.
-    Returns None when UARN is missing/invalid or not found.
-    Raises DatabaseError on query failure.
+
+def _normalise_postcode(value: str | None) -> str:
+    """Normalise postcode for deterministic equality comparison."""
+    return "".join(str(value or "").upper().split())
+
+
+def _normalise_address(value: str | None) -> str:
+    """Normalise address string for deterministic matching."""
+    text_value = str(value or "").upper()
+    cleaned = "".join(ch if ch.isalnum() or ch.isspace() else " " for ch in text_value)
+    return " ".join(cleaned.split())
+
+
+
+
+def _normalise_street(value: str | None) -> str:
+    """Normalise street text for deterministic equality checks."""
+    text_value = str(value or "").upper()
+    cleaned = "".join(ch if ch.isalnum() or ch.isspace() else " " for ch in text_value)
+    return " ".join(cleaned.split())
+
+
+def _extract_leading_clean_int(value: str | None) -> int | None:
+    """Extract a leading integer token only when it is a clean standalone number."""
+    text_value = str(value or "").strip().upper()
+    match = re.match(r"^(\d+)(?:\s|,|$)", text_value)
+    if not match:
+        return None
+    try:
+        return int(match.group(1))
+    except ValueError:
+        return None
+
+
+def _derive_user_street_and_number(address: str | None) -> tuple[str | None, int | None]:
+    """Derive user street and building number from free-text address.
+
+    Uses first comma-separated segment as primary location token, strips a
+    leading clean integer as building number where available.
     """
+    first_part = str(address or "").split(",")[0].strip()
+    number = _extract_leading_clean_int(first_part)
+    street_part = first_part
+    if number is not None:
+        street_part = re.sub(r"^\d+(?:\s|,)+", "", first_part).strip()
+    street = _normalise_street(street_part) or None
+    return street, number
+
+
+def _extract_voa_building_number(full_property_identifier: str | None) -> int | None:
+    """Extract VOA building number from simple identifiers only.
+
+    Intentionally conservative: only leading clean integer token is accepted.
+    Complex forms like 'GND & 1ST FLR 24, ...' return None in this pass.
+    """
+    return _extract_leading_clean_int(full_property_identifier)
+
+
+def _filter_structured_subject_candidates(rows: list[Any], *, user_street: str | None, user_number: int | None) -> tuple[list[Any], int, int]:
+    """Filter postcode candidates by structured street and building-number keys."""
+    street_filtered = []
+    if user_street:
+        street_filtered = [r for r in rows if _normalise_street(getattr(r, "street", None)) == user_street]
+    else:
+        street_filtered = list(rows)
+
+    number_filtered: list[Any] = []
+    if user_number is not None:
+        number_filtered = [
+            r for r in street_filtered
+            if _extract_voa_building_number(getattr(r, "full_property_identifier", None)) == user_number
+        ]
+    else:
+        number_filtered = list(street_filtered)
+
+    # Building-number filter is only authoritative when it produced matches.
+    final_rows = number_filtered if number_filtered else street_filtered
+    return final_rows, len(street_filtered), len(number_filtered)
+
+
+def _build_subject_record_from_row(row: Any, floor_rows: list[dict]) -> dict[str, Any]:
+    floor_areas = {"ground": 0.0, "basement": 0.0}
+    for item in floor_rows:
+        floor_label = str(item.get("floor") or "").lower()
+        area = float(item.get("area") or 0.0)
+        if "ground" in floor_label and "lower" not in floor_label:
+            floor_areas["ground"] += area
+        elif "lower ground" in floor_label or "basement" in floor_label:
+            floor_areas["basement"] += area
+
+    total = float(row.total_area_or_units) if row.total_area_or_units is not None else None
+    if row.unit_of_measurement and str(row.unit_of_measurement).upper() != "NIA":
+        total = None
+
+    return {
+        "uarn": str(row.uarn),
+        "scat_code": int(row.scat_code) if row.scat_code is not None else None,
+        "description": row.description,
+        "total_area_sqm": total,
+        "floor_areas": floor_areas,
+    }
+
+
+
+
+def get_subject_voa_record_by_reference(reference: str | None) -> dict[str, Any] | None:
+    """Resolve a VOA subject record from an optional bill/property reference.
+
+    Current implementation supports numeric references that map to VOA UARN.
+    Invalid/unresolvable references return None.
+    """
+    if not reference:
+        return None
+    digits = "".join(ch for ch in str(reference) if ch.isdigit())
+    if not digits:
+        return None
+    return get_subject_voa_record(digits)
+
+
+def get_subject_voa_candidates_by_address_postcode(address: str, postcode: str) -> list[dict[str, Any]]:
+    """Return structured address+postcode VOA candidates.
+
+    Matching order: postcode -> street -> building number (where cleanly available).
+    """
+    normalised_postcode = _normalise_postcode(postcode)
+    user_street, user_number = _derive_user_street_and_number(address)
+    if not normalised_postcode:
+        return []
+
+    sql = text("""
+        SELECT
+            le.uarn,
+            le.scat_code,
+            le.primary_description_text AS description,
+            le.street AS street,
+            svh.total_area_or_units AS total_area_or_units,
+            svh.unit_of_measurement AS unit_of_measurement,
+            le.full_property_identifier AS full_property_identifier
+        FROM voa_list_entries le
+        LEFT JOIN voa_sv_header svh ON le.uarn = svh.uarn
+        WHERE REPLACE(UPPER(le.postcode), ' ', '') = :postcode
+        ORDER BY le.uarn
+    """)
+    try:
+        with Session(engine) as session:
+            postcode_rows = session.execute(sql, {"postcode": normalised_postcode}).fetchall()
+
+        filtered_rows, street_count, number_count = _filter_structured_subject_candidates(
+            postcode_rows,
+            user_street=user_street,
+            user_number=user_number,
+        )
+
+        log.info(
+            "subject_lookup postcode=%s user_street=%s user_number=%s count_postcode=%s count_street=%s count_number=%s",
+            normalised_postcode,
+            user_street,
+            user_number,
+            len(postcode_rows),
+            street_count,
+            number_count,
+        )
+
+        candidates: list[dict[str, Any]] = []
+        for row in filtered_rows:
+            floor_rows = get_sv_lines_batch([str(row.uarn)]).get(str(row.uarn), [])
+            record = _build_subject_record_from_row(row, floor_rows)
+            record["street"] = _normalise_street(getattr(row, "street", None)) or None
+            record["building_number"] = _extract_voa_building_number(getattr(row, "full_property_identifier", None))
+            candidates.append(record)
+        return candidates
+    except Exception as exc:
+        log.error("get_subject_voa_candidates_by_address_postcode failed: %s", exc, exc_info=True)
+        raise DatabaseError(f"Subject candidate query failed: {exc}") from exc
+
+def get_subject_voa_record_by_address_postcode(address: str, postcode: str) -> dict[str, Any] | None:
+    """Return a VOA subject record only when address+postcode yields one exact candidate."""
+    candidates = get_subject_voa_candidates_by_address_postcode(address, postcode)
+    if len(candidates) == 1:
+        return candidates[0]
+    return None
+
+def get_subject_voa_record(uarn: str | None) -> dict[str, Any] | None:
+    """Return mapped VOA subject record for a single UARN."""
     if not uarn:
         return None
     try:
@@ -415,28 +593,8 @@ def get_subject_voa_record(uarn: str | None) -> dict[str, Any] | None:
             row = session.execute(sql, {"uarn": int_uarn}).fetchone()
         if row is None:
             return None
-
         floor_rows = get_sv_lines_batch([str(int_uarn)]).get(str(int_uarn), [])
-        floor_areas = {"ground": 0.0, "basement": 0.0}
-        for item in floor_rows:
-            floor_label = str(item.get("floor") or "").lower()
-            area = float(item.get("area") or 0.0)
-            if "ground" in floor_label and "lower" not in floor_label:
-                floor_areas["ground"] += area
-            elif "lower ground" in floor_label or "basement" in floor_label:
-                floor_areas["basement"] += area
-
-        total = float(row.total_area_or_units) if row.total_area_or_units is not None else None
-        if row.unit_of_measurement and str(row.unit_of_measurement).upper() != "NIA":
-            total = None
-
-        return {
-            "uarn": str(row.uarn),
-            "scat_code": int(row.scat_code) if row.scat_code is not None else None,
-            "description": row.description,
-            "total_area_sqm": total,
-            "floor_areas": floor_areas,
-        }
+        return _build_subject_record_from_row(row, floor_rows)
     except Exception as exc:
         log.error("get_subject_voa_record failed: %s", exc, exc_info=True)
         raise DatabaseError(f"Subject VOA record query failed: {exc}") from exc
