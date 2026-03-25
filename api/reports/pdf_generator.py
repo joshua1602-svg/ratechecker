@@ -1,6 +1,7 @@
 """PDF report generation using Jinja2 + WeasyPrint."""
 from __future__ import annotations
 
+import logging
 import os
 import re
 from pathlib import Path
@@ -248,6 +249,28 @@ def _to_title_case(value: Any) -> str:
     return re.sub(r"\s+", " ", text).title()
 
 
+_log = logging.getLogger(__name__)
+
+
+def _resolve_subject_uarns(property_address: str | None, postcode: str | None) -> set[str]:
+    """Look up the subject's VOA UARN(s) by address + postcode.
+
+    Returns an empty set on any failure so report rendering is never blocked.
+    """
+    if not property_address or not postcode:
+        return set()
+    try:
+        from api.db import get_subject_voa_candidates_by_address_postcode
+        candidates = get_subject_voa_candidates_by_address_postcode(property_address, postcode)
+        uarns = {str(c["uarn"]).strip() for c in candidates if c.get("uarn")}
+        if uarns:
+            _log.info("report subject UARN lookup: address=%r postcode=%r → %s", property_address, postcode, uarns)
+        return uarns
+    except Exception:
+        _log.warning("report subject UARN lookup failed — skipping exclusion", exc_info=True)
+        return set()
+
+
 def _derive_fields(report_data: dict) -> dict:
     """Compute derived fields and return an augmented copy."""
     data = dict(report_data)
@@ -267,6 +290,27 @@ def _derive_fields(report_data: dict) -> dict:
         data.setdefault("rv_delta", rv_delta)
         if voa_rv != 0:
             data.setdefault("rv_delta_pct", round((rv_delta / voa_rv) * 100, 1))
+
+    # ── Exclude the subject property from comparables by UARN ──
+    # This is the authoritative filter: it catches ALL report paths (direct
+    # POST from the frontend, paid download flow, etc.) regardless of whether
+    # the /assess endpoint already stripped the subject.
+    comps = data.get("comparables")
+    if comps:
+        subject_uarns = _resolve_subject_uarns(
+            data.get("property_address"), data.get("postcode"),
+        )
+        if subject_uarns:
+            before = len(comps)
+            comps = [
+                c for c in comps
+                if not (isinstance(c, dict) and str(c.get("uarn", "")).strip() in subject_uarns)
+            ]
+            removed = before - len(comps)
+            if removed:
+                _log.info("report: excluded %d subject comp(s) by UARN %s", removed, subject_uarns)
+                data["comparables"] = comps
+                data["comp_count"] = len(comps)
 
     # Per-comparable normalisation (rate_psm, layout_similarity_score defaults)
     comps = data.get("comparables")
