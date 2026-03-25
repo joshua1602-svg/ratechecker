@@ -436,12 +436,33 @@ def _derive_user_street_and_number(address: str | None) -> tuple[str | None, int
 
 
 def _extract_voa_building_number(full_property_identifier: str | None) -> int | None:
-    """Extract VOA building number from simple identifiers only.
+    """Extract VOA building number from the full property identifier.
 
-    Intentionally conservative: only leading clean integer token is accepted.
-    Complex forms like 'GND & 1ST FLR 24, ...' return None in this pass.
+    Tries the leading token first (e.g. '22, HIGH STREET' → 22).  If that
+    fails, scans subsequent comma-separated segments so that common VOA
+    formats like 'GND FLR, 22' or 'SHOP A, 22, HIGH STREET' are handled.
+    Finally, checks for a trailing standalone number in the first segment
+    to catch forms like 'GND & 1ST FLR 24, HIGH STREET'.
     """
-    return _extract_leading_clean_int(full_property_identifier)
+    leading = _extract_leading_clean_int(full_property_identifier)
+    if leading is not None:
+        return leading
+    text = str(full_property_identifier or "").strip()
+    segments = [s.strip() for s in text.split(",")]
+    # Check comma-separated segments beyond the first
+    for seg in segments[1:]:
+        num = _extract_leading_clean_int(seg)
+        if num is not None:
+            return num
+    # Trailing standalone number in the first segment
+    # e.g. 'GND & 1ST FLR 24' → 24
+    trailing = re.search(r'(?:^|\s)(\d+)\s*$', segments[0])
+    if trailing:
+        try:
+            return int(trailing.group(1))
+        except ValueError:
+            pass
+    return None
 
 
 def _structured_identity_from_subject(

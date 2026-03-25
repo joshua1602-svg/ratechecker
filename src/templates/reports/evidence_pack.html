@@ -582,7 +582,7 @@ table { page-break-inside: avoid; }
     </thead>
     <tbody>
       {% for comp in comparables[:20] %}
-      {% if comp.address | upper != property_address | upper %}
+      {% if not comp.address is subject_comp(property_address) %}
       <tr>
         <td>{{ comp.address }}</td>
         <td style="white-space:nowrap;">{{ comp.uarn }}</td>
