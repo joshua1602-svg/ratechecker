@@ -25,7 +25,6 @@ _WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
 
 @router.post("/stripe/webhook")
 async def stripe_webhook(request: Request) -> JSONResponse:
-    # ── 1. Read raw body (required for Stripe signature verification) ──
     payload = await request.body()
     sig = request.headers.get("stripe-signature", "")
     log.info(
@@ -39,7 +38,6 @@ async def stripe_webhook(request: Request) -> JSONResponse:
         log.error("STRIPE_WEBHOOK_SECRET is not configured — rejecting webhook")
         raise HTTPException(status_code=500, detail="Webhook secret not configured")
 
-    # ── 2. Verify signature ──
     try:
         event = stripe.Webhook.construct_event(payload, sig, _WEBHOOK_SECRET)
     except ValueError:
@@ -53,19 +51,19 @@ async def stripe_webhook(request: Request) -> JSONResponse:
         )
         raise HTTPException(status_code=400, detail="Invalid signature")
 
-    event_type = event.get("type", "unknown")
-    event_id = event.get("id", "")
+    event_type = event["type"]
+    event_id = event["id"]
     log.info("Webhook verified: event_id=%s event_type=%s", event_id, event_type)
 
-    # ── 3. Handle checkout.session.completed ──
     if event_type == "checkout.session.completed":
         session_obj = event["data"]["object"]
-        metadata = session_obj.get("metadata", {})
+        metadata = session_obj["metadata"] if "metadata" in session_obj else {}
         session_id = metadata.get(RATECHECKER_SESSION_METADATA_KEY)
+        stripe_session_id = session_obj["id"]
 
         log.info(
             "Webhook checkout.session.completed: stripe_session_id=%s metadata_keys=%s extracted_session_id=%s",
-            session_obj.get("id"),
+            stripe_session_id,
             sorted(metadata.keys()) if isinstance(metadata, dict) else [],
             session_id,
         )
@@ -74,7 +72,7 @@ async def stripe_webhook(request: Request) -> JSONResponse:
             log.warning(
                 "Webhook checkout.session.completed with no %s: stripe_id=%s",
                 RATECHECKER_SESSION_METADATA_KEY,
-                session_obj.get("id"),
+                stripe_session_id,
             )
             return JSONResponse(
                 {
@@ -83,22 +81,22 @@ async def stripe_webhook(request: Request) -> JSONResponse:
                 }
             )
 
-        stripe_session_id = session_obj.get("id", "")
         updated = mark_paid(session_id, stripe_session_id)
 
         if updated:
             log.info(
                 "Webhook: draft marked paid. session_id=%s stripe=%s",
-                session_id, stripe_session_id,
+                session_id,
+                stripe_session_id,
             )
         else:
             log.warning(
                 "Webhook: no matching draft for session_id=%s stripe=%s",
-                session_id, stripe_session_id,
+                session_id,
+                stripe_session_id,
             )
 
         return JSONResponse({"status": "ok", "session_id": session_id, "paid": updated})
 
-    # ── 4. Acknowledge other event types without action ──
     log.debug("Webhook: ignoring event type %s", event_type)
     return JSONResponse({"status": "ignored", "event_type": event_type})
