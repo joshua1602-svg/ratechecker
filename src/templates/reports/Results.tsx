@@ -12,27 +12,68 @@ interface ResultsProps {
   signal?: string;
 }
 
+// Four-tier verdict logic
+// Tier 1 — Undervalued:     voaRv < modelledLow
+// Tier 2 — Broadly inline:  voaRv within modelled band (±5%)
+// Tier 3 — Slightly over:   voaRv > modelledHigh, overage < 15%
+// Tier 4 — Overassessed:    voaRv > modelledHigh, overage >= 15%
+function getVerdict(
+  voaRv: number,
+  modelledLow: number,
+  modelledHigh: number
+): { heading: string; body: string; tier: "undervalued" | "inline" | "slight" | "over" } {
+  if (voaRv <= 0 || modelledHigh <= 0) {
+    return {
+      tier: "inline",
+      heading: "Your rates appear broadly in line",
+      body: "Your current rateable value appears broadly consistent with similar properties nearby on the available evidence.",
+    };
+  }
+
+  if (voaRv < modelledLow) {
+    return {
+      tier: "undervalued",
+      heading: "Your property does not appear over-assessed",
+      body: "Your current rateable value appears lower than the level indicated by comparable properties. This is unlikely to support a challenge for reduction.",
+    };
+  }
+
+  if (voaRv <= modelledHigh) {
+    return {
+      tier: "inline",
+      heading: "Your rates appear broadly in line",
+      body: "Your current rateable value appears broadly consistent with similar properties nearby on the available evidence.",
+    };
+  }
+
+  // voaRv > modelledHigh — split by degree
+  const overage = (voaRv - modelledHigh) / modelledHigh;
+
+  if (overage < 0.15) {
+    return {
+      tier: "slight",
+      heading: "Your rates may be slightly high",
+      body: "Your current rateable value appears marginally above similar properties nearby. There may be a limited case for review depending on the strength of comparable evidence.",
+    };
+  }
+
+  return {
+    tier: "over",
+    heading: "Your rates appear overassessed",
+    body: "Your current rateable value is notably above comparable properties nearby. The evidence suggests a reasonable case for challenge.",
+  };
+}
+
 export default function Results({ assessmentResult, signal }: ResultsProps) {
   const voaRv = assessmentResult?.voa_rv ?? 0;
   const modelledLow = assessmentResult?.modelled_rv_low ?? 0;
   const modelledHigh = assessmentResult?.modelled_rv_high ?? 0;
 
-  let verdictHeading: string;
-  let verdictBody: string;
-
-  if (voaRv > modelledHigh) {
-    verdictHeading = "Your property may be over-assessed";
-    verdictBody =
-      "Your current rateable value appears higher than similar properties nearby. This may support a review or challenge.";
-  } else if (voaRv < modelledLow) {
-    verdictHeading = "Your property does not appear over-assessed";
-    verdictBody =
-      "Your current rateable value appears lower than the level indicated by comparable properties. This is unlikely to support a challenge for reduction.";
-  } else {
-    verdictHeading = "Your rates appear broadly in line";
-    verdictBody =
-      "Your current rateable value appears broadly consistent with similar properties nearby on the available evidence.";
-  }
+  const { heading: verdictHeading, body: verdictBody } = getVerdict(
+    voaRv,
+    modelledLow,
+    modelledHigh
+  );
 
   return (
     <div className="results-page">
