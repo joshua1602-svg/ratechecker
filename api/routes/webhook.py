@@ -58,19 +58,18 @@ async def stripe_webhook(request: Request) -> JSONResponse:
     if event_type == "checkout.session.completed":
         session_obj = event["data"]["object"]
         
-        # Use .to_dict() to turn the Stripe object into a real Python dictionary
-        # then use .get() safely on that dictionary.
-        metadata = session_obj.to_dict().get("metadata", {})
+        # 1. Convert the whole object to a dict immediately
+        session_data = session_obj.to_dict() if hasattr(session_obj, "to_dict") else dict(session_obj)
         
-        # Now this .get() will work perfectly because metadata is a real dict
+        # 2. Extract metadata and ID from the DICT, not the StripeObject
+        metadata = session_data.get("metadata", {})
         session_id = metadata.get(RATECHECKER_SESSION_METADATA_KEY)
-        
-        stripe_session_id = session_obj.get("id")
+        stripe_session_id = session_data.get("id")
 
         log.info(
             "Webhook checkout.session.completed: stripe_session_id=%s metadata_keys=%s extracted_session_id=%s",
             stripe_session_id,
-            sorted(metadata.keys()) if isinstance(metadata, dict) else [],
+            list(metadata.keys()),
             session_id,
         )
 
