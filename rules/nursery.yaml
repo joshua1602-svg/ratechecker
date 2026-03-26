@@ -1,7 +1,7 @@
 # rules/nursery.yaml
 # Nurseries: rental comparison using NIA x £/m² (no zoning)
 
-valuation_method: nia_only
+valuation_method: nia
 
 base_valuation:
   apply_zone_a: false

@@ -1158,8 +1158,11 @@ def run_csa(
         # restaurant_cafe here so the debug field is always populated.
         _sir: float | None = None
         if voa_rv and voa_rv > 0:
-            _s_itza = itza_from_nia(nia_sqm, zone_depth)
-            _sir = round(voa_rv / _s_itza, 1) if _s_itza > 0 else None
+            if _is_restaurant:
+                _sir = round(voa_rv / nia_sqm, 1) if nia_sqm > 0 else None
+            else:
+                _s_itza = itza_from_nia(nia_sqm, zone_depth)
+                _sir = round(voa_rv / _s_itza, 1) if _s_itza > 0 else None
 
         _debug = {
             "n_initial_comps": len(comps),
@@ -1270,8 +1273,7 @@ def run_csa(
     _rate_distance_to_subject: float | None = None
 
     if _is_restaurant:
-        _s_itza = itza_from_nia(nia_sqm, zone_depth)
-        _restaurant_implied_rate = (voa_rv / _s_itza) if (voa_rv and voa_rv > 0 and _s_itza > 0) else None
+        _restaurant_implied_rate = (voa_rv / nia_sqm) if (voa_rv and voa_rv > 0 and nia_sqm > 0) else None
 
         if _restaurant_implied_rate is None:
             # No voa_rv supplied — skip rate-distance gate and proceed on market
@@ -1368,19 +1370,19 @@ def run_csa(
     # --- Estimated RV ---
     # The reconstruction basis must match the rate basis used by the comparables.
     #
-    # Retail / restaurant_cafe: VOA values these on ITZA (In Terms of Zone A).
+    # Retail: standard high-street units are reconstructed on ITZA.
     #   svh.total_area_or_units for these properties is ITZA, and
     #   unadjusted_price_psm is the Zone A rate (£/m² Zone A).
     #   Tier 2 (rv / nia_sqm where nia_sqm=ITZA) also yields the Zone A rate.
     #   → Correct reconstruction: Zone A rate × subject ITZA
     #
-    # Nursery: VOA values on NIA only (no zoning).
+    # Nursery + restaurant_cafe: reconstructed on NIA.
     #   unadjusted_price_psm is an NIA rate; total_area_or_units is NIA.
     #   → Correct reconstruction: NIA rate × subject NIA
     #
     # Using NIA reconstruction for retail produces a ~1.75× uplift because
     # NIA / ITZA ≈ 1.75 for a typical rectangular shop (1:3 aspect ratio).
-    if _is_nursery:
+    if _is_nursery or _is_restaurant:
         estimated_rv = round(tone * nia_sqm / 100) * 100
         subject_basis = nia_sqm
         basis_label = "NIA"
@@ -1390,7 +1392,7 @@ def run_csa(
         subject_basis = nia_sqm
         basis_label = "NIA"
     else:
-        # Standard high-street retail and restaurant_cafe: tone is a Zone A rate.
+        # Standard high-street retail: tone is a Zone A rate.
         itza = itza_from_nia(nia_sqm, zone_depth)
         estimated_rv = round(tone * itza / 100) * 100
         subject_basis = itza
