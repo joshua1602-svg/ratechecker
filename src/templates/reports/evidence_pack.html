@@ -616,18 +616,24 @@ table { page-break-inside: avoid; }
   <table class="facts-table">
     <tr><td class="label-cell">Current VOA Rateable Value</td><td class="value-cell">&pound;{{ voa_rv | format_currency }}</td></tr>
     <tr><td class="label-cell">Modelled Rateable Value</td><td class="value-cell">&pound;{{ modelled_rv | format_currency }}</td></tr>
-    <tr><td class="label-cell">Valuation Basis</td><td class="value-cell">{{ valuation_basis }} ({{ valuation_method | replace('_', ' ') | title }})</td></tr>
-    <tr><td class="label-cell">Subject Area ({{ valuation_basis }})</td><td class="value-cell">{{ valuation_basis_sqm }} sqm</td></tr>
-    <tr><td class="label-cell">Derived Tone / Rate</td><td class="value-cell">&pound;{{ final_tone_psm }}/m&sup2; {{ valuation_basis }} ({{ tone_basis }})</td></tr>
-    {% if geometry_assumed and valuation_method == 'zoning' %}
+    {% if valuation_method == 'itza' %}
+    <tr><td class="label-cell">Valuation Basis</td><td class="value-cell">{{ valuation_basis }}</td></tr>
+    <tr><td class="label-cell">Subject Area (ITZA)</td><td class="value-cell">{{ valuation_basis_sqm }} sqm</td></tr>
+    <tr><td class="label-cell">Derived Tone / Rate</td><td class="value-cell">&pound;{{ final_tone_psm }}/m&sup2; ITZA ({{ tone_basis }})</td></tr>
+    {% if geometry_assumed %}
     <tr><td class="label-cell">Geometry</td><td class="value-cell">Assumed 1:3 width-to-depth aspect ratio (measured frontage/depth not provided)</td></tr>
-    {% elif valuation_method == 'zoning' %}
+    {% else %}
     <tr><td class="label-cell">Geometry</td><td class="value-cell">Based on provided frontage and depth measurements</td></tr>
+    {% endif %}
+    {% else %}
+    <tr><td class="label-cell">Valuation Basis</td><td class="value-cell">{{ valuation_basis }}</td></tr>
+    <tr><td class="label-cell">Subject Area (NIA)</td><td class="value-cell">{{ valuation_basis_sqm }} sqm</td></tr>
+    <tr><td class="label-cell">Derived Tone / Rate</td><td class="value-cell">&pound;{{ final_tone_psm }}/m&sup2; NIA ({{ tone_basis }})</td></tr>
     {% endif %}
   </table>
 
-  <!-- ── Zoning schedule: retail / hair_beauty / restaurant_cafe ── -->
-  {% if valuation_method == 'zoning' and zoning_rows %}
+  <!-- ── ITZA zoning schedule ── -->
+  {% if valuation_method == 'itza' and zoning_rows %}
   <h2>Zoning Schedule</h2>
   <table class="calc-table">
     <thead>
@@ -656,9 +662,12 @@ table { page-break-inside: avoid; }
   {% endif %}
 
   <!-- ── NIA calculation: nursery ── -->
-  {% if valuation_method == 'nia_only' %}
+  {% if valuation_method == 'nia' %}
   <h2>NIA-Based Calculation</h2>
-  <p>{{ nia_sqm }} sqm &times; &pound;{{ final_tone_psm }}/m&sup2; = &pound;{{ subtotal_pre | format_currency }}</p>
+  <p>Modelled RV derived from adopted &pound;/sqm tone applied to subject net internal area.</p>
+  {% if subtotal_pre is not none %}
+  <p>{{ valuation_basis_sqm }} sqm &times; &pound;{{ final_tone_psm }}/m&sup2; = &pound;{{ subtotal_pre | format_currency }}</p>
+  {% endif %}
   {% endif %}
 
   <!-- ── Pre-allowances subtotal (all types) ── -->
@@ -674,7 +683,7 @@ table { page-break-inside: avoid; }
   {% endif %}
 
   <!-- ── Adjustment detail (nursery) ── -->
-  {% if valuation_method == 'nia_only' and nursery_adjustments %}
+  {% if valuation_method == 'nia' and nursery_adjustments %}
   <h2>Adjustments Applied</h2>
   <table class="calc-table">
     <thead>
@@ -752,20 +761,16 @@ table { page-break-inside: avoid; }
 
   <h2>Assessment of Tone and Rateable Value</h2>
   <p>
-    The assessment of rateable value is derived from analysis of comparable rental tones, expressed as £/m², having regard to the tone of the list.
-    In determining the appropriate tone, reliance is placed on the central body of consistent evidence, with a weighted approach applied to reflect the relative evidential strength of each comparable.
-    Weighting reflects proximity, alignment of floor area, and quality of evidence, with greater reliance placed on directly evidenced VOA assessments.
-    The adopted tone is applied to the subject property's net internal area to form an opinion of rateable value.
+    The rateable value has been assessed by reference to comparable evidence, having regard to the tone of the list for the relevant property type.
+    For properties typically valued on a floor area basis, tone is expressed as £/sqm and applied to the subject’s net internal area.
+    For property types where zoning is the prevailing valuation approach, tone is derived on an ITZA basis and applied accordingly.
+    In each case, the adopted tone reflects the central body of consistent evidence, with weighting applied to reflect proximity, size alignment, and evidential strength.
   </p>
 
   <h2>Physical Characteristics and Layout</h2>
   <p>
-    Consideration is given to the physical configuration of the subject property and its comparability to available evidence.
-    The subject property is assessed in terms of the proportion of trading space relative to ancillary/storage accommodation, together with overall floor configuration, including the presence of basement or upper floor areas.
-    Where comparable properties include equivalent VOA survey detail, their internal configuration has been reviewed against that of the subject property, with greater reliance placed on hereditaments demonstrating a higher degree of functional and structural similarity.
-    {% if business_type == 'restaurant_cafe' %}
-    For restaurant and café hereditaments, specific regard is given to the positioning of the kitchen, with ground floor kitchen arrangements typically providing stronger comparability due to their impact on trading efficiency and value.
-    {% endif %}
+    Consideration is given to the physical configuration of the subject property and its comparability to available evidence. This includes trading/ancillary balance, floor configuration, and operational layout.
+    These factors are reflected through the weighting of comparable evidence rather than through explicit subject-level adjustments, unless expressly stated.
   </p>
 
   <h2>Data Source and Valuation Basis</h2>

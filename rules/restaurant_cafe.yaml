@@ -1,7 +1,7 @@
 # rules/restaurant_cafe.yaml
-# Restaurants, cafés, takeaways (retail-method with zoning)
+# Restaurants, cafés, takeaways (NIA tone method; no subject-level zoning)
 
-valuation_method: zoning
+valuation_method: nia
 
 zoning:
   zone_depth_m: 6.1
@@ -19,7 +19,7 @@ area_weights:
   wcs: 0.20
   basement_storage: 0.15
 
-allowances:
+adjustments:
   outdoor_seating:
     trigger: outdoor_seating == true
     adjustment: +0.05

@@ -211,8 +211,8 @@ class EvidenceReportRequest(SimplifiedReportRequest):
     confidence: str
     recommendation_text: str
     # Valuation detail (dynamic, business-type-aware)
-    valuation_method: str = "zoning"
-    valuation_basis: str = "ITZA"
+    valuation_method: str = "itza"
+    valuation_basis: str = "ITZA (Zoning)"
     valuation_basis_sqm: Optional[float] = None
     geometry_assumed: bool = False
     zoning_rows: list[dict] = Field(default_factory=list)

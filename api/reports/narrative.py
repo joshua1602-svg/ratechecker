@@ -245,7 +245,7 @@ def build_narrative_signals(case_result: dict) -> NarrativeSignals:
     valuation_basis = str(case_result.get("valuation_basis") or "").upper()
     valuation_basis_sqm = float(case_result.get("valuation_basis_sqm") or 0.0)
     subject_nia = float(case_result.get("nia_sqm") or 0.0)
-    if valuation_basis == "ITZA" and valuation_basis_sqm > 0:
+    if valuation_basis.startswith("ITZA") and valuation_basis_sqm > 0:
         subject_area_basis = valuation_basis_sqm
     else:
         subject_area_basis = subject_nia

@@ -275,6 +275,15 @@ def _derive_fields(report_data: dict) -> dict:
     """Compute derived fields and return an augmented copy."""
     data = dict(report_data)
     data.setdefault("business_type_title", _to_title_case(data.get("business_type")))
+    method_raw = str(data.get("valuation_method") or "").strip().lower()
+    if method_raw in {"nia", "nia_only"}:
+        data["valuation_method"] = "nia"
+    elif method_raw in {"itza", "zoning"}:
+        data["valuation_method"] = "itza"
+    if data.get("valuation_method") == "nia":
+        data.setdefault("valuation_basis", "Comparable Tone (£/sqm NIA)")
+    elif data.get("valuation_method") == "itza":
+        data.setdefault("valuation_basis", "ITZA (Zoning)")
 
     voa_rv = data.get("voa_rv")
     nia_sqm = data.get("nia_sqm")

@@ -37,8 +37,8 @@ def _base_report_data() -> dict:
         "tone_basis": "median",
         "confidence": "high",
         "recommendation_text": "Strong case for appeal.",
-        "valuation_method": "zoning",
-        "valuation_basis": "ITZA",
+        "valuation_method": "nia",
+        "valuation_basis": "Comparable Tone (£/sqm NIA)",
         "zoning_rows": [
             {"zone": "A", "depth": 6.1, "area": 30.5, "rate": 250, "value": 7625},
             {"zone": "B", "depth": 6.1, "area": 30.5, "rate": 125, "value": 3812},
@@ -129,6 +129,8 @@ class TestBusinessTypeBranching:
     def test_retail_with_zoning_rows(self):
         data = _base_report_data()
         data["business_type"] = "retail"
+        data["valuation_method"] = "itza"
+        data["valuation_basis"] = "ITZA (Zoning)"
         data["zoning_rows"] = [
             {"zone": "A", "depth": 6.1, "area": 40, "rate": 300, "value": 12000},
         ]
@@ -140,6 +142,8 @@ class TestBusinessTypeBranching:
     def test_nursery_with_adjustments(self):
         data = _base_report_data()
         data["business_type"] = "nursery"
+        data["valuation_method"] = "nia"
+        data["valuation_basis"] = "Comparable Tone (£/sqm NIA)"
         data["zoning_rows"] = []
         data["nursery_adjustments"] = [
             {"name": "Purpose-built", "factor": 1.05, "notes": "Modern facility"},
@@ -151,6 +155,8 @@ class TestBusinessTypeBranching:
     def test_nursery_missing_adjustments_no_longer_required(self):
         data = _base_report_data()
         data["business_type"] = "nursery"
+        data["valuation_method"] = "nia"
+        data["valuation_basis"] = "Comparable Tone (£/sqm NIA)"
         data["zoning_rows"] = []
         data["nursery_adjustments"] = None
         result = generate_evidence_pack(data)
@@ -160,6 +166,8 @@ class TestBusinessTypeBranching:
     def test_retail_missing_zoning_rows_no_longer_required(self):
         data = _base_report_data()
         data["business_type"] = "retail"
+        data["valuation_method"] = "itza"
+        data["valuation_basis"] = "ITZA (Zoning)"
         data["zoning_rows"] = None
         data["nursery_adjustments"] = None
         result = generate_evidence_pack(data)
@@ -217,6 +225,34 @@ class TestPdfTemplateRendering:
             "evidence_pack.html",
         ).render(**data)
         assert ">Floor Config<" not in html
+
+    def test_restaurant_nia_block_has_no_itza_language(self):
+        data = pdf_generator._derive_fields(_base_report_data())
+        html = pdf_generator._load_template(
+            pdf_generator._get_env(),
+            "evidence_pack.html",
+        ).render(**data)
+        assert "Comparable Tone (" in html
+        assert "NIA)" in html
+        assert "Subject Area (NIA)" in html
+        assert "Zoning Schedule" not in html
+        assert "Assumed 1:3 width-to-depth aspect ratio" not in html
+        assert "Zone A" not in html
+
+    def test_retail_itza_block_still_renders(self):
+        data = _base_report_data()
+        data["business_type"] = "retail"
+        data["valuation_method"] = "itza"
+        data["valuation_basis"] = "ITZA (Zoning)"
+        data["zoning_rows"] = [{"zone": "Zone A", "depth_m": 6.1, "area_sqm": 40.0, "relativity": 1.0, "tone": 300.0, "value": 12000.0}]
+        data["geometry_assumed"] = True
+        html = pdf_generator._load_template(
+            pdf_generator._get_env(),
+            "evidence_pack.html",
+        ).render(**pdf_generator._derive_fields(data))
+        assert "Zoning Schedule" in html
+        assert "Subject Area (ITZA)" in html
+        assert "Assumed 1:3 width-to-depth aspect ratio" in html
 
 
 class TestVoaReconciliationRendering:

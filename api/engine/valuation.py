@@ -15,6 +15,14 @@ from api.engine.rules import business_rules, rule_file_name
 from api.models import AreasInput, FlagsInput, NurseryInput, PropertyInput
 
 
+def _resolve_valuation_method(rules: dict) -> str:
+    """Normalize rule-file method labels to the report contract values."""
+    raw = str(rules.get("valuation_method") or "").strip().lower()
+    if raw in {"nia", "nia_only"}:
+        return "nia"
+    return "itza"
+
+
 def calculate_rv(
     property: PropertyInput,
     tone_rate: float,
@@ -33,8 +41,16 @@ def calculate_rv(
     rules = business_rules(btype)
     flags = flags or FlagsInput(consent_disclaimer=True)
 
-    if rules.get("valuation_method") == "nia_only":
-        return _nursery_rv(property, tone_rate, nursery or NurseryInput(), flags, rules)
+    if _resolve_valuation_method(rules) == "nia":
+        return _nia_rv(
+            property=property,
+            tone_rate=tone_rate,
+            areas=areas,
+            nursery=nursery or NurseryInput(),
+            flags=flags,
+            rules=rules,
+            business_type=btype,
+        )
     return _zoning_rv(property, tone_rate, areas, flags, rules)
 
 
@@ -78,7 +94,7 @@ def _zoning_rv(
     rv = round(adjusted_rv / 100) * 100
 
     return {
-        "method": "zoning",
+        "method": "itza",
         "itza": round(itza, 2),
         "tone_rate": tone_rate,
         "base_rv": round(base_rv, 2),
@@ -90,15 +106,17 @@ def _zoning_rv(
 
 
 # ---------------------------------------------------------------------------
-# NIA-only method (nurseries)
+# NIA method (e.g. nursery / restaurant_cafe)
 # ---------------------------------------------------------------------------
 
-def _nursery_rv(
+def _nia_rv(
     property: PropertyInput,
     tone_rate: float,
+    areas: Optional[AreasInput],
     nursery: NurseryInput,
     flags: FlagsInput,
     rules: dict,
+    business_type: str,
 ) -> dict:
     adj_multiplier = 1.0
     adjustments: list[dict] = []
@@ -106,7 +124,11 @@ def _nursery_rv(
     for name, rule in rules.get("adjustments", {}).items():
         trigger = rule.get("trigger", "")
         adj = float(rule.get("adjustment", 0))
-        if _eval_nursery_trigger(trigger, nursery, flags):
+        if business_type == "nursery":
+            triggered = _eval_nursery_trigger(trigger, nursery, flags)
+        else:
+            triggered = _eval_trigger(trigger, property, areas, flags)
+        if triggered:
             adj_multiplier *= (1.0 + adj)
             adjustments.append({"name": name, "pct": round(adj * 100, 1)})
 
@@ -114,7 +136,7 @@ def _nursery_rv(
     rv = round(base_rv * adj_multiplier / 100) * 100
 
     return {
-        "method": "nia_only",
+        "method": "nia",
         "nia": property.nia_sqm,
         "tone_rate": tone_rate,
         "base_rv": round(base_rv, 2),
@@ -284,17 +306,18 @@ def apply_adjustments(
     _areas = areas or AreasInput()
     _nursery = nursery or NurseryInput()
 
-    # Nurseries declare adjustments under "adjustments"; all zoning segments
+    # NIA-method segments declare adjustments under "adjustments"; ITZA segments
     # use "allowances".  The trigger evaluators differ accordingly.
-    is_nursery = rules.get("valuation_method") == "nia_only"
-    rule_section = rules.get("adjustments" if is_nursery else "allowances", {})
+    is_nia = _resolve_valuation_method(rules) == "nia"
+    is_nursery = business_type == "nursery"
+    rule_section = rules.get("adjustments" if is_nia else "allowances", {})
 
     adj_multiplier = 1.0
     applied: list[dict] = []
 
     for name, rule in rule_section.items():
         adj = float(rule.get("adjustment", 0))
-        if is_nursery:
+        if is_nia and is_nursery:
             triggered = _eval_nursery_trigger(rule.get("trigger", ""), _nursery, _flags)
         else:
             triggered = _eval_trigger(rule.get("trigger", ""), property, _areas, _flags)
@@ -351,7 +374,7 @@ def build_valuation_detail(
     """Build the valuation calculation detail for the evidence pack.
 
     Reconstructs the per-zone breakdown (for zoning types) or NIA calculation
-    (for nurseries) using the same maths the engine applied, so the evidence
+    (for nia-method sectors) using the same maths the engine applied, so the evidence
     pack can display truthful intermediate steps.
 
     Parameters
@@ -359,7 +382,7 @@ def build_valuation_detail(
     property : PropertyInput
         Subject property (NIA, optional frontage/depth).
     tone_rate : float
-        Derived market tone (£/m²) — ITZA basis for retail/restaurant, NIA for nursery.
+        Derived market tone (£/m²) on the basis used by the sector method.
     adjusted_rv : int
         Final modelled RV after adjustments.
     adjustments_applied : list[dict]
@@ -372,9 +395,9 @@ def build_valuation_detail(
     Returns a dict with keys needed by the evidence pack template.
     """
     rules = business_rules(business_type)
-    method = rules.get("valuation_method", "zoning")
+    method = _resolve_valuation_method(rules)
 
-    if method == "nia_only":
+    if method == "nia":
         return _build_nia_detail(
             property, tone_rate, adjusted_rv,
             adjustments_applied, adjustment_factor, rules,
@@ -453,8 +476,8 @@ def _build_zoning_detail(
         allowances_summary = "No allowances applied — base RV unchanged."
 
     return {
-        "valuation_method": "zoning",
-        "valuation_basis": "ITZA",
+        "valuation_method": "itza",
+        "valuation_basis": "ITZA (Zoning)",
         "valuation_basis_sqm": round(itza_total, 2),
         "geometry_assumed": geometry_assumed,
         "zoning_rows": zoning_rows,
@@ -495,8 +518,8 @@ def _build_nia_detail(
         allowances_summary = "No adjustments applied — base RV unchanged."
 
     return {
-        "valuation_method": "nia_only",
-        "valuation_basis": "NIA",
+        "valuation_method": "nia",
+        "valuation_basis": "Comparable Tone (£/sqm NIA)",
         "valuation_basis_sqm": round(nia, 2),
         "geometry_assumed": False,
         "zoning_rows": [],

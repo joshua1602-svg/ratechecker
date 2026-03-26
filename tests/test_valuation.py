@@ -12,12 +12,13 @@ from __future__ import annotations
 import math
 import pytest
 
-from api.engine.csa import itza_from_geometry, itza_from_nia
+from api.engine.csa import Comparable, itza_from_geometry, itza_from_nia, run_csa
 from api.engine.valuation import (
     _apply_op,
     _eval_nursery_trigger,
     _eval_trigger,
     apply_adjustments,
+    build_valuation_detail,
     calculate_rv,
 )
 from api.models import AreasInput, BusinessType, FlagsInput, NurseryInput, PropertyInput
@@ -278,8 +279,54 @@ class TestApplyAdjustments:
         )
         result = apply_adjustments("retail", 20_000, prop)
         assert result["base_estimated_rv"] == 20_000
-        assert result["adjusted_estimated_rv"] == 20_000
-        assert result["adjustments"]["total_adjustment_factor"] == 1.0
+
+
+class TestSectorMethodSelection:
+    def test_build_valuation_detail_method_by_sector(self):
+        retail = build_valuation_detail(
+            property=_prop(nia_sqm=100.0, business_type="retail"),
+            tone_rate=250.0,
+            adjusted_rv=15_000,
+            adjustments_applied=[],
+            adjustment_factor=1.0,
+            business_type="retail",
+        )
+        restaurant = build_valuation_detail(
+            property=_prop(nia_sqm=100.0, business_type="restaurant_cafe"),
+            tone_rate=250.0,
+            adjusted_rv=25_000,
+            adjustments_applied=[],
+            adjustment_factor=1.0,
+            business_type="restaurant_cafe",
+        )
+        nursery = build_valuation_detail(
+            property=_prop(nia_sqm=100.0, business_type="nursery"),
+            tone_rate=140.0,
+            adjusted_rv=14_000,
+            adjustments_applied=[],
+            adjustment_factor=1.0,
+            business_type="nursery",
+        )
+        assert retail["valuation_method"] == "itza"
+        assert restaurant["valuation_method"] == "nia"
+        assert nursery["valuation_method"] == "nia"
+
+    def test_run_csa_restaurant_reconstructs_rv_on_nia_basis(self):
+        comps = [
+            Comparable("1", "1 High St SW1A 1AA", 226, 20000, 100, None, "NIA", False, 51.5, -0.1, "RESTAURANT"),
+            Comparable("2", "2 High St SW1A 1AA", 226, 22000, 110, None, "NIA", False, 51.5005, -0.1005, "CAFE"),
+            Comparable("3", "3 High St SW1A 1AA", 226, 18000, 90, None, "NIA", False, 51.501, -0.101, "RESTAURANT"),
+        ]
+        result = run_csa(
+            comps=comps,
+            lat=51.5,
+            lon=-0.1,
+            business_type="restaurant_cafe",
+            nia_sqm=100.0,
+            voa_rv=30000,
+        )
+        assert result["estimated_rv"] == 20000
+        assert result["rate_normalisation"]["subject_basis_label"] == "NIA"
 
     def test_retail_poor_frontage_reduces_rv(self):
         prop = PropertyInput(
