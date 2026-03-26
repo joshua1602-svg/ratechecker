@@ -57,8 +57,9 @@ async def stripe_webhook(request: Request) -> JSONResponse:
 
     if event_type == "checkout.session.completed":
         session_obj = event["data"]["object"]
-        metadata = session_obj["metadata"] if "metadata" in session_obj else {}
-        session_id = dict(metadata).get(RATECHECKER_SESSION_METADATA_KEY)
+        raw_metadata = session_obj.get("metadata") or {}
+        metadata_dict = raw_metadata if isinstance(raw_metadata, dict) else dict(raw_metadata.items())
+        session_id = metadata_dict.get(RATECHECKER_SESSION_METADATA_KEY)
         stripe_session_id = session_obj["id"]
 
         log.info(
