@@ -24,6 +24,7 @@ from api.engine.fit_layer import apply_fit_layer
 from api.engine.layout_overweight import LayoutInput, apply_layout_overweighting
 from api.engine.rules import csa_rules
 from api.engine.valuation import apply_adjustments
+from api.location_signals import get_location_signals
 from api.models import (
     AdjustmentBreakdown,
     AdjustmentItem,
@@ -249,6 +250,12 @@ async def assess(req: AssessRequest) -> AssessResponse:
             total_adjustment_factor=adj["adjustments"]["total_adjustment_factor"],
         )
 
+    location_signals = get_location_signals(
+        postcode=req.property.postcode,
+        latitude=lat,
+        longitude=lon,
+    )
+
     return AssessResponse(
         signal=result["signal"],
         explanation=result["explanation"],
@@ -260,4 +267,5 @@ async def assess(req: AssessRequest) -> AssessResponse:
         adjustments=adj_breakdown,
         adjustment_summary=adj_summary,
         rated_comps=_comps_for_response,
+        location_signals=location_signals,
     )

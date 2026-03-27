@@ -106,6 +106,7 @@ class AssessResponse(BaseModel):
     adjustments: Optional[AdjustmentBreakdown] = None
     adjustment_summary: Optional[str] = None
     rated_comps: list[dict] = Field(default_factory=list)
+    location_signals: Optional[dict] = None
 
 
 class PurchaseFormData(BaseModel):
@@ -231,6 +232,9 @@ class EvidenceReportRequest(SimplifiedReportRequest):
     case_assessment: Optional[str] = None
     recommended_action: Optional[str] = None
     narrative_signals: Optional[dict] = None
+    location_signals: Optional[dict] = None
+    crime_adjustment_indicator: Optional[str] = None
+    flood_adjustment_indicator: Optional[str] = None
 
 
 class PurchaseResponse(BaseModel):
@@ -645,6 +649,24 @@ def build_evidence_payload_from_assess(
         payload["cramped_flag"] = request.flags.cramped_flag
         if request.flags.fitout_year:
             payload["fitout_year"] = request.flags.fitout_year
+
+    location_signals = assess_response.location_signals or {}
+    crime_level = str((location_signals.get("crime") or {}).get("signal_level") or "N/A")
+    flood_level = str((location_signals.get("flood") or {}).get("signal_level") or "N/A")
+
+    payload["location_signals"] = location_signals or {
+        "crime": {"signal_level": "N/A", "included_in_report": False, "narrative": "N/A"},
+        "flood": {"signal_level": "N/A", "included_in_report": False, "narrative": "N/A"},
+    }
+    payload["crime_adjustment_indicator"] = {
+        "low": "Low",
+        "moderate": "Moderate",
+        "elevated": "Elevated",
+    }.get(crime_level.lower(), "N/A")
+    payload["flood_adjustment_indicator"] = {
+        "active": "Active",
+        "none": "None",
+    }.get(flood_level.lower(), "N/A")
 
     payload.update(build_rendered_narrative(payload))
 

@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from api.db import count_voa_rows, ensure_runtime_indexes
 from api.pending_reports import ensure_table as ensure_pending_reports_table
+from api.location_signals import ensure_location_signal_cache_table
 
 log = logging.getLogger(__name__)
 
@@ -82,6 +83,10 @@ def startup() -> None:
         ensure_pending_reports_table()
     except Exception:
         log.warning("Could not create pending_reports table — paid flow will fail")
+    try:
+        ensure_location_signal_cache_table()
+    except Exception:
+        log.warning("Could not create location_signal_cache table — location signals cache disabled")
 
 
 @app.get("/health", tags=["ops"])

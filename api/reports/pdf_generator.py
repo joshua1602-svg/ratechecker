@@ -349,6 +349,14 @@ def _derive_fields(report_data: dict) -> dict:
     reconciliation = data.get("voa_reconciliation") or {}
     data.setdefault("voa_record_match", _format_reconciliation_status(reconciliation.get("overall_status")))
     data.setdefault("voa_reconciliation_no_rows", _build_reconciliation_detail_rows(reconciliation))
+    loc = data.get("location_signals") or {}
+    crime = loc.get("crime") or {}
+    flood = loc.get("flood") or {}
+    crime_level = str(crime.get("signal_level") or "N/A").lower()
+    flood_level = str(flood.get("signal_level") or "N/A").lower()
+    data.setdefault("crime_adjustment_indicator", {"low": "Low", "moderate": "Moderate", "elevated": "Elevated"}.get(crime_level, "N/A"))
+    data.setdefault("flood_adjustment_indicator", {"active": "Active", "none": "None"}.get(flood_level, "N/A"))
+
     if not data.get("evidence_interpretation") or not data.get("case_assessment") or not data.get("recommended_action"):
         data.update(build_rendered_narrative(data))
 

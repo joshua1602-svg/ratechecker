@@ -685,6 +685,16 @@ table { page-break-inside: avoid; }
   </div>
   {% endif %}
 
+  <h2>Allowances / Adjustments — Directional Public Signals</h2>
+  <table class="facts-table">
+    <tr><td class="label-cell">Crime signal</td><td class="value-cell">{{ crime_adjustment_indicator | default('N/A') }}</td></tr>
+    <tr><td class="label-cell">Flood signal</td><td class="value-cell">{{ flood_adjustment_indicator | default('N/A') }}</td></tr>
+  </table>
+  <p style="font-size:8pt; color:#7A8A9A; margin-top:4px;">
+    These public-signal indicators are directional evidence only. They may support further review where operational impact is evidenced,
+    but do not of themselves justify allowances or alter the modelled RV.
+  </p>
+
   <!-- ── Adjustment detail (nursery) ── -->
   {% if valuation_method == 'nia' and nursery_adjustments %}
   <h2>Adjustments Applied</h2>
