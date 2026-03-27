@@ -218,6 +218,19 @@ class TestPdfTemplateRendering:
         assert "Comparable evidence is set out on page" in html
         assert "Submission-Ready Narrative" in html
 
+
+    def test_evidence_pack_renders_location_signal_indicators(self):
+        data = pdf_generator._derive_fields(_base_report_data())
+        data["crime_adjustment_indicator"] = "Moderate"
+        data["flood_adjustment_indicator"] = "Active"
+        html = pdf_generator._load_template(
+            pdf_generator._get_env(),
+            "evidence_pack.html",
+        ).render(**data)
+        assert "Directional Public Signals" in html
+        assert "Moderate" in html
+        assert "Active" in html
+
     def test_evidence_pack_does_not_render_floor_config_comps_column(self):
         data = pdf_generator._derive_fields(_base_report_data())
         html = pdf_generator._load_template(
