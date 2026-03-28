@@ -622,7 +622,7 @@ table { page-break-inside: avoid; }
     {% if valuation_method == 'itza' %}
     <tr><td class="label-cell">Valuation Basis</td><td class="value-cell">{{ valuation_basis }}</td></tr>
     <tr><td class="label-cell">Subject Area (ITZA)</td><td class="value-cell">{{ valuation_basis_sqm }} sqm</td></tr>
-    <tr><td class="label-cell">Derived Tone / Rate</td><td class="value-cell">&pound;{{ final_tone_psm }}/m&sup2; ITZA ({{ tone_basis }})</td></tr>
+    <tr><td class="label-cell">Derived Tone / Rate</td><td class="value-cell">&pound;{{ '%.2f'|format(final_tone_psm|float) }}/m&sup2; ITZA ({{ tone_basis }})</td></tr>
     {% if geometry_assumed %}
     <tr><td class="label-cell">Geometry</td><td class="value-cell">Assumed 1:3 width-to-depth aspect ratio (measured frontage/depth not provided)</td></tr>
     {% else %}
@@ -631,7 +631,7 @@ table { page-break-inside: avoid; }
     {% else %}
     <tr><td class="label-cell">Valuation Basis</td><td class="value-cell">{{ valuation_basis }}</td></tr>
     <tr><td class="label-cell">Subject Area (NIA)</td><td class="value-cell">{{ valuation_basis_sqm }} sqm</td></tr>
-    <tr><td class="label-cell">Derived Tone / Rate</td><td class="value-cell">&pound;{{ final_tone_psm }}/m&sup2; NIA ({{ tone_basis }})</td></tr>
+    <tr><td class="label-cell">Derived Tone / Rate</td><td class="value-cell">&pound;{{ '%.2f'|format(final_tone_psm|float) }}/m&sup2; NIA ({{ tone_basis }})</td></tr>
     {% endif %}
   </table>
 
@@ -669,7 +669,7 @@ table { page-break-inside: avoid; }
   <h2>NIA-Based Calculation</h2>
   <p>Modelled RV derived from adopted &pound;/sqm tone applied to subject net internal area.</p>
   {% if subtotal_pre is not none %}
-  <p>{{ valuation_basis_sqm }} sqm &times; &pound;{{ final_tone_psm }}/m&sup2; = &pound;{{ subtotal_pre | format_currency }}</p>
+  <p>{{ valuation_basis_sqm }} sqm &times; &pound;{{ '%.2f'|format(final_tone_psm|float) }}/m&sup2; = &pound;{{ subtotal_pre | format_currency }}</p>
   {% endif %}
   {% endif %}
 
@@ -845,9 +845,7 @@ table { page-break-inside: avoid; }
   <h1>Submission-Ready Narrative</h1>
 
   <div class="callout">
-    <pre class="narrative-pre">{{ submission_narrative }}
-
-Comparable evidence is set out on page 4 of this document.</pre>
+    <pre class="narrative-pre">{{ submission_narrative }}</pre>
   </div>
 </div>
 

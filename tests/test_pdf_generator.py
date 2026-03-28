@@ -215,7 +215,8 @@ class TestPdfTemplateRendering:
         ).render(**data)
 
         assert "Restaurant_cafe" in html
-        assert "Comparable evidence is set out on page" in html
+        assert "Comparable evidence is set out on page" not in html
+        assert "222.22" in html
         assert "Submission-Ready Narrative" in html
 
 
