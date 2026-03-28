@@ -271,6 +271,53 @@ def _resolve_subject_uarns(property_address: str | None, postcode: str | None) -
         return set()
 
 
+def _resolve_subject_cover_uarn(
+    *,
+    property_address: str | None,
+    postcode: str | None,
+    business_type: str | None,
+    nia_sqm: float | None,
+    floor_config: str | None,
+    basement_sqm: float | None,
+) -> str | None:
+    """Resolve a canonical subject UARN for cover-page display.
+
+    This follows the same disambiguation methodology as VOA subject matching.
+    """
+    if not property_address or not postcode:
+        return None
+    try:
+        from api.db import get_subject_voa_candidates_by_address_postcode
+        from api.models import _resolve_subject_candidate
+
+        candidates = get_subject_voa_candidates_by_address_postcode(property_address, postcode)
+        if not candidates:
+            return None
+
+        user_basement = bool((basement_sqm or 0) > 0)
+        if floor_config in {"ground_lower_ground", "ground_lower_ground_first", "ground_and_basement", "ground_basement_first"}:
+            user_basement = True
+        user_ground = True if floor_config is not None else None
+
+        resolved, signal = _resolve_subject_candidate(
+            candidates=candidates,
+            business_type=str(business_type or "").strip().lower(),
+            user_ground=user_ground,
+            user_basement=user_basement if user_ground is not None else None,
+            user_total_area_sqm=nia_sqm,
+        )
+        uarn = str((resolved or {}).get("uarn") or "").strip()
+        if uarn:
+            _log.info(
+                "report cover UARN lookup: address=%r postcode=%r candidates=%d signal=%s selected=%s",
+                property_address, postcode, len(candidates), signal, uarn,
+            )
+            return uarn
+    except Exception:
+        _log.warning("report cover UARN lookup failed — leaving uprn unchanged", exc_info=True)
+    return None
+
+
 def _derive_fields(report_data: dict) -> dict:
     """Compute derived fields and return an augmented copy."""
     data = dict(report_data)
@@ -320,6 +367,19 @@ def _derive_fields(report_data: dict) -> dict:
                 _log.info("report: excluded %d subject comp(s) by UARN %s", removed, subject_uarns)
                 data["comparables"] = comps
                 data["comp_count"] = len(comps)
+
+    # Populate cover UPRN/UARN when frontend payload omitted it.
+    if not str(data.get("uprn") or "").strip():
+        resolved_cover_uarn = _resolve_subject_cover_uarn(
+            property_address=data.get("property_address"),
+            postcode=data.get("postcode"),
+            business_type=data.get("business_type"),
+            nia_sqm=data.get("nia_sqm"),
+            floor_config=data.get("floor_config"),
+            basement_sqm=data.get("basement_sqm"),
+        )
+        if resolved_cover_uarn:
+            data["uprn"] = resolved_cover_uarn
 
     # Per-comparable normalisation (rate_psm, layout_similarity_score defaults)
     comps = data.get("comparables")
