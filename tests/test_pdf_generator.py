@@ -219,6 +219,16 @@ class TestPdfTemplateRendering:
         assert "222.22" in html
         assert "Submission-Ready Narrative" in html
 
+    def test_evidence_pack_renders_tone_source_label_when_provided(self):
+        data = pdf_generator._derive_fields(_base_report_data())
+        data["tone_source_label"] = "Primary tone source: Same street evidence"
+        html = pdf_generator._load_template(
+            pdf_generator._get_env(),
+            "evidence_pack.html",
+        ).render(**data)
+        assert "Tone Source" in html
+        assert "Primary tone source: Same street evidence" in html
+
 
     def test_evidence_pack_renders_location_signal_indicators(self):
         data = pdf_generator._derive_fields(_base_report_data())

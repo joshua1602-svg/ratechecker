@@ -619,6 +619,9 @@ table { page-break-inside: avoid; }
   <table class="facts-table">
     <tr><td class="label-cell">Current VOA Rateable Value</td><td class="value-cell">&pound;{{ voa_rv | format_currency }}</td></tr>
     <tr><td class="label-cell">Modelled Rateable Value</td><td class="value-cell">&pound;{{ modelled_rv | format_currency }}</td></tr>
+    {% if tone_source_label %}
+    <tr><td class="label-cell">Tone Source</td><td class="value-cell">{{ tone_source_label }}</td></tr>
+    {% endif %}
     {% if valuation_method == 'itza' %}
     <tr><td class="label-cell">Valuation Basis</td><td class="value-cell">{{ valuation_basis }}</td></tr>
     <tr><td class="label-cell">Subject Area (ITZA)</td><td class="value-cell">{{ valuation_basis_sqm }} sqm</td></tr>

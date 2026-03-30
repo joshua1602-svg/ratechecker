@@ -47,7 +47,7 @@ def _comp(
 
 
 def _run(comps, nia_sqm=100.0, voa_rv=10_000.0, business_type="retail",
-         subject_description=""):
+         subject_description="", subject_address=""):
     return run_csa(
         comps=comps,
         lat=51.5,
@@ -56,6 +56,7 @@ def _run(comps, nia_sqm=100.0, voa_rv=10_000.0, business_type="retail",
         nia_sqm=nia_sqm,
         voa_rv=voa_rv,
         subject_description=subject_description,
+        subject_address=subject_address,
     )
 
 
@@ -900,6 +901,121 @@ class TestStreetExtraction:
         assert dbg.get("same_street_comparable_count", 0) == 4
         assert dbg.get("same_street_key") == "HIGH STREET"
 
+
+# ---------------------------------------------------------------------------
+# 6b. Retail same-street weighting and primary tone source
+# ---------------------------------------------------------------------------
+
+class TestRetailSameStreetPrimaryTone:
+    def _retail_comp_with_address(self, uarn: str, zone_a_rate: float, address: str) -> Comparable:
+        c = _comp(
+            uarn,
+            rv=round(float(zone_a_rate) * itza_from_nia(100.0)),
+            nia_sqm=100.0,
+            unadjusted_price_psm=float(zone_a_rate),
+            has_summary=True,
+        )
+        c.address = address
+        return c
+
+    def test_same_street_primary_triggers_on_min_count(self):
+        same_street = [
+            self._retail_comp_with_address(f"ss{i}", r, "SHOP, 1, HIGH STREET, LONDON")
+            for i, r in enumerate([500, 505, 510, 515, 520, 525])
+        ]
+        wider = [
+            self._retail_comp_with_address(f"w{i}", r, "SHOP, 9, WORPLE ROAD, LONDON")
+            for i, r in enumerate([300, 310, 320, 330])
+        ]
+        result = _run(
+            same_street + wider,
+            nia_sqm=100.0,
+            voa_rv=float(round(500 * itza_from_nia(100.0))),
+            subject_address="12 High Street, London",
+        )
+        assert result["signal"] != "Insufficient Data"
+        assert result["tone_source"] == "same_street_evidence"
+        assert result["tone_rate"] >= 500.0
+
+    def test_same_street_primary_triggers_on_share(self):
+        same_street = [
+            self._retail_comp_with_address(f"ss{i}", r, "SHOP, 1, HIGH STREET, LONDON")
+            for i, r in enumerate([460, 470, 480, 490, 500])
+        ]
+        wider = [
+            self._retail_comp_with_address(f"w{i}", r, "SHOP, 9, MARKET ROAD, LONDON")
+            for i, r in enumerate([260, 270, 280, 290])
+        ]
+        result = _run(
+            same_street + wider,
+            nia_sqm=100.0,
+            voa_rv=float(round(470 * itza_from_nia(100.0))),
+            subject_address="44 High Street, London",
+        )
+        assert result["signal"] != "Insufficient Data"
+        assert result["tone_source"] == "same_street_evidence"
+        assert result["tone_rate"] >= 460.0
+
+    def test_broader_path_remains_when_count_and_share_below_threshold(self):
+        comps = [
+            self._retail_comp_with_address("ss1", 390, "SHOP, 1, HIGH STREET, LONDON"),
+            self._retail_comp_with_address("ss2", 400, "SHOP, 2, HIGH STREET, LONDON"),
+            self._retail_comp_with_address("o1", 360, "SHOP, 1, MARKET ROAD, LONDON"),
+            self._retail_comp_with_address("o2", 370, "SHOP, 2, MARKET ROAD, LONDON"),
+            self._retail_comp_with_address("o3", 380, "SHOP, 3, MARKET ROAD, LONDON"),
+            self._retail_comp_with_address("o4", 410, "SHOP, 4, MARKET ROAD, LONDON"),
+        ]
+        result = _run(
+            comps,
+            nia_sqm=100.0,
+            voa_rv=float(round(390 * itza_from_nia(100.0))),
+            subject_address="77 High Street, London",
+        )
+        baseline = _run(
+            comps,
+            nia_sqm=100.0,
+            voa_rv=float(round(390 * itza_from_nia(100.0))),
+            subject_address="",
+        )
+        assert result["signal"] != "Insufficient Data"
+        assert result["tone_source"] == "wider_local"
+        assert baseline["signal"] != "Insufficient Data"
+        assert result["tone_rate"] >= baseline["tone_rate"]
+
+    def test_same_street_primary_prevents_low_wider_comps_dragging_tone(self):
+        same_street = [
+            self._retail_comp_with_address(f"ss{i}", r, "SHOP, 1, HIGH STREET, LONDON")
+            for i, r in enumerate([500, 505, 510, 515, 520, 525])
+        ]
+        low_wider = [
+            self._retail_comp_with_address(f"lw{i}", r, "SHOP, 9, WORPLE ROAD, LONDON")
+            for i, r in enumerate([220, 230, 240, 250])
+        ]
+        result = _run(
+            same_street + low_wider,
+            nia_sqm=100.0,
+            voa_rv=float(round(500 * itza_from_nia(100.0))),
+            subject_address="12 High Street, London",
+        )
+        assert result["signal"] != "Insufficient Data"
+        assert result["tone_source"] == "same_street_evidence"
+        assert result["tone_rate"] >= 500.0
+
+    def test_non_retail_path_not_switched_to_same_street_primary(self):
+        comps = [
+            self._retail_comp_with_address("n1", 180, "SHOP, 1, HIGH STREET, LONDON"),
+            self._retail_comp_with_address("n2", 185, "SHOP, 2, HIGH STREET, LONDON"),
+            self._retail_comp_with_address("n3", 190, "SHOP, 3, MARKET ROAD, LONDON"),
+        ]
+        result = _run(
+            comps,
+            nia_sqm=100.0,
+            voa_rv=18_000.0,
+            business_type="restaurant_cafe",
+            subject_address="12 High Street, London",
+        )
+        assert result["signal"] != "Insufficient Data"
+        assert result["tone_source"] == "wider_local"
 
 # ---------------------------------------------------------------------------
 # 7. Conservative retail cluster selection (_retail_select_cluster / run_csa)

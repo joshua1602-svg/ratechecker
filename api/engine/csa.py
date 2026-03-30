@@ -219,6 +219,16 @@ _STREET_SUFFIXES: frozenset[str] = frozenset({
 # of the full postcode-sector pool.
 _MIN_SAME_STREET_COMPS: int = 4
 
+# Retail micro-location weighting: same-street/same-parade comparables receive
+# materially higher location influence within the standard multiplicative
+# weighting stack (proximity × source × size × street-bias).
+_RETAIL_SAME_STREET_WEIGHT_MULTIPLIER: float = 1.75
+
+# Retail primary-tone thresholds: when same-street evidence is sufficiently
+# deep/dominant, derive the primary tone from that subset only.
+_RETAIL_PRIMARY_TONE_SAME_STREET_MIN_COUNT: int = 6
+_RETAIL_PRIMARY_TONE_SAME_STREET_MIN_SHARE: float = 0.50
+
 # Location-tier pool selection thresholds (retail only).
 # Tier 1 — same street  : use if dominant street has ≥ this many comps.
 # Tier 2 — same sector  : use if same postcode sector has ≥ this many comps.
@@ -730,6 +740,7 @@ def run_csa(
     subject_sv_line_descs: tuple[str, ...] = (),
     subject_postcode_sector: str = "",
     subject_itza_sqm: float | None = None,
+    subject_address: str = "",
 ) -> dict:
     """
     Run the CSA on a list of pre-fetched Comparable objects.
@@ -742,6 +753,7 @@ def run_csa(
     zone_depth = 6.1
     _is_nursery = business_type == "nursery"
     _is_restaurant = business_type == "restaurant_cafe"
+    _subject_street_key = _extract_street_key(subject_address) if subject_address else None
 
     # --- Size-band filter ---
     _retail_like = business_type in ("retail", "hair_beauty")
@@ -865,7 +877,11 @@ def run_csa(
             w_size = math.exp(-_RETAIL_SIZE_LOG_PENALTY * _size_log_ratio)
         else:
             w_size = 1.0
-        rated.append((c, d, rate, w_prox * w_src * w_size))
+        w_street = 1.0
+        if _retail_like and _subject_street_key:
+            if _extract_street_key(c.address) == _subject_street_key:
+                w_street = _RETAIL_SAME_STREET_WEIGHT_MULTIPLIER
+        rated.append((c, d, rate, w_prox * w_src * w_size * w_street))
 
     if not rated:
         _csa_log.debug("CSA_RESTAURANT_DEBUG stage=3_rate_extraction RETURNING_INSUFFICIENT rated=0 excluded_no_rate=%s", excluded_no_rate)
@@ -1141,8 +1157,42 @@ def run_csa(
         return _insufficient_data()
 
     # --- Tone derivation ---
-    rate_vals = [r for _, _, r, _ in rated]
-    weights = [w for _, _, _, w in rated]
+    tone_source = "wider_local"
+    tone_source_label = "Primary tone source: Wider local comparable set"
+    primary_tone_comp_count = len(rated)
+    primary_tone_same_street_count = 0
+    same_street_share_final = 0.0
+
+    _same_street_subset: list[tuple[Comparable, float, float, float]] = []
+    if _retail_like and _subject_street_key:
+        _same_street_subset = [
+            item for item in rated
+            if _extract_street_key(item[0].address) == _subject_street_key
+        ]
+        _final_count = len(rated)
+        _same_count = len(_same_street_subset)
+        same_street_share_final = (_same_count / _final_count) if _final_count > 0 else 0.0
+        primary_tone_same_street_count = _same_count
+        _same_street_primary = (
+            _same_count >= _RETAIL_PRIMARY_TONE_SAME_STREET_MIN_COUNT
+            or same_street_share_final >= _RETAIL_PRIMARY_TONE_SAME_STREET_MIN_SHARE
+        )
+        if _same_street_primary and _same_count > 0:
+            tone_source = "same_street_evidence"
+            tone_source_label = (
+                "Primary tone source: Same street evidence "
+                "(sufficiently strong same-street set)"
+            )
+            primary_tone_comp_count = _same_count
+            rate_vals = [r for _, _, r, _ in _same_street_subset]
+            weights = [w for _, _, _, w in _same_street_subset]
+        else:
+            rate_vals = [r for _, _, r, _ in rated]
+            weights = [w for _, _, _, w in rated]
+    else:
+        rate_vals = [r for _, _, r, _ in rated]
+        weights = [w for _, _, _, w in rated]
+
     try:
         tone = _weighted_median(rate_vals, weights)
     except Exception:
@@ -1178,6 +1228,7 @@ def run_csa(
             "same_street_comparable_count": same_street_count,
             "same_street_key": same_street_key,
             "same_street_reverted": same_street_reverted,
+            "subject_street_key": _subject_street_key,
             # Clustering and selection
             "retail_method": subject_retail_method if _retail_like else None,
             "cluster_count": cluster_count,
@@ -1203,6 +1254,13 @@ def run_csa(
             "tier1_rate_median": None,
             "tier2_rate_median": None,
             "top5_by_weight": [],
+            # Primary tone-source diagnostics
+            "tone_source": tone_source,
+            "primary_tone_comp_count": primary_tone_comp_count,
+            "primary_tone_same_street_count": primary_tone_same_street_count,
+            "same_street_share_final": round(same_street_share_final, 3),
+            "same_street_primary_rule_min_count": _RETAIL_PRIMARY_TONE_SAME_STREET_MIN_COUNT,
+            "same_street_primary_rule_min_share": _RETAIL_PRIMARY_TONE_SAME_STREET_MIN_SHARE,
         }
         if _is_restaurant:
             _debug["pre_trim_comparable_count"] = pre_trim_comparable_count
@@ -1443,6 +1501,9 @@ def run_csa(
             "rate": round(r, 4),
             "weight": round(w, 6),
             "distance_m": round(d, 1),
+            "is_same_street": bool(
+                _subject_street_key and _extract_street_key(c.address) == _subject_street_key
+            ),
         }
         for c, d, r, w in rated
     ]
@@ -1455,6 +1516,8 @@ def run_csa(
         "tone_rate": tone,
         "estimated_rv": estimated_rv,
         "confidence": confidence,
+        "tone_source": tone_source,
+        "tone_source_label": tone_source_label,
         "rate_normalisation": {
             "tier_unadjusted_psm": tier_counts.get("unadjusted_psm", 0),
             "tier_rv_over_nia": tier_counts.get("rv_over_nia", 0),

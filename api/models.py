@@ -107,6 +107,8 @@ class AssessResponse(BaseModel):
     adjustment_summary: Optional[str] = None
     rated_comps: list[dict] = Field(default_factory=list)
     location_signals: Optional[dict] = None
+    tone_source: Optional[str] = None
+    tone_source_label: Optional[str] = None
 
 
 class PurchaseFormData(BaseModel):
@@ -209,6 +211,7 @@ class EvidenceReportRequest(SimplifiedReportRequest):
     modelled_rv: float
     final_tone_psm: float
     tone_basis: str
+    tone_source_label: Optional[str] = None
     confidence: str
     recommendation_text: str
     # Valuation detail (dynamic, business-type-aware)
@@ -605,6 +608,7 @@ def build_evidence_payload_from_assess(
         "modelled_rv": best_rv,
         "final_tone_psm": tone_rate,
         "tone_basis": tone_basis,
+        "tone_source_label": assess_response.tone_source_label,
         "confidence": confidence_map.get(assess_response.signal, assess_response.signal),
         "recommendation_text": recommendation_text,
         # Valuation detail — all from engine truth
