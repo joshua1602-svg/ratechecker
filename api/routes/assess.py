@@ -181,6 +181,7 @@ async def assess(req: AssessRequest) -> AssessResponse:
         nia_sqm=req.property.nia_sqm,
         voa_rv=req.property.voa_rv,
         subject_itza_sqm=subject_itza_override,
+        subject_address=req.property.address,
     )
 
     # 5b. Layout overweighting layer (runs after CSA, before adjustments)
@@ -277,4 +278,6 @@ async def assess(req: AssessRequest) -> AssessResponse:
         adjustment_summary=adj_summary,
         rated_comps=_comps_for_response,
         location_signals=location_signals,
+        tone_source=result.get("tone_source"),
+        tone_source_label=result.get("tone_source_label"),
     )
