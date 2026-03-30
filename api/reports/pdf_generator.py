@@ -331,6 +331,10 @@ def _derive_fields(report_data: dict) -> dict:
         data.setdefault("valuation_basis", "Comparable Tone (£/sqm NIA)")
     elif data.get("valuation_method") == "itza":
         data.setdefault("valuation_basis", "ITZA (Zoning)")
+        data.setdefault(
+            "geometry_source_indicator",
+            "Assumed 1:3 geometry fallback" if data.get("geometry_assumed") else "Provided frontage/depth geometry",
+        )
 
     voa_rv = data.get("voa_rv")
     nia_sqm = data.get("nia_sqm")

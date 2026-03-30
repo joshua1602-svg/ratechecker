@@ -729,6 +729,7 @@ def run_csa(
     subject_description: str = "",
     subject_sv_line_descs: tuple[str, ...] = (),
     subject_postcode_sector: str = "",
+    subject_itza_sqm: float | None = None,
 ) -> dict:
     """
     Run the CSA on a list of pre-fetched Comparable objects.
@@ -1393,7 +1394,11 @@ def run_csa(
         basis_label = "NIA"
     else:
         # Standard high-street retail: tone is a Zone A rate.
-        itza = itza_from_nia(nia_sqm, zone_depth)
+        itza = (
+            float(subject_itza_sqm)
+            if subject_itza_sqm is not None and float(subject_itza_sqm) > 0
+            else itza_from_nia(nia_sqm, zone_depth)
+        )
         estimated_rv = round(tone * itza / 100) * 100
         subject_basis = itza
         basis_label = "ITZA"

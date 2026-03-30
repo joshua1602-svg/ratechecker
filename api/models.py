@@ -216,6 +216,7 @@ class EvidenceReportRequest(SimplifiedReportRequest):
     valuation_basis: str = "ITZA (Zoning)"
     valuation_basis_sqm: Optional[float] = None
     geometry_assumed: bool = False
+    geometry_source_indicator: Optional[str] = None
     zoning_rows: list[dict] = Field(default_factory=list)
     nursery_adjustments: list[dict] = Field(default_factory=list)
     adjustment_items: list[dict] = Field(default_factory=list)
@@ -574,6 +575,9 @@ def build_evidence_payload_from_assess(
             )
 
     # Build valuation detail from real engine data
+    normalized_facts, _, user_total = _build_voa_reconciliation_inputs(request)
+    voa_subject_record, _ = resolve_subject_voa_record(request, normalized_facts, user_total)
+
     tone_rate = assess_response.tone_rate or 0.0
     adj_breakdown = assess_response.adjustments
     if adj_breakdown is not None:
@@ -590,6 +594,7 @@ def build_evidence_payload_from_assess(
         adjustments_applied=adj_applied,
         adjustment_factor=adj_factor,
         business_type=request.property.business_type.value,
+        voa_subject_record=voa_subject_record,
     )
 
     # Evidence-specific required fields
@@ -607,6 +612,7 @@ def build_evidence_payload_from_assess(
         "valuation_basis": valuation_detail["valuation_basis"],
         "valuation_basis_sqm": valuation_detail["valuation_basis_sqm"],
         "geometry_assumed": valuation_detail["geometry_assumed"],
+        "geometry_source_indicator": valuation_detail.get("geometry_source_indicator"),
         "zoning_rows": valuation_detail["zoning_rows"],
         "nursery_adjustments": valuation_detail.get("nursery_adjustments", []),
         "adjustment_items": valuation_detail["adjustment_items"],

@@ -23,13 +23,14 @@ from api.engine.geocoding import postcode_to_coords
 from api.engine.fit_layer import apply_fit_layer
 from api.engine.layout_overweight import LayoutInput, apply_layout_overweighting
 from api.engine.rules import csa_rules
-from api.engine.valuation import apply_adjustments
+from api.engine.valuation import apply_adjustments, itza_from_voa_sv_lines
 from api.location_signals import get_location_signals
 from api.models import (
     AdjustmentBreakdown,
     AdjustmentItem,
     AssessRequest,
     AssessResponse,
+    resolve_subject_voa_record,
 )
 
 log = logging.getLogger(__name__)
@@ -165,6 +166,13 @@ async def assess(req: AssessRequest) -> AssessResponse:
     ]
 
     # 5. Run CSA
+    resolved_subject_record, _ = resolve_subject_voa_record(req)
+    subject_itza_override = None
+    if resolved_subject_record is not None:
+        _sv_lines = resolved_subject_record.get("sv_lines") or []
+        if _sv_lines:
+            subject_itza_override = itza_from_voa_sv_lines(_sv_lines)
+
     result = run_csa(
         comps=comps,
         lat=lat,
@@ -172,6 +180,7 @@ async def assess(req: AssessRequest) -> AssessResponse:
         business_type=btype,
         nia_sqm=req.property.nia_sqm,
         voa_rv=req.property.voa_rv,
+        subject_itza_sqm=subject_itza_override,
     )
 
     # 5b. Layout overweighting layer (runs after CSA, before adjustments)

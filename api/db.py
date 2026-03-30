@@ -209,7 +209,7 @@ def get_sv_line_descs_batch(uarns: list[str]) -> dict[str, tuple[str, ...]]:
 
 def get_sv_lines_batch(uarns: list[str]) -> dict[str, list[dict]]:
     """
-    Return full SV line rows (floor, description, area) keyed by UARN.
+    Return full SV line rows (floor, description, area, price, value) keyed by UARN.
 
     Used by the layout overweighting layer to build layout fingerprints
     for each comparable.  Read-only query.
@@ -223,7 +223,7 @@ def get_sv_lines_batch(uarns: list[str]) -> dict[str, list[dict]]:
     if not int_uarns:
         return {}
     sql = text("""
-        SELECT uarn, floor, description, area
+        SELECT uarn, floor, description, area, price, value
         FROM voa_sv_lines
         WHERE uarn = ANY(:uarns)
           AND description IS NOT NULL
@@ -238,6 +238,8 @@ def get_sv_lines_batch(uarns: list[str]) -> dict[str, list[dict]]:
                 "floor": r.floor,
                 "description": r.description,
                 "area": float(r.area) if r.area is not None else 0.0,
+                "price": float(r.price) if r.price is not None else None,
+                "value": float(r.value) if r.value is not None else None,
             })
         return result
     except Exception as exc:
@@ -582,7 +584,9 @@ def _build_subject_record_from_row(row: Any, floor_rows: list[dict]) -> dict[str
         "scat_code": int(row.scat_code) if row.scat_code is not None else None,
         "description": row.description,
         "total_area_sqm": total,
+        "adopted_rv": float(row.adopted_rv) if getattr(row, "adopted_rv", None) is not None else None,
         "floor_areas": floor_areas,
+        "sv_lines": floor_rows,
     }
 
 
@@ -620,6 +624,7 @@ def get_subject_voa_candidates_by_address_postcode(address: str, postcode: str) 
             le.street AS street,
             svh.total_area_or_units AS total_area_or_units,
             svh.unit_of_measurement AS unit_of_measurement,
+            svh.adopted_rv AS adopted_rv,
             le.full_property_identifier AS full_property_identifier
         FROM voa_list_entries le
         LEFT JOIN voa_sv_header svh ON le.uarn = svh.uarn
@@ -684,7 +689,8 @@ def get_subject_voa_record(uarn: str | None) -> dict[str, Any] | None:
             le.street AS street,
             le.full_property_identifier AS full_property_identifier,
             svh.total_area_or_units AS total_area_or_units,
-            svh.unit_of_measurement AS unit_of_measurement
+            svh.unit_of_measurement AS unit_of_measurement,
+            svh.adopted_rv AS adopted_rv
         FROM voa_list_entries le
         LEFT JOIN voa_sv_header svh ON le.uarn = svh.uarn
         WHERE le.uarn = :uarn

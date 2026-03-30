@@ -623,7 +623,10 @@ table { page-break-inside: avoid; }
     <tr><td class="label-cell">Valuation Basis</td><td class="value-cell">{{ valuation_basis }}</td></tr>
     <tr><td class="label-cell">Subject Area (ITZA)</td><td class="value-cell">{{ valuation_basis_sqm }} sqm</td></tr>
     <tr><td class="label-cell">Derived Tone / Rate</td><td class="value-cell">&pound;{{ '%.2f'|format(final_tone_psm|float) }}/m&sup2; ITZA ({{ tone_basis }})</td></tr>
-    {% if geometry_assumed %}
+    <tr><td class="label-cell">Geometry Source</td><td class="value-cell">{{ geometry_source_indicator | default('Assumed 1:3 geometry fallback') }}</td></tr>
+    {% if geometry_source_indicator == 'VOA structured valuation record' %}
+    <tr><td class="label-cell">Geometry</td><td class="value-cell">Subject geometry taken from VOA structured valuation records (voa_sv_lines)</td></tr>
+    {% elif geometry_assumed %}
     <tr><td class="label-cell">Geometry</td><td class="value-cell">Assumed 1:3 width-to-depth aspect ratio (measured frontage/depth not provided)</td></tr>
     {% else %}
     <tr><td class="label-cell">Geometry</td><td class="value-cell">Based on provided frontage and depth measurements</td></tr>
@@ -642,9 +645,17 @@ table { page-break-inside: avoid; }
     <thead>
       <tr>
         <th>Zone</th>
+        {% if geometry_source_indicator == 'VOA structured valuation record' %}
+        <th>Floor</th>
+        {% else %}
         <th class="num">Depth (m)</th>
+        {% endif %}
         <th class="num">Area (sqm)</th>
+        {% if geometry_source_indicator == 'VOA structured valuation record' %}
+        <th>Description</th>
+        {% else %}
         <th class="num">Relativity</th>
+        {% endif %}
         <th class="num">Tone (&pound;/m&sup2;)</th>
         <th class="num">Value (&pound;)</th>
       </tr>
@@ -653,9 +664,17 @@ table { page-break-inside: avoid; }
       {% for row in zoning_rows %}
       <tr>
         <td>{{ row.zone }}</td>
+        {% if geometry_source_indicator == 'VOA structured valuation record' %}
+        <td>{{ row.floor or "—" }}</td>
+        {% else %}
         <td class="num">{{ row.depth_m }}</td>
+        {% endif %}
         <td class="num">{{ row.area_sqm }}</td>
+        {% if geometry_source_indicator == 'VOA structured valuation record' %}
+        <td>{{ row.description or "—" }}</td>
+        {% else %}
         <td class="num">{{ row.relativity }}</td>
+        {% endif %}
         <td class="num">&pound;{{ row.tone }}</td>
         <td class="num">&pound;{{ row.value | format_currency }}</td>
       </tr>

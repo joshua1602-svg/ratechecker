@@ -328,6 +328,67 @@ class TestSectorMethodSelection:
         assert result["estimated_rv"] == 20000
         assert result["rate_normalisation"]["subject_basis_label"] == "NIA"
 
+    def test_run_csa_retail_uses_voa_subject_itza_when_provided(self):
+        comps = [
+            Comparable("1", "1 High St SW1A 1AA", 201, 10000, 50, 200, "NIA", True, 51.5, -0.1, "RETAIL"),
+            Comparable("2", "2 High St SW1A 1AA", 201, 12000, 60, 200, "NIA", True, 51.5005, -0.1005, "RETAIL"),
+            Comparable("3", "3 High St SW1A 1AA", 201, 9000, 45, 200, "NIA", True, 51.501, -0.101, "RETAIL"),
+        ]
+        result = run_csa(
+            comps=comps,
+            lat=51.5,
+            lon=-0.1,
+            business_type="retail",
+            nia_sqm=100.0,
+            voa_rv=30000,
+            subject_itza_sqm=80.0,
+        )
+        expected_rv = round(float(result["tone_rate"]) * 80.0 / 100) * 100
+        assert result["estimated_rv"] == expected_rv
+        assert result["rate_normalisation"]["subject_basis_label"] == "ITZA"
+        assert result["rate_normalisation"]["subject_basis_sqm"] == 80.0
+
+    def test_voa_sv_lines_used_for_subject_geometry_when_available(self):
+        detail = build_valuation_detail(
+            property=_prop(nia_sqm=120.0, business_type="retail"),
+            tone_rate=300.0,
+            adjusted_rv=30_000,
+            adjustments_applied=[],
+            adjustment_factor=1.0,
+            business_type="retail",
+            voa_subject_record={
+                "uarn": "123",
+                "total_area_sqm": 120.0,
+                "adopted_rv": 28000.0,
+                "sv_lines": [
+                    {"floor": "Ground", "description": "Zone A", "area": 40.0, "price": 300.0, "value": 12000.0},
+                    {"floor": "Ground", "description": "Zone B", "area": 30.0, "price": 150.0, "value": 4500.0},
+                ],
+            },
+        )
+        assert detail["geometry_source_indicator"] == "VOA structured valuation record"
+        assert detail["geometry_assumed"] is False
+        assert detail["zoning_rows"][0]["floor"] == "Ground"
+        assert detail["zoning_rows"][0]["description"] == "Zone A"
+        assert detail["zoning_rows"][0]["zone"] == "Zone A"
+
+    def test_fallback_geometry_unchanged_when_no_voa_sv_lines(self):
+        detail = build_valuation_detail(
+            property=_prop(nia_sqm=100.0, business_type="retail"),
+            tone_rate=250.0,
+            adjusted_rv=20_000,
+            adjustments_applied=[],
+            adjustment_factor=1.0,
+            business_type="retail",
+            voa_subject_record={"uarn": "123", "sv_lines": []},
+        )
+        expected_itza = round(itza_from_nia(100.0, 6.1), 2)
+        assert detail["geometry_source_indicator"] == "Assumed 1:3 geometry fallback"
+        assert detail["geometry_assumed"] is True
+        assert detail["valuation_basis_sqm"] == expected_itza
+        assert detail["zoning_rows"][0]["zone"] == "Zone A"
+        assert "floor" not in detail["zoning_rows"][0]
+
     def test_retail_poor_frontage_reduces_rv(self):
         prop = PropertyInput(
             postcode="X", business_type=BusinessType.retail, nia_sqm=100.0,
