@@ -15,6 +15,44 @@ from api.engine.rules import business_rules, rule_file_name
 from api.models import AreasInput, FlagsInput, NurseryInput, PropertyInput
 
 
+def _relativity_from_description(description: str | None) -> float | None:
+    desc = str(description or "").lower()
+    if "zone a" in desc:
+        return 1.0
+    if "zone b" in desc:
+        return 0.5
+    if "zone c" in desc:
+        return 0.25
+    if "remainder" in desc:
+        return 0.125
+    return None
+
+
+def itza_from_voa_sv_lines(sv_lines: list[dict]) -> float:
+    """Compute ITZA from VOA structured valuation lines."""
+    if not sv_lines:
+        return 0.0
+
+    prices = [float(r["price"]) for r in sv_lines if r.get("price") is not None and float(r["price"]) > 0]
+    zone_a_price = max(prices) if prices else None
+
+    total_itza = 0.0
+    for line in sv_lines:
+        area = float(line.get("area") or 0.0)
+        if area <= 0:
+            continue
+        relativity: float | None = None
+        price = line.get("price")
+        if zone_a_price and price is not None and float(price) > 0:
+            relativity = float(price) / zone_a_price
+        if relativity is None:
+            relativity = _relativity_from_description(line.get("description"))
+        if relativity is None:
+            relativity = 1.0
+        total_itza += area * relativity
+    return total_itza
+
+
 def _resolve_valuation_method(rules: dict) -> str:
     """Normalize rule-file method labels to the report contract values."""
     raw = str(rules.get("valuation_method") or "").strip().lower()
@@ -370,6 +408,7 @@ def build_valuation_detail(
     adjustments_applied: list[dict],
     adjustment_factor: float,
     business_type: str,
+    voa_subject_record: dict | None = None,
 ) -> dict:
     """Build the valuation calculation detail for the evidence pack.
 
@@ -404,7 +443,7 @@ def build_valuation_detail(
         )
     return _build_zoning_detail(
         property, tone_rate, adjusted_rv,
-        adjustments_applied, adjustment_factor, rules,
+        adjustments_applied, adjustment_factor, rules, voa_subject_record=voa_subject_record,
     )
 
 
@@ -415,12 +454,21 @@ def _build_zoning_detail(
     adjustments_applied: list[dict],
     adjustment_factor: float,
     rules: dict,
+    *,
+    voa_subject_record: dict | None = None,
 ) -> dict:
     zone_depth = rules.get("zoning", {}).get("zone_depth_m", 6.1)
     relativities = rules.get("zoning", {}).get("relativities", {})
 
-    # Determine geometry — mirrors _zoning_rv() logic exactly
-    if property.frontage_m and property.depth_m:
+    sv_lines = (voa_subject_record or {}).get("sv_lines") or []
+    has_voa_geometry = bool(sv_lines)
+
+    # Determine geometry — mirrors _zoning_rv() logic exactly for fallback cases.
+    if has_voa_geometry:
+        width = None
+        depth = None
+        geometry_assumed = False
+    elif property.frontage_m and property.depth_m:
         width = property.frontage_m
         depth = property.depth_m
         geometry_assumed = False
@@ -430,34 +478,68 @@ def _build_zoning_detail(
         depth = property.nia_sqm / width
         geometry_assumed = True
 
-    # Build zone rows (same maths as itza_from_geometry)
-    zone_defs = [
-        ("Zone A", zone_depth, relativities.get("zone_a", 1.0)),
-        ("Zone B", zone_depth, relativities.get("zone_b", 0.5)),
-        ("Zone C", zone_depth, relativities.get("zone_c", 0.25)),
-        ("Remainder", float("inf"), relativities.get("remainder", 0.125)),
-    ]
-
     zoning_rows: list[dict] = []
-    remaining = depth
     itza_total = 0.0
-    for zone_name, z_depth, relativity in zone_defs:
-        if remaining <= 0:
-            break
-        used = min(remaining, z_depth)
-        area = width * used
-        itza_contrib = area * relativity
-        value = itza_contrib * tone_rate
-        itza_total += itza_contrib
-        zoning_rows.append({
-            "zone": zone_name,
-            "area_sqm": round(area, 1),
-            "depth_m": round(used, 1),
-            "relativity": relativity,
-            "tone": round(tone_rate, 2),
-            "value": round(value, 2),
-        })
-        remaining -= used
+    if has_voa_geometry:
+        prices = [float(r["price"]) for r in sv_lines if r.get("price") is not None and float(r["price"]) > 0]
+        zone_a_price = max(prices) if prices else None
+        for idx, line in enumerate(sv_lines, start=1):
+            area = float(line.get("area") or 0.0)
+            if area <= 0:
+                continue
+            line_price = line.get("price")
+            line_value = line.get("value")
+            relativity: float | None = None
+            if zone_a_price and line_price is not None and float(line_price) > 0:
+                relativity = float(line_price) / zone_a_price
+            if relativity is None:
+                relativity = _relativity_from_description(line.get("description"))
+            if relativity is None:
+                relativity = 1.0
+            itza_contrib = area * relativity
+            itza_total += itza_contrib
+
+            if line_value is None and line_price is not None:
+                line_value = area * float(line_price)
+            elif line_value is None:
+                line_value = itza_contrib * tone_rate
+
+            zoning_rows.append({
+                "zone": str(line.get("description") or f"Line {idx}"),
+                "area_sqm": round(area, 1),
+                "depth_m": None,
+                "relativity": round(relativity, 4),
+                "tone": round(float(line_price), 2) if line_price is not None else round(tone_rate, 2),
+                "value": round(float(line_value), 2),
+                "floor": line.get("floor"),
+                "description": line.get("description"),
+            })
+    else:
+        # Build zone rows (same maths as itza_from_geometry)
+        zone_defs = [
+            ("Zone A", zone_depth, relativities.get("zone_a", 1.0)),
+            ("Zone B", zone_depth, relativities.get("zone_b", 0.5)),
+            ("Zone C", zone_depth, relativities.get("zone_c", 0.25)),
+            ("Remainder", float("inf"), relativities.get("remainder", 0.125)),
+        ]
+        remaining = depth
+        for zone_name, z_depth, relativity in zone_defs:
+            if remaining <= 0:
+                break
+            used = min(remaining, z_depth)
+            area = width * used
+            itza_contrib = area * relativity
+            value = itza_contrib * tone_rate
+            itza_total += itza_contrib
+            zoning_rows.append({
+                "zone": zone_name,
+                "area_sqm": round(area, 1),
+                "depth_m": round(used, 1),
+                "relativity": relativity,
+                "tone": round(tone_rate, 2),
+                "value": round(value, 2),
+            })
+            remaining -= used
 
     subtotal_pre = round(itza_total * tone_rate, 2)
 
@@ -480,6 +562,11 @@ def _build_zoning_detail(
         "valuation_basis": "ITZA (Zoning)",
         "valuation_basis_sqm": round(itza_total, 2),
         "geometry_assumed": geometry_assumed,
+        "geometry_source_indicator": (
+            "VOA structured valuation record"
+            if has_voa_geometry else
+            "Assumed 1:3 geometry fallback"
+        ),
         "zoning_rows": zoning_rows,
         "subtotal_pre": subtotal_pre,
         "adjustment_items": adjustments_applied,

@@ -268,6 +268,34 @@ class TestPdfTemplateRendering:
         assert "Subject Area (ITZA)" in html
         assert "Assumed 1:3 width-to-depth aspect ratio" in html
 
+    def test_retail_itza_uses_voa_geometry_wording_and_lines(self):
+        data = _base_report_data()
+        data["business_type"] = "retail"
+        data["valuation_method"] = "itza"
+        data["valuation_basis"] = "ITZA (Zoning)"
+        data["geometry_assumed"] = False
+        data["geometry_source_indicator"] = "VOA structured valuation record"
+        data["zoning_rows"] = [
+            {
+                "zone": "Zone A",
+                "floor": "Ground",
+                "description": "Zone A",
+                "area_sqm": 40.0,
+                "tone": 300.0,
+                "value": 12000.0,
+            }
+        ]
+        html = pdf_generator._load_template(
+            pdf_generator._get_env(),
+            "evidence_pack.html",
+        ).render(**pdf_generator._derive_fields(data))
+        assert "Geometry Source" in html
+        assert "VOA structured valuation record" in html
+        assert "Assumed 1:3 width-to-depth aspect ratio" not in html
+        assert ">Floor<" in html
+        assert ">Description<" in html
+        assert "Zone A" in html
+
 
 class TestVoaReconciliationRendering:
     def test_simplified_report_has_summary_row_only(self):
