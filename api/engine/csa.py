@@ -1231,10 +1231,10 @@ def run_csa(
     _same_street_primary = False
     if _retail_like and _subject_street_key:
         _same_street_subset = [
-            item for item in rated
+            item for item in _primary_tone_pool
             if _extract_street_key(item[0].address) == _subject_street_key
         ]
-        _final_count = len(rated)
+        _final_count = len(_primary_tone_pool)
         _same_count = len(_same_street_subset)
         same_street_share_final = (_same_count / _final_count) if _final_count > 0 else 0.0
         primary_tone_same_street_count = _same_count
