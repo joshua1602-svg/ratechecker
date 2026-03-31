@@ -739,6 +739,32 @@ class TestEvidencePayloadBuilder:
         payload = build_evidence_payload_from_assess(resp, req)
         assert "strong case" in payload["recommendation_text"].lower()
 
+    def test_evidence_payload_tone_source_uses_is_same_street_flags(self):
+        from api.models import build_evidence_payload_from_assess
+        resp = self._make_assess_response(
+            tone_source_label="Primary tone source: Wider local comparable set",
+            rated_comps=[
+                {"uarn": str(i), "address": f"{i} High Street, London", "is_same_street": True}
+                for i in range(1, 10)
+            ],
+        )
+        req = self._make_request()
+        payload = build_evidence_payload_from_assess(resp, req)
+        assert "Same street evidence" in payload["tone_source_label"]
+
+    def test_evidence_payload_tone_source_falls_back_to_address_match_when_flag_missing(self):
+        from api.models import build_evidence_payload_from_assess
+        resp = self._make_assess_response(
+            tone_source_label="Primary tone source: Wider local comparable set",
+            rated_comps=[
+                {"uarn": str(i), "address": f"{i} High Street, London"}
+                for i in range(1, 10)
+            ],
+        )
+        req = self._make_request()
+        payload = build_evidence_payload_from_assess(resp, req)
+        assert "Same street evidence" in payload["tone_source_label"]
+
     def test_simplified_payload_passes_route_validation(self):
         """Verify the simplified builder also passes route validation."""
         from api.models import build_report_payload_from_assess
