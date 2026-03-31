@@ -94,6 +94,13 @@ class TestSubjectExclusion:
         # The source must contain exclude_uarn=req.property.uprn
         assert "exclude_uarn=req.property.uprn" in source
 
+    def test_assess_passes_resolved_subject_address_into_csa(self):
+        """Assess should pass resolved VOA subject address into run_csa for street matching."""
+        with open("api/routes/assess.py") as f:
+            source = f.read()
+        assert "subject_address=subject_address_for_csa" in source
+        assert 'resolved_subject_record.get("full_property_identifier")' in source
+
 
 # ---------------------------------------------------------------------------
 # 3. Report payload mapping from engine outputs
