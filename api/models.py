@@ -617,36 +617,30 @@ def build_evidence_payload_from_assess(
             _tone_source_label = "Primary tone source: Wider local comparable set"
 
     # Legacy fallback only when CSA fields are absent.
+    # Use explicit same-street flags only; do not re-derive from subject address
+    # to avoid downstream disagreement with CSA's own subject-address basis.
     if (
         _rated
         and request.property.business_type.value in ("retail", "hair_beauty")
         and (_tone_source is None or _tone_source_label is None)
     ):
-        from api.engine.csa import _extract_street_key
-
-        _subject_key = _extract_street_key(request.property.address or "")
-        _ss_count = 0
-        for c in _rated:
-            if c.get("is_same_street") is True:
-                _ss_count += 1
-                continue
-            if c.get("is_same_street") is False:
-                continue
-            if _subject_key and _extract_street_key(c.get("address") or "") == _subject_key:
-                _ss_count += 1
+        _flags = [c.get("is_same_street") for c in _rated if "is_same_street" in c]
+        _ss_count = sum(1 for flag in _flags if flag is True)
         _total = len(_rated)
         _ss_share = _ss_count / _total if _total > 0 else 0.0
-        _fallback_same_street = (_ss_count >= 6 or _ss_share >= 0.50)
-        if _tone_source is None:
-            _tone_source = "same_street_evidence" if _fallback_same_street else "wider_local"
-        if _tone_source_label is None:
-            if _fallback_same_street:
-                _tone_source_label = (
-                    "Primary tone source: Same street evidence "
-                    "(sufficiently strong same-street set)"
-                )
-            else:
-                _tone_source_label = "Primary tone source: Wider local comparable set"
+        # Only derive when explicit flags exist; otherwise leave unset.
+        if _flags:
+            _fallback_same_street = (_ss_count >= 6 or _ss_share >= 0.50)
+            if _tone_source is None:
+                _tone_source = "same_street_evidence" if _fallback_same_street else "wider_local"
+            if _tone_source_label is None:
+                if _fallback_same_street:
+                    _tone_source_label = (
+                        "Primary tone source: Same street evidence "
+                        "(sufficiently strong same-street set)"
+                    )
+                else:
+                    _tone_source_label = "Primary tone source: Wider local comparable set"
 
     # Evidence-specific required fields
     payload.update({

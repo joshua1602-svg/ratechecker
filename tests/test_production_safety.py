@@ -753,7 +753,7 @@ class TestEvidencePayloadBuilder:
         payload = build_evidence_payload_from_assess(resp, req)
         assert "Same street evidence" in payload["tone_source_label"]
 
-    def test_evidence_payload_tone_source_falls_back_to_address_match_when_flag_missing(self):
+    def test_evidence_payload_does_not_derive_tone_source_when_flags_missing(self):
         from api.models import build_evidence_payload_from_assess
         resp = self._make_assess_response(
             tone_source=None,
@@ -765,8 +765,8 @@ class TestEvidencePayloadBuilder:
         )
         req = self._make_request()
         payload = build_evidence_payload_from_assess(resp, req)
-        assert "Same street evidence" in payload["tone_source_label"]
-        assert payload["tone_source"] == "same_street_evidence"
+        assert payload["tone_source_label"] is None
+        assert payload["tone_source"] is None
 
     def test_evidence_payload_preserves_csa_same_street_label_without_overwrite(self):
         from api.models import build_evidence_payload_from_assess
