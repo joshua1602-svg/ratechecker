@@ -600,24 +600,53 @@ def build_evidence_payload_from_assess(
         voa_subject_record=voa_subject_record,
     )
 
-    # Re-derive tone_source_label from rated_comps when the stored value is
-    # missing or stale.  Each rated comp carries an `is_same_street` flag set
-    # by the CSA engine, so we can reconstruct the label without re-running
-    # the full assessment.  Thresholds mirror _RETAIL_PRIMARY_TONE_SAME_STREET_*
-    # constants in csa.py.
-    _tone_source_label = assess_response.tone_source_label
+    # CSA is the source of truth for tone source fields. Preserve CSA outputs
+    # exactly when supplied; only derive fallback values when they are absent.
+    _tone_source = (assess_response.tone_source or "").strip() or None
+    _tone_source_label = (assess_response.tone_source_label or "").strip() or None
     _rated = assess_response.rated_comps or []
-    if _rated and request.property.business_type.value in ("retail", "hair_beauty"):
-        _ss_count = sum(1 for c in _rated if c.get("is_same_street"))
-        _total = len(_rated)
-        _ss_share = _ss_count / _total if _total > 0 else 0.0
-        if _ss_count >= 6 or _ss_share >= 0.50:
+
+    # If CSA provided tone_source but omitted label, map to canonical label.
+    if _tone_source_label is None:
+        if _tone_source == "same_street_evidence":
             _tone_source_label = (
                 "Primary tone source: Same street evidence "
                 "(sufficiently strong same-street set)"
             )
-        else:
+        elif _tone_source == "wider_local":
             _tone_source_label = "Primary tone source: Wider local comparable set"
+
+    # Legacy fallback only when CSA fields are absent.
+    if (
+        _rated
+        and request.property.business_type.value in ("retail", "hair_beauty")
+        and (_tone_source is None or _tone_source_label is None)
+    ):
+        from api.engine.csa import _extract_street_key
+
+        _subject_key = _extract_street_key(request.property.address or "")
+        _ss_count = 0
+        for c in _rated:
+            if c.get("is_same_street") is True:
+                _ss_count += 1
+                continue
+            if c.get("is_same_street") is False:
+                continue
+            if _subject_key and _extract_street_key(c.get("address") or "") == _subject_key:
+                _ss_count += 1
+        _total = len(_rated)
+        _ss_share = _ss_count / _total if _total > 0 else 0.0
+        _fallback_same_street = (_ss_count >= 6 or _ss_share >= 0.50)
+        if _tone_source is None:
+            _tone_source = "same_street_evidence" if _fallback_same_street else "wider_local"
+        if _tone_source_label is None:
+            if _fallback_same_street:
+                _tone_source_label = (
+                    "Primary tone source: Same street evidence "
+                    "(sufficiently strong same-street set)"
+                )
+            else:
+                _tone_source_label = "Primary tone source: Wider local comparable set"
 
     # Evidence-specific required fields
     payload.update({
@@ -627,6 +656,7 @@ def build_evidence_payload_from_assess(
         "modelled_rv": best_rv,
         "final_tone_psm": tone_rate,
         "tone_basis": tone_basis,
+        "tone_source": _tone_source,
         "tone_source_label": _tone_source_label,
         "confidence": confidence_map.get(assess_response.signal, assess_response.signal),
         "recommendation_text": recommendation_text,
