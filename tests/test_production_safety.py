@@ -742,7 +742,8 @@ class TestEvidencePayloadBuilder:
     def test_evidence_payload_tone_source_uses_is_same_street_flags(self):
         from api.models import build_evidence_payload_from_assess
         resp = self._make_assess_response(
-            tone_source_label="Primary tone source: Wider local comparable set",
+            tone_source=None,
+            tone_source_label=None,
             rated_comps=[
                 {"uarn": str(i), "address": f"{i} High Street, London", "is_same_street": True}
                 for i in range(1, 10)
@@ -755,7 +756,8 @@ class TestEvidencePayloadBuilder:
     def test_evidence_payload_tone_source_falls_back_to_address_match_when_flag_missing(self):
         from api.models import build_evidence_payload_from_assess
         resp = self._make_assess_response(
-            tone_source_label="Primary tone source: Wider local comparable set",
+            tone_source=None,
+            tone_source_label=None,
             rated_comps=[
                 {"uarn": str(i), "address": f"{i} High Street, London"}
                 for i in range(1, 10)
@@ -763,6 +765,72 @@ class TestEvidencePayloadBuilder:
         )
         req = self._make_request()
         payload = build_evidence_payload_from_assess(resp, req)
+        assert "Same street evidence" in payload["tone_source_label"]
+        assert payload["tone_source"] == "same_street_evidence"
+
+    def test_evidence_payload_preserves_csa_same_street_label_without_overwrite(self):
+        from api.models import build_evidence_payload_from_assess
+        exact_label = "Primary tone source: Same street evidence (sufficiently strong same-street set)"
+        resp = self._make_assess_response(
+            tone_source="same_street_evidence",
+            tone_source_label=exact_label,
+            # Contradictory pool must not overwrite CSA-provided tone source.
+            rated_comps=[
+                {"uarn": "1", "address": "1 Market Road, London", "is_same_street": False},
+                {"uarn": "2", "address": "2 Market Road, London", "is_same_street": False},
+            ],
+        )
+        req = self._make_request()
+        payload = build_evidence_payload_from_assess(resp, req)
+        assert payload["tone_source"] == "same_street_evidence"
+        assert payload["tone_source_label"] == exact_label
+
+    def test_evidence_payload_preserves_csa_wider_local_label_without_overwrite(self):
+        from api.models import build_evidence_payload_from_assess
+        exact_label = "Primary tone source: Wider local comparable set"
+        resp = self._make_assess_response(
+            tone_source="wider_local",
+            tone_source_label=exact_label,
+            # Contradictory pool must not overwrite CSA-provided tone source.
+            rated_comps=[
+                {"uarn": str(i), "address": f"{i} High Street, London", "is_same_street": True}
+                for i in range(1, 10)
+            ],
+        )
+        req = self._make_request()
+        payload = build_evidence_payload_from_assess(resp, req)
+        assert payload["tone_source"] == "wider_local"
+        assert payload["tone_source_label"] == exact_label
+
+    def test_evidence_payload_maps_csa_tone_source_to_label_when_label_missing(self):
+        from api.models import build_evidence_payload_from_assess
+        resp = self._make_assess_response(
+            tone_source="wider_local",
+            tone_source_label=None,
+        )
+        req = self._make_request()
+        payload = build_evidence_payload_from_assess(resp, req)
+        assert payload["tone_source"] == "wider_local"
+        assert payload["tone_source_label"] == "Primary tone source: Wider local comparable set"
+
+    def test_evidence_payload_non_retail_keeps_csa_tone_source_label(self):
+        from api.models import build_evidence_payload_from_assess, BusinessType
+        resp = self._make_assess_response(
+            tone_source="same_street_evidence",
+            tone_source_label="Primary tone source: Same street evidence (sufficiently strong same-street set)",
+        )
+        req = self._make_request(
+            property={
+                "address": "1 Station Road",
+                "postcode": "SW1A 1AA",
+                "business_type": BusinessType.nursery,
+                "voa_rv": 20000,
+                "nia_sqm": 120,
+                "uprn": "UPRN123",
+            }
+        )
+        payload = build_evidence_payload_from_assess(resp, req)
+        assert payload["tone_source"] == "same_street_evidence"
         assert "Same street evidence" in payload["tone_source_label"]
 
     def test_simplified_payload_passes_route_validation(self):
