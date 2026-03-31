@@ -816,6 +816,12 @@ class TestStreetExtraction:
         result = _extract_street_key("Gnd Flr, 2 High Street")
         assert result == "HIGH STREET"
 
+    def test_floor_prefixed_high_street_abbreviation_extracted(self):
+        from api.engine.csa import _extract_street_key
+        # Common abbreviation form in VOA data should canonicalise to STREET.
+        result = _extract_street_key("Gnd Flr, 2 High St")
+        assert result == "HIGH STREET"
+
     def _rated_with_address(self, address: str, rate: float,
                              dist: float = 50.0, weight: float = 1.0) -> tuple:
         c = _comp("x", rv=rate * 100, nia_sqm=100.0,

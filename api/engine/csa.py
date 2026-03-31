@@ -215,6 +215,18 @@ _STREET_SUFFIXES: frozenset[str] = frozenset({
     "QUAY", "WHARF", "BROADWAY", "CRESCENT", "APPROACH", "PRECINCT",
 })
 
+# Common abbreviations seen in VOA address strings.
+_STREET_SUFFIX_ALIASES: dict[str, str] = {
+    "ST": "STREET",
+    "RD": "ROAD",
+    "AVE": "AVENUE",
+    "LN": "LANE",
+    "CL": "CLOSE",
+    "DR": "DRIVE",
+    "TER": "TERRACE",
+    "SQ": "SQUARE",
+}
+
 # Minimum same-street comparables required to use the same-street pool instead
 # of the full postcode-sector pool.
 _MIN_SAME_STREET_COMPS: int = 4
@@ -409,8 +421,9 @@ def _extract_street_key(address: str) -> str | None:
     clean = re.sub(r"['\-]", "", address.upper())
     tokens = re.sub(r"[^A-Z0-9 ]", " ", clean).split()
     for i, token in enumerate(tokens):
-        if token in _STREET_SUFFIXES and i > 0:
-            return f"{tokens[i - 1]} {token}"
+        canonical = _STREET_SUFFIX_ALIASES.get(token, token)
+        if canonical in _STREET_SUFFIXES and i > 0:
+            return f"{tokens[i - 1]} {canonical}"
     return None
 
 
