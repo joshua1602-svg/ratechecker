@@ -68,6 +68,14 @@ def test_no_naive_full_address_substring_matching_before_structured_fields():
     assert "user_street" in src
 
 
+def test_subject_candidate_lookup_batches_sv_lines_and_degrades_on_failure():
+    src = inspect.getsource(db.get_subject_voa_candidates_by_address_postcode)
+    assert "candidate_uarns" in src
+    assert "get_sv_lines_batch(candidate_uarns)" in src
+    assert "sv_lines_batch_failed" in src
+    assert "get_sv_lines_batch([str(row.uarn)])" not in src
+
+
 def test_exclude_subject_by_canonical_uarn_match():
     rows = [
         {"uarn": "100", "address": "22, HIGH STREET, LONDON", "street": "HIGH STREET", "postcode": "SW1A 1AA"},
