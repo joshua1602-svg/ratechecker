@@ -651,9 +651,21 @@ def get_subject_voa_candidates_by_address_postcode(address: str, postcode: str) 
             number_count,
         )
 
+        candidate_uarns = [str(row.uarn) for row in filtered_rows]
+        try:
+            sv_lines_by_uarn = get_sv_lines_batch(candidate_uarns) if candidate_uarns else {}
+        except DatabaseError as exc:
+            log.warning(
+                "subject_lookup sv_lines_batch_failed postcode=%s uarn_count=%s err=%s",
+                normalised_postcode,
+                len(candidate_uarns),
+                exc,
+            )
+            sv_lines_by_uarn = {}
+
         candidates: list[dict[str, Any]] = []
         for row in filtered_rows:
-            floor_rows = get_sv_lines_batch([str(row.uarn)]).get(str(row.uarn), [])
+            floor_rows = sv_lines_by_uarn.get(str(row.uarn), [])
             record = _build_subject_record_from_row(row, floor_rows)
             record["postcode"] = normalised_postcode
             record["street"] = _normalise_street(getattr(row, "street", None)) or None

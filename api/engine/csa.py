@@ -1067,78 +1067,53 @@ def run_csa(
                 if _s_itza > 0:
                     subject_implied_rate = voa_rv / _s_itza
 
-        # --- Location-tier pool selection (retail only) ---
-        # Preference order: same-street → same-postcode-sector → full pool.
-        # Pool selection happens before clustering; clustering operates on
-        # the selected pool unchanged.
-
-        # Build dominant-street bucket from post-outlier rated pool.
-        _street_buckets: dict[str, list] = {}
-        for _item in rated:
-            _c, _, _, _ = _item
-            _sk = _extract_street_key(_c.address)
-            if _sk:
-                _street_buckets.setdefault(_sk, []).append(_item)
-
-        if _street_buckets:
-            _dominant_street = max(
-                _street_buckets,
-                key=lambda s: sum(w for _, _, _, w in _street_buckets[s]),
-            )
-            _raw_same_street_count = len(_street_buckets[_dominant_street])
-        else:
-            _dominant_street = None
-            _raw_same_street_count = 0
-
-        # Soft boost anchor: dominant street if ≥ 2 comps (for _retail_select_cluster).
-        _ss_anchor: str | None = (
-            _dominant_street if _raw_same_street_count >= 2 else None
-        )
-
-        # Same-postcode-sector comparables (using subject_postcode_sector param).
-        if subject_postcode_sector:
-            _sector_pool = [
+        # True same-street primary-tone branch (retail / hair-beauty only):
+        # evaluate on the full post-outlier retail candidate pool before
+        # location-tier narrowing / clustering.
+        if _subject_street_key and _post_outlier_pool_count > 0:
+            _post_outlier_same_street_subset = [
                 _item for _item in rated
-                if _extract_postcode_sector(_item[0].address) == subject_postcode_sector
+                if _extract_street_key(_item[0].address) == _subject_street_key
             ]
-            same_postcode_sector_count = len(_sector_pool)
-        else:
-            _sector_pool = []
-            same_postcode_sector_count = 0
-
-        # Coherence pre-check for same-street tier: accept only when the pool's
-        # rate spread is within a defensible range.  A wide spread signals that
-        # the street itself contains multiple competing pitch levels and should
-        # not be collapsed into a single-tier pool without further scrutiny.
-        _ss_accepted = False
-        if _raw_same_street_count >= _RETAIL_SAME_STREET_TIER_MIN and _dominant_street:
-            _ss_rates = sorted(r for _, _, r, _ in _street_buckets[_dominant_street])
-            _ss_n = len(_ss_rates)
-            _ss_med = _ss_rates[_ss_n // 2] if _ss_n else 0.0
-            _ss_spread = (
-                (_ss_rates[-1] - _ss_rates[0]) / _ss_med
-                if _ss_med > 0 and _ss_n >= 2
-                else 0.0
+            _post_outlier_same_street_count = len(_post_outlier_same_street_subset)
+            _post_outlier_same_street_share = (
+                _post_outlier_same_street_count / _post_outlier_pool_count
             )
-            if _ss_spread <= _RETAIL_SAME_STREET_MAX_SPREAD:
-                _ss_accepted = True
+            _same_street_primary_early = (
+                _post_outlier_same_street_count >= _RETAIL_PRIMARY_TONE_SAME_STREET_MIN_COUNT
+                or _post_outlier_same_street_share >= _RETAIL_PRIMARY_TONE_SAME_STREET_MIN_SHARE
+            )
+        if _same_street_primary_early and _post_outlier_same_street_subset:
+            rated = _post_outlier_same_street_subset
+            same_street_key = _subject_street_key
+            same_street_count = len(rated)
+            _location_tier = "same_street_primary"
+            _selection_reason = "same_street_primary_override"
+            cluster_count = 1
+            selected_cluster_id = 0
+        else:
+            # --- Location-tier pool selection (retail only) ---
+            # Preference order: same-street → same-postcode-sector → full pool.
+            # Pool selection happens before clustering; clustering operates on
+            # the selected pool unchanged.
+
+            # Build dominant-street bucket from post-outlier rated pool.
+            _street_buckets: dict[str, list] = {}
+            for _item in rated:
+                _c, _, _, _ = _item
+                _sk = _extract_street_key(_c.address)
+                if _sk:
+                    _street_buckets.setdefault(_sk, []).append(_item)
+
+            if _street_buckets:
+                _dominant_street = max(
+                    _street_buckets,
+                    key=lambda s: sum(w for _, _, _, w in _street_buckets[s]),
+                )
+                _raw_same_street_count = len(_street_buckets[_dominant_street])
             else:
-                # Count-eligible but too incoherent; mark and fall through.
-                same_street_reverted = True
-                _ss_anchor = None
-
-        # Tier selection.
-        if _ss_accepted:
-            pool = _street_buckets[_dominant_street]
-            same_street_key = _dominant_street
-            same_street_count = _raw_same_street_count
-            _location_tier = "same_street"
-
-        elif same_postcode_sector_count >= _RETAIL_SECTOR_TIER_MIN:
-            pool = _sector_pool
-            same_street_key = None
-            same_street_count = 0
-            _location_tier = "same_postcode_sector"
+                _dominant_street = None
+                _raw_same_street_count = 0
 
         else:
             pool = rated
@@ -1147,33 +1122,83 @@ def run_csa(
             _location_tier = "full_pool"
         _primary_tone_pool = pool
 
-        # Cluster the selected pool and apply conservative retail cluster selection.
-        clusters = _find_rate_clusters(pool)
-        cluster_count = len(clusters)
+            # Same-postcode-sector comparables (using subject_postcode_sector param).
+            if subject_postcode_sector:
+                _sector_pool = [
+                    _item for _item in rated
+                    if _extract_postcode_sector(_item[0].address) == subject_postcode_sector
+                ]
+                same_postcode_sector_count = len(_sector_pool)
+            else:
+                _sector_pool = []
+                same_postcode_sector_count = 0
+
+            # Coherence pre-check for same-street tier: accept only when the pool's
+            # rate spread is within a defensible range.  A wide spread signals that
+            # the street itself contains multiple competing pitch levels and should
+            # not be collapsed into a single-tier pool without further scrutiny.
+            _ss_accepted = False
+            if _raw_same_street_count >= _RETAIL_SAME_STREET_TIER_MIN and _dominant_street:
+                _ss_rates = sorted(r for _, _, r, _ in _street_buckets[_dominant_street])
+                _ss_n = len(_ss_rates)
+                _ss_med = _ss_rates[_ss_n // 2] if _ss_n else 0.0
+                _ss_spread = (
+                    (_ss_rates[-1] - _ss_rates[0]) / _ss_med
+                    if _ss_med > 0 and _ss_n >= 2
+                    else 0.0
+                )
+                if _ss_spread <= _RETAIL_SAME_STREET_MAX_SPREAD:
+                    _ss_accepted = True
+                else:
+                    # Count-eligible but too incoherent; mark and fall through.
+                    same_street_reverted = True
+                    _ss_anchor = None
+
+            # Tier selection.
+            if _ss_accepted:
+                pool = _street_buckets[_dominant_street]
+                same_street_key = _dominant_street
+                same_street_count = _raw_same_street_count
+                _location_tier = "same_street"
+
+            elif same_postcode_sector_count >= _RETAIL_SECTOR_TIER_MIN:
+                pool = _sector_pool
+                same_street_key = None
+                same_street_count = 0
+                _location_tier = "same_postcode_sector"
+
+            else:
+                pool = rated
+                same_street_key = None
+                same_street_count = 0
+                _location_tier = "full_pool"
+            # Cluster the selected pool and apply conservative retail cluster selection.
+            clusters = _find_rate_clusters(pool)
+            cluster_count = len(clusters)
 
         # full_pool fragmentation guard: before selecting a point estimate,
         # verify that the pool has a single defensible dominant tone.  If the
         # largest cluster covers less than _RETAIL_FULL_POOL_SELECTION_MIN_DOMINANT_SHARE
         # of the pool, the evidence is too fragmented and no estimate is produced.
         # This rejects at the selection stage — not merely in confidence labeling.
-        if _location_tier == "full_pool" and cluster_count >= 2:
-            _pool_size = len(pool)
-            _largest_cluster = max(len(cl) for cl in clusters)
-            _dominant_share = _largest_cluster / _pool_size if _pool_size > 0 else 1.0
-            if _dominant_share < _RETAIL_FULL_POOL_SELECTION_MIN_DOMINANT_SHARE:
-                return _insufficient_data()
+            if _location_tier == "full_pool" and cluster_count >= 2:
+                _pool_size = len(pool)
+                _largest_cluster = max(len(cl) for cl in clusters)
+                _dominant_share = _largest_cluster / _pool_size if _pool_size > 0 else 1.0
+                if _dominant_share < _RETAIL_FULL_POOL_SELECTION_MIN_DOMINANT_SHARE:
+                    return _insufficient_data()
 
-        pool, selected_cluster_id, _selection_reason = _retail_select_cluster(
-            clusters,
-            subject_nia=nia_sqm,
-            min_comps=_MIN_COMPS_FOR_VALUATION,
-            same_street_anchor=_ss_anchor,
-        )
-        rated = pool
-        # Retail: after cluster selection, cap the pool to limit large dense
-        # cluster distortion.  Keep highest-weight comps (proximity × source).
-        if len(rated) > _RETAIL_POST_CLUSTER_MAX_COMPS:
-            rated = sorted(rated, key=lambda x: x[3], reverse=True)[:_RETAIL_POST_CLUSTER_MAX_COMPS]
+            pool, selected_cluster_id, _selection_reason = _retail_select_cluster(
+                clusters,
+                subject_nia=nia_sqm,
+                min_comps=_MIN_COMPS_FOR_VALUATION,
+                same_street_anchor=_ss_anchor,
+            )
+            rated = pool
+            # Retail: after cluster selection, cap the pool to limit large dense
+            # cluster distortion.  Keep highest-weight comps (proximity × source).
+            if len(rated) > _RETAIL_POST_CLUSTER_MAX_COMPS:
+                rated = sorted(rated, key=lambda x: x[3], reverse=True)[:_RETAIL_POST_CLUSTER_MAX_COMPS]
 
     if not rated:
         return _insufficient_data()
@@ -1204,6 +1229,7 @@ def run_csa(
     same_street_share_final = 0.0
 
     _same_street_subset: list[tuple[Comparable, float, float, float]] = []
+    _same_street_primary = False
     if _retail_like and _subject_street_key:
         _same_street_subset = [
             item for item in _primary_tone_pool
@@ -1269,6 +1295,7 @@ def run_csa(
             "same_street_key": same_street_key,
             "same_street_reverted": same_street_reverted,
             "subject_street_key": _subject_street_key,
+            "subject_street_raw": subject_address,
             # Clustering and selection
             "retail_method": subject_retail_method if _retail_like else None,
             "cluster_count": cluster_count,
@@ -1299,8 +1326,18 @@ def run_csa(
             "primary_tone_comp_count": primary_tone_comp_count,
             "primary_tone_same_street_count": primary_tone_same_street_count,
             "same_street_share_final": round(same_street_share_final, 3),
+            "same_street_primary_triggered": _same_street_primary,
             "same_street_primary_rule_min_count": _RETAIL_PRIMARY_TONE_SAME_STREET_MIN_COUNT,
             "same_street_primary_rule_min_share": _RETAIL_PRIMARY_TONE_SAME_STREET_MIN_SHARE,
+            "post_outlier_pool_count": _post_outlier_pool_count,
+            "post_outlier_same_street_count": _post_outlier_same_street_count,
+            "post_outlier_same_street_share": round(_post_outlier_same_street_share, 3),
+            "post_outlier_same_street_primary_triggered": _same_street_primary_early,
+            "final_comparable_count": len(rated),
+            "primary_tone_subset_size": len(rate_vals),
+            "final_tone_source_used": tone_source,
+            "same_street_comp_uarns": [str(item[0].uarn) for item in _same_street_subset],
+            "same_street_comp_addresses": [item[0].address for item in _same_street_subset],
         }
         if _is_restaurant:
             _debug["pre_trim_comparable_count"] = pre_trim_comparable_count
@@ -1327,6 +1364,19 @@ def run_csa(
             }
             for c, d, r, w in top5
         ]
+        if _retail_like:
+            _csa_log.debug(
+                "same_street_primary_check subject_raw=%r subject_key=%r final_comp_count=%d "
+                "same_count=%d same_share=%.3f triggered=%s primary_subset=%d tone_source=%s",
+                subject_address,
+                _subject_street_key,
+                len(rated),
+                primary_tone_same_street_count,
+                same_street_share_final,
+                _same_street_primary,
+                len(rate_vals),
+                tone_source,
+            )
 
     # --- Confidence (count-based baseline) ---
     n_comps = len(rated)
