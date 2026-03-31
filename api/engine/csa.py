@@ -215,6 +215,28 @@ _STREET_SUFFIXES: frozenset[str] = frozenset({
     "QUAY", "WHARF", "BROADWAY", "CRESCENT", "APPROACH", "PRECINCT",
 })
 
+# Common abbreviations seen in VOA address strings.
+_STREET_SUFFIX_ALIASES: dict[str, str] = {
+    "ST": "STREET",
+    "RD": "ROAD",
+    "AVE": "AVENUE",
+    "LN": "LANE",
+    "CL": "CLOSE",
+    "DR": "DRIVE",
+    "TER": "TERRACE",
+    "SQ": "SQUARE",
+}
+_STREET_SUFFIX_PATTERN: str = "|".join(
+    sorted(
+        set(_STREET_SUFFIXES) | set(_STREET_SUFFIX_ALIASES.keys()),
+        key=len,
+        reverse=True,
+    )
+)
+_STREET_KEY_RE = re.compile(
+    rf"\b([A-Z][A-Z0-9]*)\s*({_STREET_SUFFIX_PATTERN})\b"
+)
+
 # Minimum same-street comparables required to use the same-street pool instead
 # of the full postcode-sector pool.
 _MIN_SAME_STREET_COMPS: int = 4
@@ -407,10 +429,23 @@ def _extract_street_key(address: str) -> str | None:
         "SHOP AND PREMISES, OXFORD STREET" → "OXFORD STREET"
     """
     clean = re.sub(r"['\-]", "", address.upper())
-    tokens = re.sub(r"[^A-Z0-9 ]", " ", clean).split()
+    clean = re.sub(r"[^A-Z0-9 ]", " ", clean)
+    clean = re.sub(r"\s+", " ", clean).strip()
+
+    # Primary path: regex supports both "HIGH STREET" and concatenated
+    # forms seen in noisy address payloads (e.g. "HIGHSTREET").
+    m = _STREET_KEY_RE.search(clean)
+    if m:
+        stem, suffix = m.group(1), m.group(2)
+        canonical = _STREET_SUFFIX_ALIASES.get(suffix, suffix)
+        if canonical in _STREET_SUFFIXES:
+            return f"{stem} {canonical}"
+
+    tokens = clean.split()
     for i, token in enumerate(tokens):
-        if token in _STREET_SUFFIXES and i > 0:
-            return f"{tokens[i - 1]} {token}"
+        canonical = _STREET_SUFFIX_ALIASES.get(token, token)
+        if canonical in _STREET_SUFFIXES and i > 0:
+            return f"{tokens[i - 1]} {canonical}"
     return None
 
 
@@ -1009,6 +1044,10 @@ def run_csa(
     _location_tier: str = "not_retail"          # set inside retail block; used for debug
     _raw_same_street_count: int = 0             # dominant-street count in post-outlier pool
     same_postcode_sector_count: int = 0         # same-sector count in post-outlier pool
+    # Keep a stable pre-cluster location-tier pool for same-street primary-tone
+    # triggering. This must be captured before conservative retail clustering so
+    # valid same-street evidence isn't accidentally removed by later narrowing.
+    _primary_tone_pool: list[_ClusterItem] = rated
 
     if _retail_like:
         # Classify the subject's valuation basis.
@@ -1106,6 +1145,7 @@ def run_csa(
             same_street_key = None
             same_street_count = 0
             _location_tier = "full_pool"
+        _primary_tone_pool = pool
 
         # Cluster the selected pool and apply conservative retail cluster selection.
         clusters = _find_rate_clusters(pool)
@@ -1166,10 +1206,10 @@ def run_csa(
     _same_street_subset: list[tuple[Comparable, float, float, float]] = []
     if _retail_like and _subject_street_key:
         _same_street_subset = [
-            item for item in rated
+            item for item in _primary_tone_pool
             if _extract_street_key(item[0].address) == _subject_street_key
         ]
-        _final_count = len(rated)
+        _final_count = len(_primary_tone_pool)
         _same_count = len(_same_street_subset)
         same_street_share_final = (_same_count / _final_count) if _final_count > 0 else 0.0
         primary_tone_same_street_count = _same_count
