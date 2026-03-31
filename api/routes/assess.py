@@ -173,6 +173,18 @@ async def assess(req: AssessRequest) -> AssessResponse:
         if _sv_lines:
             subject_itza_override = itza_from_voa_sv_lines(_sv_lines)
 
+    subject_address_for_csa = (req.property.address or "").strip()
+    if resolved_subject_record is not None:
+        _resolved_addr = (
+            resolved_subject_record.get("full_property_identifier")
+            or resolved_subject_record.get("address")
+            or ""
+        ).strip()
+        # Use the resolved VOA address when available so same-street matching
+        # operates on the canonical VOA street string used by comparables.
+        if _resolved_addr:
+            subject_address_for_csa = _resolved_addr
+
     result = run_csa(
         comps=comps,
         lat=lat,
@@ -181,7 +193,7 @@ async def assess(req: AssessRequest) -> AssessResponse:
         nia_sqm=req.property.nia_sqm,
         voa_rv=req.property.voa_rv,
         subject_itza_sqm=subject_itza_override,
-        subject_address=req.property.address,
+        subject_address=subject_address_for_csa,
     )
 
     # 5b. Layout overweighting layer (runs after CSA, before adjustments)
