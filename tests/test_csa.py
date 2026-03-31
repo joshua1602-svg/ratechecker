@@ -822,6 +822,12 @@ class TestStreetExtraction:
         result = _extract_street_key("Gnd Flr, 2 High St")
         assert result == "HIGH STREET"
 
+    def test_floor_prefixed_highstreet_no_space_extracted(self):
+        from api.engine.csa import _extract_street_key
+        # No-space variants appear in some rendered/address-normalised payloads.
+        result = _extract_street_key("GND FL 1,HIGHSTREET,WIMBLEDON,LONDON")
+        assert result == "HIGH STREET"
+
     def _rated_with_address(self, address: str, rate: float,
                              dist: float = 50.0, weight: float = 1.0) -> tuple:
         c = _comp("x", rv=rate * 100, nia_sqm=100.0,
@@ -967,6 +973,83 @@ class TestRetailSameStreetPrimaryTone:
         assert result["signal"] != "Insufficient Data"
         assert result["tone_source"] == "same_street_evidence"
         assert result["tone_rate"] >= 460.0
+
+    def test_same_street_primary_uses_final_rated_pool(self):
+        """
+        Regression: same-street primary trigger must be evaluated on the final
+        rated pool used for valuation so count/share and tone source align with
+        the production valuation path and final modelled RV.
+        """
+        hs_lat = 51.5 + 600 / 111_000
+        high_street = [
+            self._retail_comp_with_address(
+                f"hs{i}",
+                r,
+                "GND FLR, 2 HIGH STREET, WIMBLEDON, LONDON",
+            )
+            for i, r in enumerate([760, 780, 800, 820, 840, 860, 880])
+        ]
+        for c in high_street:
+            c.lat = hs_lat
+
+        cr_lat = 51.5 + 80 / 111_000
+        church_road = [
+            self._retail_comp_with_address(
+                f"cr{i}",
+                r,
+                "10 CHURCH ROAD, WIMBLEDON, LONDON",
+            )
+            for i, r in enumerate([480, 500, 520, 540, 560, 580, 600, 620])
+        ]
+        for c in church_road:
+            c.lat = cr_lat
+
+        result = _run(
+            high_street + church_road,
+            nia_sqm=100.0,
+            voa_rv=float(round(500 * itza_from_nia(100.0))),
+            subject_address="Gnd Flr, 2 High Street, Wimbledon, London",
+        )
+        assert result["signal"] != "Insufficient Data"
+        assert result["tone_source"] == "same_street_evidence"
+        assert result["tone_rate"] >= 760.0
+        dbg = result.get("_debug", {})
+        assert dbg.get("primary_tone_same_street_count", 0) >= 6
+
+    def test_same_street_primary_changes_final_estimated_rv_and_label(self):
+        same_street = [
+            self._retail_comp_with_address(
+                f"ss{i}",
+                r,
+                "BSMT & GND FL 14, HIGH STREET, WIMBLEDON, LONDON",
+            )
+            for i, r in enumerate([500, 505, 510, 515, 520, 525])
+        ]
+        wider = [
+            self._retail_comp_with_address(
+                f"w{i}",
+                r,
+                "2, CHURCH ROAD, WIMBLEDON, LONDON",
+            )
+            for i, r in enumerate([220, 230, 240, 250])
+        ]
+        triggered = _run(
+            same_street + wider,
+            nia_sqm=100.0,
+            voa_rv=float(round(500 * itza_from_nia(100.0))),
+            subject_address="GND FLR 2 HIGH STREET WIMBLEDON",
+        )
+        baseline = _run(
+            same_street + wider,
+            nia_sqm=100.0,
+            voa_rv=float(round(500 * itza_from_nia(100.0))),
+            subject_address="99 MARKET ROAD, WIMBLEDON",
+        )
+        assert triggered["signal"] != "Insufficient Data"
+        assert baseline["signal"] != "Insufficient Data"
+        assert triggered["tone_source"] == "same_street_evidence"
+        assert "Same street evidence" in (triggered.get("tone_source_label") or "")
+        assert triggered["estimated_rv"] != baseline["estimated_rv"]
 
     def test_broader_path_remains_when_count_and_share_below_threshold(self):
         comps = [

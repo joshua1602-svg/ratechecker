@@ -1145,8 +1145,6 @@ def run_csa(
             same_street_key = None
             same_street_count = 0
             _location_tier = "full_pool"
-        _primary_tone_pool = pool
-
         # Cluster the selected pool and apply conservative retail cluster selection.
         clusters = _find_rate_clusters(pool)
         cluster_count = len(clusters)
@@ -1204,6 +1202,7 @@ def run_csa(
     same_street_share_final = 0.0
 
     _same_street_subset: list[tuple[Comparable, float, float, float]] = []
+    _same_street_primary = False
     if _retail_like and _subject_street_key:
         _same_street_subset = [
             item for item in _primary_tone_pool
@@ -1269,6 +1268,7 @@ def run_csa(
             "same_street_key": same_street_key,
             "same_street_reverted": same_street_reverted,
             "subject_street_key": _subject_street_key,
+            "subject_street_raw": subject_address,
             # Clustering and selection
             "retail_method": subject_retail_method if _retail_like else None,
             "cluster_count": cluster_count,
@@ -1299,8 +1299,14 @@ def run_csa(
             "primary_tone_comp_count": primary_tone_comp_count,
             "primary_tone_same_street_count": primary_tone_same_street_count,
             "same_street_share_final": round(same_street_share_final, 3),
+            "same_street_primary_triggered": _same_street_primary,
             "same_street_primary_rule_min_count": _RETAIL_PRIMARY_TONE_SAME_STREET_MIN_COUNT,
             "same_street_primary_rule_min_share": _RETAIL_PRIMARY_TONE_SAME_STREET_MIN_SHARE,
+            "final_comparable_count": len(rated),
+            "primary_tone_subset_size": len(rate_vals),
+            "final_tone_source_used": tone_source,
+            "same_street_comp_uarns": [str(item[0].uarn) for item in _same_street_subset],
+            "same_street_comp_addresses": [item[0].address for item in _same_street_subset],
         }
         if _is_restaurant:
             _debug["pre_trim_comparable_count"] = pre_trim_comparable_count
@@ -1327,6 +1333,19 @@ def run_csa(
             }
             for c, d, r, w in top5
         ]
+        if _retail_like:
+            _csa_log.debug(
+                "same_street_primary_check subject_raw=%r subject_key=%r final_comp_count=%d "
+                "same_count=%d same_share=%.3f triggered=%s primary_subset=%d tone_source=%s",
+                subject_address,
+                _subject_street_key,
+                len(rated),
+                primary_tone_same_street_count,
+                same_street_share_final,
+                _same_street_primary,
+                len(rate_vals),
+                tone_source,
+            )
 
     # --- Confidence (count-based baseline) ---
     n_comps = len(rated)
