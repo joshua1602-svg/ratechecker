@@ -1044,10 +1044,11 @@ def run_csa(
     _location_tier: str = "not_retail"          # set inside retail block; used for debug
     _raw_same_street_count: int = 0             # dominant-street count in post-outlier pool
     same_postcode_sector_count: int = 0         # same-sector count in post-outlier pool
-    # Keep a stable pre-cluster location-tier pool for same-street primary-tone
-    # triggering. This must be captured before conservative retail clustering so
-    # valid same-street evidence isn't accidentally removed by later narrowing.
-    _primary_tone_pool: list[_ClusterItem] = rated
+    _post_outlier_pool_count: int = len(rated)
+    _post_outlier_same_street_count: int = 0
+    _post_outlier_same_street_share: float = 0.0
+    _post_outlier_same_street_subset: list[_ClusterItem] = []
+    _same_street_primary_early: bool = False
 
     if _retail_like:
         # Classify the subject's valuation basis.
@@ -1115,12 +1116,10 @@ def run_csa(
                 _dominant_street = None
                 _raw_same_street_count = 0
 
-        else:
-            pool = rated
-            same_street_key = None
-            same_street_count = 0
-            _location_tier = "full_pool"
-        _primary_tone_pool = pool
+            # Soft boost anchor: dominant street if ≥ 2 comps (for _retail_select_cluster).
+            _ss_anchor: str | None = (
+                _dominant_street if _raw_same_street_count >= 2 else None
+            )
 
             # Same-postcode-sector comparables (using subject_postcode_sector param).
             if subject_postcode_sector:

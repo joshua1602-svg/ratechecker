@@ -974,11 +974,11 @@ class TestRetailSameStreetPrimaryTone:
         assert result["tone_source"] == "same_street_evidence"
         assert result["tone_rate"] >= 460.0
 
-    def test_same_street_primary_uses_pre_cluster_location_pool(self):
+    def test_same_street_primary_uses_final_rated_pool(self):
         """
-        Regression: same-street primary trigger should be based on the selected
-        location-tier pool before cluster narrowing, so a valid same-street set
-        is not lost when the conservative cluster selector chooses another band.
+        Regression: same-street primary trigger must be evaluated on the final
+        rated pool used for valuation so count/share and tone source align with
+        the production valuation path and final modelled RV.
         """
         hs_lat = 51.5 + 600 / 111_000
         high_street = [
@@ -1015,6 +1015,41 @@ class TestRetailSameStreetPrimaryTone:
         assert result["tone_rate"] >= 760.0
         dbg = result.get("_debug", {})
         assert dbg.get("primary_tone_same_street_count", 0) >= 6
+
+    def test_same_street_primary_changes_final_estimated_rv_and_label(self):
+        same_street = [
+            self._retail_comp_with_address(
+                f"ss{i}",
+                r,
+                "BSMT & GND FL 14, HIGH STREET, WIMBLEDON, LONDON",
+            )
+            for i, r in enumerate([500, 505, 510, 515, 520, 525])
+        ]
+        wider = [
+            self._retail_comp_with_address(
+                f"w{i}",
+                r,
+                "2, CHURCH ROAD, WIMBLEDON, LONDON",
+            )
+            for i, r in enumerate([220, 230, 240, 250])
+        ]
+        triggered = _run(
+            same_street + wider,
+            nia_sqm=100.0,
+            voa_rv=float(round(500 * itza_from_nia(100.0))),
+            subject_address="GND FLR 2 HIGH STREET WIMBLEDON",
+        )
+        baseline = _run(
+            same_street + wider,
+            nia_sqm=100.0,
+            voa_rv=float(round(500 * itza_from_nia(100.0))),
+            subject_address="99 MARKET ROAD, WIMBLEDON",
+        )
+        assert triggered["signal"] != "Insufficient Data"
+        assert baseline["signal"] != "Insufficient Data"
+        assert triggered["tone_source"] == "same_street_evidence"
+        assert "Same street evidence" in (triggered.get("tone_source_label") or "")
+        assert triggered["estimated_rv"] != baseline["estimated_rv"]
 
     def test_broader_path_remains_when_count_and_share_below_threshold(self):
         comps = [
