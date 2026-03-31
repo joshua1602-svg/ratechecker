@@ -1147,7 +1147,17 @@ def run_csa(
                     else 0.0
                 )
                 if _ss_spread <= _RETAIL_SAME_STREET_MAX_SPREAD:
-                    _ss_accepted = True
+                    # Prime plausibility gate: reject same-street tier when
+                    # the pool median rate is implausibly above the subject's
+                    # own implied rate.  This prevents a prime parade from
+                    # inflating the tone for a secondary-pitch subject.
+                    if (subject_implied_rate is not None
+                            and subject_implied_rate > 0
+                            and _ss_med > subject_implied_rate * _PRIME_PLAUSIBILITY_THRESHOLD):
+                        same_street_reverted = True
+                        _ss_anchor = None
+                    else:
+                        _ss_accepted = True
                 else:
                     # Count-eligible but too incoherent; mark and fall through.
                     same_street_reverted = True
@@ -1160,14 +1170,26 @@ def run_csa(
                 same_street_count = _raw_same_street_count
                 _location_tier = "same_street"
 
-            elif same_postcode_sector_count >= _RETAIL_SECTOR_TIER_MIN:
+            elif (same_postcode_sector_count >= _RETAIL_SECTOR_TIER_MIN
+                  and not same_street_reverted):
                 pool = _sector_pool
                 same_street_key = None
                 same_street_count = 0
                 _location_tier = "same_postcode_sector"
 
             else:
-                pool = rated
+                # When same-street was reverted due to prime plausibility,
+                # exclude the dominant street's comps from the full pool so
+                # they cannot dominate the cluster selection via proximity.
+                if same_street_reverted and _dominant_street:
+                    pool = [
+                        _item for _item in rated
+                        if _extract_street_key(_item[0].address) != _dominant_street
+                    ]
+                    if len(pool) < _MIN_COMPS_FOR_VALUATION:
+                        pool = rated  # fall back to full pool if too few remain
+                else:
+                    pool = rated
                 same_street_key = None
                 same_street_count = 0
                 _location_tier = "full_pool"
@@ -1231,10 +1253,10 @@ def run_csa(
     _same_street_primary = False
     if _retail_like and _subject_street_key:
         _same_street_subset = [
-            item for item in _primary_tone_pool
+            item for item in rated
             if _extract_street_key(item[0].address) == _subject_street_key
         ]
-        _final_count = len(_primary_tone_pool)
+        _final_count = len(rated)
         _same_count = len(_same_street_subset)
         same_street_share_final = (_same_count / _final_count) if _final_count > 0 else 0.0
         primary_tone_same_street_count = _same_count
