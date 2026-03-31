@@ -49,22 +49,53 @@ class TestDatabaseErrorPropagation:
             with pytest.raises(DatabaseError, match="SV lines query failed"):
                 get_sv_lines_batch(["12345"])
 
-    def test_get_sv_car_parking_batch_raises_on_failure(self):
-        from api.db import DatabaseError, get_sv_car_parking_batch
+    def test_get_sv_car_parking_batch_fails_soft_on_failure(self):
+        from api.db import get_sv_car_parking_batch
 
-        with patch("api.db.Session") as mock_session_cls:
+        with patch("api.db.Session") as mock_session_cls, patch("api.db.DATABASE_URL", "postgresql://unit-test"):
             mock_session_cls.return_value.__enter__ = MagicMock(
                 side_effect=Exception("connection refused")
             )
             mock_session_cls.return_value.__exit__ = MagicMock(return_value=False)
-            with pytest.raises(DatabaseError, match="Car parking query failed"):
-                get_sv_car_parking_batch(["12345"])
+            assert get_sv_car_parking_batch(["12345"]) == {}
 
     def test_empty_uarns_returns_empty_without_error(self):
         """Empty input should return {} without hitting the database."""
         from api.db import get_sv_lines_batch, get_sv_car_parking_batch
         assert get_sv_lines_batch([]) == {}
         assert get_sv_car_parking_batch([]) == {}
+
+    def test_get_sv_car_parking_batch_dedupes_and_chunks(self):
+        from api.db import get_sv_car_parking_batch
+
+        with patch("api.db.Session") as mock_session_cls, patch("api.db.DATABASE_URL", "postgresql://unit-test"):
+            session = MagicMock()
+            mock_session_cls.return_value.__enter__.return_value = session
+            mock_session_cls.return_value.__exit__.return_value = False
+            session.execute.side_effect = [
+                MagicMock(fetchall=MagicMock(return_value=[])),  # SET LOCAL chunk 1
+                MagicMock(fetchall=MagicMock(return_value=[
+                    MagicMock(uarn=1, cp_spaces=2, cp_total=100),
+                ])),
+                MagicMock(fetchall=MagicMock(return_value=[])),  # SET LOCAL chunk 2
+                MagicMock(fetchall=MagicMock(return_value=[
+                    MagicMock(uarn=30, cp_spaces=1, cp_total=50),
+                ])),
+            ]
+
+            result = get_sv_car_parking_batch(
+                [str(i) for i in range(1, 31)] + ["1", "2", "x"]
+            )
+
+            assert set(result.keys()) == {"1", "30"}
+            chunk_queries = [
+                call.args[1]["uarns"]
+                for call in session.execute.call_args_list
+                if isinstance(call.args[1], dict) and "uarns" in call.args[1]
+            ]
+            assert len(chunk_queries) == 2
+            assert len(chunk_queries[0]) == 25
+            assert len(chunk_queries[1]) == 5
 
 
 # ---------------------------------------------------------------------------

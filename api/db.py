@@ -16,6 +16,7 @@ import logging
 import math
 import os
 import re
+import time
 from typing import Any
 
 log = logging.getLogger(__name__)
@@ -257,22 +258,40 @@ def get_sv_car_parking_batch(uarns: list[str]) -> dict[str, dict]:
 
     Each value contains ``cp_spaces`` and ``cp_total`` (total parking value £).
     Used by the 03-07 fit layer to detect parking presence and contribution.
-    Returns {} on empty input.  Raises DatabaseError on query failure.
+    Returns {} on empty input. Never raises on query failure (fail-soft).
     """
     if not uarns:
         return {}
     int_uarns = _coerce_uarns_to_int(uarns)
     if not int_uarns:
         return {}
+    # Deduplicate while preserving input order to avoid redundant DB work.
+    int_uarns = list(dict.fromkeys(int_uarns))
+    chunk_size = 25
+    timeout_ms = 250
+    chunks: list[list[int]] = [
+        int_uarns[i:i + chunk_size] for i in range(0, len(int_uarns), chunk_size)
+    ]
     sql = text("""
         SELECT uarn, cp_spaces, cp_total
         FROM voa_sv_car_parking
         WHERE uarn = ANY(:uarns)
     """)
+    started = time.perf_counter()
+    fallback = False
+    rows: list[Any] = []
+    use_statement_timeout = "sqlite" not in DATABASE_URL
     try:
         with Session(engine) as session:
-            rows = session.execute(sql, {"uarns": int_uarns}).fetchall()
-        return {
+            for chunk in chunks:
+                # Keep this optional enrichment query on a strict per-chunk budget.
+                if use_statement_timeout:
+                    session.execute(
+                        text("SET LOCAL statement_timeout = :timeout_ms"),
+                        {"timeout_ms": timeout_ms},
+                    )
+                rows.extend(session.execute(sql, {"uarns": chunk}).fetchall())
+        result = {
             str(r.uarn): {
                 "cp_spaces": float(r.cp_spaces) if r.cp_spaces is not None else None,
                 "cp_total":  float(r.cp_total)  if r.cp_total  is not None else None,
@@ -280,8 +299,22 @@ def get_sv_car_parking_batch(uarns: list[str]) -> dict[str, dict]:
             for r in rows
         }
     except Exception as exc:
-        log.error("get_sv_car_parking_batch failed: %s", exc, exc_info=True)
-        raise DatabaseError(f"Car parking query failed: {exc}") from exc
+        fallback = True
+        log.warning("get_sv_car_parking_batch failed; using empty fallback: %s", exc, exc_info=True)
+        result = {}
+    duration_ms = round((time.perf_counter() - started) * 1000, 1)
+    log.info(
+        "get_sv_car_parking_batch completed",
+        extra={
+            "uarn_count": len(int_uarns),
+            "chunks": len(chunks),
+            "duration_ms": duration_ms,
+            "fallback": fallback,
+            "rows_returned": len(result),
+            "timeout_ms": timeout_ms,
+        },
+    )
+    return result
 
 
 def get_sv_additions_batch(uarns: list[str]) -> dict[str, dict]:
