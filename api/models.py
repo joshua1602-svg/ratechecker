@@ -601,14 +601,27 @@ def build_evidence_payload_from_assess(
     )
 
     # Re-derive tone_source_label from rated_comps when the stored value is
-    # missing or stale.  Each rated comp carries an `is_same_street` flag set
-    # by the CSA engine, so we can reconstruct the label without re-running
-    # the full assessment.  Thresholds mirror _RETAIL_PRIMARY_TONE_SAME_STREET_*
-    # constants in csa.py.
+    # missing or stale. Each rated comp should carry an `is_same_street` flag
+    # from the CSA engine; however, some persisted payloads can be missing that
+    # key (e.g. legacy frontend state snapshots). In that case, infer same-
+    # street membership by extracting a street key from comp and subject
+    # addresses so the evidence-pack label remains aligned with the rendered
+    # comparable list.
     _tone_source_label = assess_response.tone_source_label
     _rated = assess_response.rated_comps or []
     if _rated and request.property.business_type.value in ("retail", "hair_beauty"):
-        _ss_count = sum(1 for c in _rated if c.get("is_same_street"))
+        from api.engine.csa import _extract_street_key
+
+        _subject_key = _extract_street_key(request.property.address or "")
+        _ss_count = 0
+        for c in _rated:
+            if c.get("is_same_street") is True:
+                _ss_count += 1
+                continue
+            if c.get("is_same_street") is False:
+                continue
+            if _subject_key and _extract_street_key(c.get("address") or "") == _subject_key:
+                _ss_count += 1
         _total = len(_rated)
         _ss_share = _ss_count / _total if _total > 0 else 0.0
         if _ss_count >= 6 or _ss_share >= 0.50:
