@@ -1049,6 +1049,10 @@ def run_csa(
     _post_outlier_same_street_share: float = 0.0
     _post_outlier_same_street_subset: list[_ClusterItem] = []
     _same_street_primary_early: bool = False
+    _dominant_street: str | None = None
+    _same_street_median_rate: float | None = None
+    _pool_count_before_reversion: int = 0
+    _pool_count_after_reversion: int = 0
 
     if _retail_like:
         # Classify the subject's valuation basis.
@@ -1141,6 +1145,7 @@ def run_csa(
                 _ss_rates = sorted(r for _, _, r, _ in _street_buckets[_dominant_street])
                 _ss_n = len(_ss_rates)
                 _ss_med = _ss_rates[_ss_n // 2] if _ss_n else 0.0
+                _same_street_median_rate = _ss_med if _ss_n else None
                 _ss_spread = (
                     (_ss_rates[-1] - _ss_rates[0]) / _ss_med
                     if _ss_med > 0 and _ss_n >= 2
@@ -1178,21 +1183,27 @@ def run_csa(
                 _location_tier = "same_postcode_sector"
 
             else:
-                # When same-street was reverted due to prime plausibility,
-                # exclude the dominant street's comps from the full pool so
-                # they cannot dominate the cluster selection via proximity.
-                if same_street_reverted and _dominant_street:
-                    pool = [
-                        _item for _item in rated
-                        if _extract_street_key(_item[0].address) != _dominant_street
-                    ]
-                    if len(pool) < _MIN_COMPS_FOR_VALUATION:
-                        pool = rated  # fall back to full pool if too few remain
-                else:
-                    pool = rated
+                # Soft demotion only: if same-street was reverted (e.g. prime
+                # plausibility), do not use it as a direct primary tier or
+                # same-street cluster anchor, but keep those comps in full-pool
+                # clustering so relevant street evidence is not erased.
+                pool = rated
                 same_street_key = None
                 same_street_count = 0
                 _location_tier = "full_pool"
+            _pool_count_before_reversion = len(rated)
+            _pool_count_after_reversion = len(pool)
+            _csa_log.debug(
+                "same_street_reversion_check subject_implied_rate=%s same_street_median=%s "
+                "reverted=%s dominant_street=%r pool_before=%d pool_after=%d tier=%s",
+                round(subject_implied_rate, 2) if subject_implied_rate is not None else None,
+                round(_same_street_median_rate, 2) if _same_street_median_rate is not None else None,
+                same_street_reverted,
+                _dominant_street,
+                _pool_count_before_reversion,
+                _pool_count_after_reversion,
+                _location_tier,
+            )
             # Cluster the selected pool and apply conservative retail cluster selection.
             clusters = _find_rate_clusters(pool)
             cluster_count = len(clusters)
@@ -1397,6 +1408,18 @@ def run_csa(
                 _same_street_primary,
                 len(rate_vals),
                 tone_source,
+            )
+            _csa_log.debug(
+                "same_street_reversion_final subject_implied_rate=%s same_street_median=%s "
+                "reverted=%s dominant_street=%r pool_before=%d pool_after=%d tone_source=%s selection_reason=%s",
+                round(subject_implied_rate, 2) if subject_implied_rate is not None else None,
+                round(_same_street_median_rate, 2) if _same_street_median_rate is not None else None,
+                same_street_reverted,
+                _dominant_street,
+                _pool_count_before_reversion,
+                _pool_count_after_reversion,
+                tone_source,
+                _selection_reason,
             )
 
     # --- Confidence (count-based baseline) ---

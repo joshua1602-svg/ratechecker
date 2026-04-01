@@ -28,6 +28,7 @@ from api.models import (
 )
 from api.pending_reports import get_draft, get_draft_payment_status
 from api.reports.pdf_generator import generate_evidence_pack, generate_simplified_report
+from api.routes.assess import run_assessment_pipeline
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -362,6 +363,16 @@ async def download_report(session_id: str, request: Request) -> Response:
             status_code=500,
             detail="Stored engine data is invalid — cannot generate report.",
         ) from exc
+
+    # Defensive paid-flow rebuild: if stored rated_comps are empty/missing
+    # (e.g. frontend persisted an empty list), recompute from backend inputs so
+    # evidence tables remain populated from backend truth.
+    if not (assess_resp.rated_comps or []):
+        logger.info(
+            "Stored paid assess_response has no rated_comps; recomputing assessment for session_id=%s",
+            session_id,
+        )
+        assess_resp = await run_assessment_pipeline(assess_req)
 
     # ── 4. Build the report payload from backend truth ──
     product = draft["product"]
