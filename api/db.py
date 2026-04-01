@@ -427,6 +427,18 @@ def _normalise_postcode(value: str | None) -> str:
     return "".join(str(value or "").upper().split())
 
 
+def _postcode_variants(compact: str) -> list[str]:
+    """Return both the compact ('SW195DX') and standard-spaced ('SW19 5DX') forms.
+
+    UK postcodes always have a 3-character inward code, so the space goes
+    before the last 3 characters.
+    """
+    if len(compact) < 4:
+        return [compact]
+    spaced = compact[:-3] + " " + compact[-3:]
+    return [compact, spaced]
+
+
 def _normalise_address(value: str | None) -> str:
     """Normalise address string for deterministic matching."""
     text_value = str(value or "").upper()
@@ -649,6 +661,11 @@ def get_subject_voa_candidates_by_address_postcode(address: str, postcode: str) 
     if not normalised_postcode:
         return []
 
+    # Match against both compact ("SW195DX") and standard-spaced ("SW19 5DX")
+    # forms so the query can use an index on le.postcode directly, avoiding
+    # the full-table-scan caused by REPLACE(UPPER(...)).
+    pc_variants = _postcode_variants(normalised_postcode)
+
     sql = text("""
         SELECT
             le.uarn,
@@ -661,12 +678,15 @@ def get_subject_voa_candidates_by_address_postcode(address: str, postcode: str) 
             le.full_property_identifier AS full_property_identifier
         FROM voa_list_entries le
         LEFT JOIN voa_sv_header svh ON le.uarn = svh.uarn
-        WHERE REPLACE(UPPER(le.postcode), ' ', '') = :postcode
+        WHERE le.postcode = :pc_spaced OR le.postcode = :pc_compact
         ORDER BY le.uarn
     """)
     try:
         with Session(engine) as session:
-            postcode_rows = session.execute(sql, {"postcode": normalised_postcode}).fetchall()
+            postcode_rows = session.execute(sql, {
+                "pc_spaced": pc_variants[1] if len(pc_variants) > 1 else pc_variants[0],
+                "pc_compact": pc_variants[0],
+            }).fetchall()
 
         filtered_rows, street_count, number_count = _filter_structured_subject_candidates(
             postcode_rows,
