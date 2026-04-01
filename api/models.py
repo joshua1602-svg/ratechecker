@@ -604,7 +604,8 @@ def build_evidence_payload_from_assess(
     # street-key extraction.  This is robust against frontends that strip the
     # is_same_street flag or pass stale tone_source_label values.
     # Thresholds mirror _RETAIL_PRIMARY_TONE_SAME_STREET_* in csa.py.
-    _tone_source_label = assess_response.tone_source_label
+    _tone_source = getattr(assess_response, "tone_source", None)
+    _tone_source_label = getattr(assess_response, "tone_source_label", None)
     _rated = assess_response.rated_comps or []
     if _rated and request.property.business_type.value in ("retail", "hair_beauty"):
         from api.engine.csa import _extract_street_key
@@ -617,11 +618,13 @@ def build_evidence_payload_from_assess(
             _total = len(_rated)
             _ss_share = _ss_count / _total if _total > 0 else 0.0
             if _ss_count >= 6 or _ss_share >= 0.50:
+                _tone_source = "same_street_evidence"
                 _tone_source_label = (
                     "Primary tone source: Same street evidence "
                     "(sufficiently strong same-street set)"
                 )
             else:
+                _tone_source = "wider_local"
                 _tone_source_label = "Primary tone source: Wider local comparable set"
 
     # Legacy fallback only when CSA fields are absent.
