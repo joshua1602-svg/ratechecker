@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import asdict, dataclass
 from statistics import quantiles
 from typing import Literal, Optional
@@ -176,9 +177,45 @@ CASE_STRENGTH_TEMPLATES = {
 }
 
 
+_STREET_SUFFIXES: frozenset[str] = frozenset({
+    "STREET", "ROAD", "AVENUE", "LANE", "WAY", "CLOSE", "GROVE",
+    "PLACE", "GARDENS", "COURT", "DRIVE", "ROW", "TERRACE", "WALK",
+    "PARADE", "GATE", "BRIDGE", "HILL", "SQUARE", "MEWS", "YARD",
+    "QUAY", "WHARF", "BROADWAY", "CRESCENT", "APPROACH", "PRECINCT",
+})
+_STREET_SUFFIX_ALIASES: dict[str, str] = {
+    "ST": "STREET", "RD": "ROAD", "AVE": "AVENUE", "LN": "LANE",
+    "CL": "CLOSE", "DR": "DRIVE", "TER": "TERRACE", "SQ": "SQUARE",
+}
+_STREET_SUFFIX_PATTERN: str = "|".join(
+    sorted(set(_STREET_SUFFIXES) | set(_STREET_SUFFIX_ALIASES.keys()), key=len, reverse=True),
+)
+_STREET_KEY_RE = re.compile(rf"\b([A-Z][A-Z0-9]*)\s*({_STREET_SUFFIX_PATTERN})\b")
+
+
 def _extract_street_key(address: str) -> str:
-    parts = [p.strip().lower() for p in str(address or "").split(",") if p.strip()]
-    return parts[0] if parts else ""
+    """Return a normalised street identifier (e.g. 'HIGH STREET') from an address.
+
+    Mirrors the logic in api/engine/csa.py so that same-street matching in the
+    narrative layer is consistent with the CSA engine's street detection.
+    """
+    clean = re.sub(r"['\-]", "", (address or "").upper())
+    clean = re.sub(r"[^A-Z0-9 ]", " ", clean)
+    clean = re.sub(r"\s+", " ", clean).strip()
+
+    m = _STREET_KEY_RE.search(clean)
+    if m:
+        stem, suffix = m.group(1), m.group(2)
+        canonical = _STREET_SUFFIX_ALIASES.get(suffix, suffix)
+        if canonical in _STREET_SUFFIXES:
+            return f"{stem} {canonical}"
+
+    tokens = clean.split()
+    for i, token in enumerate(tokens):
+        canonical = _STREET_SUFFIX_ALIASES.get(token, token)
+        if canonical in _STREET_SUFFIXES and i > 0:
+            return f"{tokens[i - 1]} {canonical}"
+    return ""
 
 
 def _infer_voa_match_quality(reconciliation: dict | None) -> MatchQuality:

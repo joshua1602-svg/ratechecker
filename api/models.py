@@ -600,21 +600,29 @@ def build_evidence_payload_from_assess(
         voa_subject_record=voa_subject_record,
     )
 
-    # CSA is the source of truth for tone source fields. Preserve CSA outputs
-    # exactly when supplied; only derive fallback values when they are absent.
-    _tone_source = (assess_response.tone_source or "").strip() or None
-    _tone_source_label = (assess_response.tone_source_label or "").strip() or None
+    # Re-derive tone_source_label from rated_comps using address-based
+    # street-key extraction.  This is robust against frontends that strip the
+    # is_same_street flag or pass stale tone_source_label values.
+    # Thresholds mirror _RETAIL_PRIMARY_TONE_SAME_STREET_* in csa.py.
+    _tone_source_label = assess_response.tone_source_label
     _rated = assess_response.rated_comps or []
-
-    # If CSA provided tone_source but omitted label, map to canonical label.
-    if _tone_source_label is None:
-        if _tone_source == "same_street_evidence":
-            _tone_source_label = (
-                "Primary tone source: Same street evidence "
-                "(sufficiently strong same-street set)"
+    if _rated and request.property.business_type.value in ("retail", "hair_beauty"):
+        from api.engine.csa import _extract_street_key
+        _subj_street = _extract_street_key(request.property.address or "")
+        if _subj_street:
+            _ss_count = sum(
+                1 for c in _rated
+                if _extract_street_key(c.get("address") or "") == _subj_street
             )
-        elif _tone_source == "wider_local":
-            _tone_source_label = "Primary tone source: Wider local comparable set"
+            _total = len(_rated)
+            _ss_share = _ss_count / _total if _total > 0 else 0.0
+            if _ss_count >= 6 or _ss_share >= 0.50:
+                _tone_source_label = (
+                    "Primary tone source: Same street evidence "
+                    "(sufficiently strong same-street set)"
+                )
+            else:
+                _tone_source_label = "Primary tone source: Wider local comparable set"
 
     # Legacy fallback only when CSA fields are absent.
     if (
