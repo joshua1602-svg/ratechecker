@@ -421,6 +421,31 @@ def _derive_fields(report_data: dict) -> dict:
     data.setdefault("crime_adjustment_indicator", {"low": "Low", "moderate": "Moderate", "elevated": "Elevated"}.get(crime_level, "N/A"))
     data.setdefault("flood_adjustment_indicator", {"active": "Active", "none": "None"}.get(flood_level, "N/A"))
 
+    # Re-derive tone_source_label from comparable addresses so it is always
+    # consistent with the actual comp pool, regardless of how the payload was
+    # constructed (paid download, direct POST, stale draft, etc.).
+    _btype = str(data.get("business_type") or "").lower()
+    if _btype in ("retail", "hair_beauty") and _comps_list:
+        from api.engine.csa import _extract_street_key as _csa_street_key
+        _subj_street = _csa_street_key(data.get("property_address") or "")
+        if _subj_street:
+            _ss_n = sum(
+                1 for _c in _comps_list
+                if isinstance(_c, dict) and _csa_street_key(_c.get("address") or "") == _subj_street
+            )
+            _total_n = len(_comps_list)
+            _ss_sh = _ss_n / _total_n if _total_n > 0 else 0.0
+            if _ss_n >= 6 or _ss_sh >= 0.50:
+                data["tone_source_label"] = (
+                    "Primary tone source: Same street evidence "
+                    "(sufficiently strong same-street set)"
+                )
+            else:
+                data.setdefault(
+                    "tone_source_label",
+                    "Primary tone source: Wider local comparable set",
+                )
+
     if not data.get("evidence_interpretation") or not data.get("case_assessment") or not data.get("recommended_action"):
         data.update(build_rendered_narrative(data))
 

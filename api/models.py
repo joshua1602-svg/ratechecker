@@ -600,24 +600,29 @@ def build_evidence_payload_from_assess(
         voa_subject_record=voa_subject_record,
     )
 
-    # Re-derive tone_source_label from rated_comps when the stored value is
-    # missing or stale.  Each rated comp carries an `is_same_street` flag set
-    # by the CSA engine, so we can reconstruct the label without re-running
-    # the full assessment.  Thresholds mirror _RETAIL_PRIMARY_TONE_SAME_STREET_*
-    # constants in csa.py.
+    # Re-derive tone_source_label from rated_comps using address-based
+    # street-key extraction.  This is robust against frontends that strip the
+    # is_same_street flag or pass stale tone_source_label values.
+    # Thresholds mirror _RETAIL_PRIMARY_TONE_SAME_STREET_* in csa.py.
     _tone_source_label = assess_response.tone_source_label
     _rated = assess_response.rated_comps or []
     if _rated and request.property.business_type.value in ("retail", "hair_beauty"):
-        _ss_count = sum(1 for c in _rated if c.get("is_same_street"))
-        _total = len(_rated)
-        _ss_share = _ss_count / _total if _total > 0 else 0.0
-        if _ss_count >= 6 or _ss_share >= 0.50:
-            _tone_source_label = (
-                "Primary tone source: Same street evidence "
-                "(sufficiently strong same-street set)"
+        from api.engine.csa import _extract_street_key
+        _subj_street = _extract_street_key(request.property.address or "")
+        if _subj_street:
+            _ss_count = sum(
+                1 for c in _rated
+                if _extract_street_key(c.get("address") or "") == _subj_street
             )
-        else:
-            _tone_source_label = "Primary tone source: Wider local comparable set"
+            _total = len(_rated)
+            _ss_share = _ss_count / _total if _total > 0 else 0.0
+            if _ss_count >= 6 or _ss_share >= 0.50:
+                _tone_source_label = (
+                    "Primary tone source: Same street evidence "
+                    "(sufficiently strong same-street set)"
+                )
+            else:
+                _tone_source_label = "Primary tone source: Wider local comparable set"
 
     # Evidence-specific required fields
     payload.update({
