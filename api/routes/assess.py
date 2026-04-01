@@ -55,7 +55,15 @@ async def assess(req: AssessRequest) -> AssessResponse:
     # 1. Captcha verification
     if not await verify_turnstile(req.captcha_token):
         raise HTTPException(status_code=400, detail="Captcha verification failed")
+    return await run_assessment_pipeline(req)
 
+
+async def run_assessment_pipeline(req: AssessRequest) -> AssessResponse:
+    """Run the full assessment pipeline without captcha validation.
+
+    Used by /assess (after captcha) and by paid report generation fallback
+    when persisted comparable rows are missing.
+    """
     # 2. Geocode postcode
     coords = await postcode_to_coords(req.property.postcode)
     if coords is None:
