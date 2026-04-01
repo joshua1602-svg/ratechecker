@@ -117,8 +117,8 @@ def get_comparables(
         SELECT
             le.uarn,
             le.full_property_identifier           AS address,
-            le.postcode                          AS postcode,
-            le.street                            AS street,
+            le.postcode                           AS postcode,
+            le.street                             AS street,
             le.scat_code,
             le.rateable_value                     AS rv,
             le.primary_description_text           AS description,
@@ -137,12 +137,15 @@ def get_comparables(
             AND le.rateable_value > 0
             AND pc.latitude  BETWEEN :lat_lo AND :lat_hi
             AND pc.longitude BETWEEN :lon_lo AND :lon_hi
-            AND COALESCE(svh.total_area_or_units, :nia_fallback) BETWEEN :lo_nia AND :hi_nia
+            AND (
+                svh.total_area_or_units BETWEEN :lo_nia AND :hi_nia
+                OR (svh.total_area_or_units IS NULL
+                    AND :nia_fallback BETWEEN :lo_nia AND :hi_nia)
+            )
             AND (svh.unit_of_measurement IS NULL OR svh.unit_of_measurement = 'NIA')
             {postcode_clause}
             {exclude_clause}
     """)
-
     params: dict[str, Any] = {
         **scat_binds,
         "lat_lo": lat - lat_delta,
