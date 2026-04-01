@@ -408,6 +408,24 @@ def _derive_fields(report_data: dict) -> dict:
                     if _raw is not None:
                         _c["weight_pct"] = round(float(_raw) / _weight_sum * 100, 1)
 
+    # Sort comparables by descending weight for presentation clarity
+    if _comps_list:
+        def _weight_sort_value(comp: dict) -> float:
+            raw = comp.get("weight_pct")
+            if isinstance(raw, str):
+                raw = raw.strip().rstrip("%")
+            try:
+                return float(raw or 0)
+            except (TypeError, ValueError):
+                return 0.0
+
+        data["comparables"] = sorted(
+            _comps_list,
+            key=lambda c: _weight_sort_value(c) if isinstance(c, dict) else 0.0,
+            reverse=True,
+        )
+        _comps_list = data["comparables"]
+
     data.setdefault("weighting_rows", _build_weighting_rows(data))
 
     reconciliation = data.get("voa_reconciliation") or {}
