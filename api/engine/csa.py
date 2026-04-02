@@ -1054,6 +1054,8 @@ def run_csa(
     _pool_count_before_reversion: int = 0
     _pool_count_after_reversion: int = 0
 
+    _same_street_primary_eligible = (_retail_like or _is_restaurant)
+
     if _retail_like:
         # Classify the subject's valuation basis.
         subject_retail_method = _classify_retail_method(
@@ -1231,6 +1233,59 @@ def run_csa(
             # cluster distortion.  Keep highest-weight comps (proximity × source).
             if len(rated) > _RETAIL_POST_CLUSTER_MAX_COMPS:
                 rated = sorted(rated, key=lambda x: x[3], reverse=True)[:_RETAIL_POST_CLUSTER_MAX_COMPS]
+    elif _is_restaurant:
+        # Restaurant/cafe: apply the same same-street-primary trigger structure
+        # used for retail (count/share thresholds + coherence/plausibility guard),
+        # but without retail-only clustering.
+        if voa_rv and voa_rv > 0 and nia_sqm > 0:
+            subject_implied_rate = voa_rv / nia_sqm
+
+        if _subject_street_key and _post_outlier_pool_count > 0:
+            _post_outlier_same_street_subset = [
+                _item for _item in rated
+                if _extract_street_key(_item[0].address) == _subject_street_key
+            ]
+            _post_outlier_same_street_count = len(_post_outlier_same_street_subset)
+            _post_outlier_same_street_share = (
+                _post_outlier_same_street_count / _post_outlier_pool_count
+            )
+            _same_street_primary_early = (
+                _post_outlier_same_street_count >= _RETAIL_PRIMARY_TONE_SAME_STREET_MIN_COUNT
+                or _post_outlier_same_street_share >= _RETAIL_PRIMARY_TONE_SAME_STREET_MIN_SHARE
+            )
+        if _same_street_primary_early and _post_outlier_same_street_subset:
+            _ss_rates = sorted(r for _, _, r, _ in _post_outlier_same_street_subset)
+            _ss_n = len(_ss_rates)
+            _ss_med = _ss_rates[_ss_n // 2] if _ss_n else 0.0
+            _same_street_median_rate = _ss_med if _ss_n else None
+            _ss_spread = (
+                (_ss_rates[-1] - _ss_rates[0]) / _ss_med
+                if _ss_med > 0 and _ss_n >= 2
+                else 0.0
+            )
+            _ss_incoherent = _ss_spread > _RETAIL_SAME_STREET_MAX_SPREAD
+            _ss_implausibly_prime = (
+                subject_implied_rate is not None
+                and subject_implied_rate > 0
+                and _ss_med > subject_implied_rate * _PRIME_PLAUSIBILITY_THRESHOLD
+            )
+            if _ss_incoherent or _ss_implausibly_prime:
+                same_street_reverted = True
+                _same_street_primary_early = False
+                _location_tier = "full_pool"
+                _selection_reason = "same_street_primary_reverted"
+            else:
+                rated = _post_outlier_same_street_subset
+                same_street_key = _subject_street_key
+                same_street_count = len(rated)
+                _location_tier = "same_street_primary"
+                _selection_reason = "same_street_primary_override"
+                _pool_count_before_reversion = _post_outlier_pool_count
+                _pool_count_after_reversion = len(rated)
+        if _pool_count_before_reversion == 0:
+            _pool_count_before_reversion = _post_outlier_pool_count
+        if _pool_count_after_reversion == 0:
+            _pool_count_after_reversion = len(rated)
 
     if not rated:
         return _insufficient_data()
@@ -1262,7 +1317,7 @@ def run_csa(
 
     _same_street_subset: list[tuple[Comparable, float, float, float]] = []
     _same_street_primary = False
-    if _retail_like and _subject_street_key:
+    if _same_street_primary_eligible and _subject_street_key:
         _same_street_subset = [
             item for item in rated
             if _extract_street_key(item[0].address) == _subject_street_key
@@ -1275,6 +1330,8 @@ def run_csa(
             _same_count >= _RETAIL_PRIMARY_TONE_SAME_STREET_MIN_COUNT
             or same_street_share_final >= _RETAIL_PRIMARY_TONE_SAME_STREET_MIN_SHARE
         )
+        if _is_restaurant and same_street_reverted:
+            _same_street_primary = False
         if _same_street_primary and _same_count > 0:
             tone_source = "same_street_evidence"
             tone_source_label = (
@@ -1314,6 +1371,7 @@ def run_csa(
                 _sir = round(voa_rv / _s_itza, 1) if _s_itza > 0 else None
 
         _debug = {
+            "business_type": business_type,
             "n_initial_comps": len(comps),
             "n_after_size_and_launderette": len(filtered),
             "n_after_distance": len(with_dist),
@@ -1368,6 +1426,7 @@ def run_csa(
             "final_comparable_count": len(rated),
             "primary_tone_subset_size": len(rate_vals),
             "final_tone_source_used": tone_source,
+            "final_tone_source_label": tone_source_label,
             "same_street_comp_uarns": [str(item[0].uarn) for item in _same_street_subset],
             "same_street_comp_addresses": [item[0].address for item in _same_street_subset],
         }
@@ -1396,6 +1455,17 @@ def run_csa(
             }
             for c, d, r, w in top5
         ]
+        if _same_street_primary_eligible:
+            _csa_log.debug(
+                "same_street_primary_diagnostics business_type=%s same_count=%d same_share=%.3f "
+                "primary_triggered=%s same_street_reverted=%s final_tone_source_label=%s",
+                business_type,
+                primary_tone_same_street_count,
+                same_street_share_final,
+                _same_street_primary,
+                same_street_reverted,
+                tone_source_label,
+            )
         if _retail_like:
             _csa_log.debug(
                 "same_street_primary_check subject_raw=%r subject_key=%r final_comp_count=%d "

@@ -1096,21 +1096,51 @@ class TestRetailSameStreetPrimaryTone:
         assert result["tone_source"] == "same_street_evidence"
         assert result["tone_rate"] >= 500.0
 
-    def test_non_retail_path_not_switched_to_same_street_primary(self):
-        comps = [
-            self._retail_comp_with_address("n1", 180, "SHOP, 1, HIGH STREET, LONDON"),
-            self._retail_comp_with_address("n2", 185, "SHOP, 2, HIGH STREET, LONDON"),
-            self._retail_comp_with_address("n3", 190, "SHOP, 3, MARKET ROAD, LONDON"),
+    def test_restaurant_same_street_primary_triggers_with_strong_set(self):
+        same_street = [
+            self._retail_comp_with_address(f"rss{i}", r, "UNIT, 1, HIGH STREET, LONDON")
+            for i, r in enumerate([138, 140, 142, 144, 146, 148])
+        ]
+        wider = [
+            self._retail_comp_with_address(f"rw{i}", r, "UNIT, 9, MARKET ROAD, LONDON")
+            for i, r in enumerate([90, 92, 94, 96])
         ]
         result = _run(
-            comps,
+            same_street + wider,
             nia_sqm=100.0,
-            voa_rv=18_000.0,
+            voa_rv=14_000.0,
+            business_type="restaurant_cafe",
+            subject_address="12 High Street, London",
+        )
+        assert result["signal"] != "Insufficient Data"
+        assert result["tone_source"] == "same_street_evidence"
+        assert "Same street evidence" in (result.get("tone_source_label") or "")
+        dbg = result.get("_debug", {})
+        assert dbg.get("business_type") == "restaurant_cafe"
+        assert dbg.get("same_street_primary_triggered") is True
+        assert dbg.get("same_street_reverted") is False
+
+    def test_restaurant_same_street_reverted_is_soft_demotion(self):
+        same_street = [
+            self._retail_comp_with_address(f"rss{i}", r, "UNIT, 1, HIGH STREET, LONDON")
+            for i, r in enumerate([170, 175, 180, 185, 190, 195])
+        ]
+        wider = [
+            self._retail_comp_with_address(f"rw{i}", r, "UNIT, 9, MARKET ROAD, LONDON")
+            for i, r in enumerate([95, 100, 105, 110])
+        ]
+        result = _run(
+            same_street + wider,
+            nia_sqm=100.0,
+            voa_rv=10_000.0,
             business_type="restaurant_cafe",
             subject_address="12 High Street, London",
         )
         assert result["signal"] != "Insufficient Data"
         assert result["tone_source"] == "wider_local"
+        dbg = result.get("_debug", {})
+        assert dbg.get("same_street_reverted") is True
+        assert dbg.get("final_comparable_count", 0) >= 6
 
 # ---------------------------------------------------------------------------
 # 7. Conservative retail cluster selection (_retail_select_cluster / run_csa)
