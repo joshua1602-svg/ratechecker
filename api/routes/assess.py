@@ -202,6 +202,11 @@ async def run_assessment_pipeline(req: AssessRequest) -> AssessResponse:
         voa_rv=req.property.voa_rv,
         subject_itza_sqm=subject_itza_override,
         subject_address=subject_address_for_csa,
+        subject_scat_code=(
+            int(resolved_subject_record.get("scat_code"))
+            if resolved_subject_record and resolved_subject_record.get("scat_code") is not None
+            else None
+        ),
     )
 
     # 5b. Layout overweighting layer (runs after CSA, before adjustments)

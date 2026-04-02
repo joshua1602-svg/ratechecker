@@ -17,6 +17,7 @@ import logging
 import math
 import re
 import statistics
+from collections import Counter
 
 _csa_log = logging.getLogger(__name__)
 from dataclasses import dataclass, field
@@ -776,6 +777,7 @@ def run_csa(
     subject_postcode_sector: str = "",
     subject_itza_sqm: float | None = None,
     subject_address: str = "",
+    subject_scat_code: int | None = None,
 ) -> dict:
     """
     Run the CSA on a list of pre-fetched Comparable objects.
@@ -789,6 +791,60 @@ def run_csa(
     _is_nursery = business_type == "nursery"
     _is_restaurant = business_type == "restaurant_cafe"
     _subject_street_key = _extract_street_key(subject_address) if subject_address else None
+    _n_input_comps = len(comps)
+    _allowed_scats_by_type = {
+        "restaurant_cafe": {
+            int(rules["scat_codes"]["cafe"]),
+            int(rules["scat_codes"]["restaurant"]),
+        },
+        "retail": {
+            int(rules["scat_codes"]["retail_shop"]),
+            int(rules["scat_codes"]["showroom"]),
+        },
+        "hair_beauty": {int(rules["scat_codes"]["hair_beauty"])},
+        "nursery": {int(rules["scat_codes"]["nursery"])},
+        "pub": {
+            int(rules["scat_codes"]["pub"]),
+            int(rules["scat_codes"]["pub_with_lodge"]),
+        },
+    }
+    _allowed_scats = _allowed_scats_by_type.get(business_type, set())
+    def _coerce_scat(value: object) -> int | None:
+        try:
+            return int(value)  # tolerate string/decimal-coded SCATs from non-DB callers
+        except (TypeError, ValueError):
+            return None
+
+    _scat_distribution_before = dict(
+        sorted(
+            Counter(
+                _coerce_scat(c.scat_code) for c in comps
+                if _coerce_scat(c.scat_code) is not None
+            ).items()
+        )
+    )
+    if _allowed_scats:
+        comps = [
+            c for c in comps
+            if _coerce_scat(c.scat_code) in _allowed_scats
+        ]
+    _scat_distribution_after = dict(
+        sorted(
+            Counter(
+                _coerce_scat(c.scat_code) for c in comps
+                if _coerce_scat(c.scat_code) is not None
+            ).items()
+        )
+    )
+    if _is_restaurant:
+        _csa_log.debug(
+            "CSA_RESTAURANT_DEBUG stage=0_scat_scope business_type=%s subject_scat=%s allowed_scats=%s scat_distribution_before=%s scat_distribution_after=%s",
+            business_type,
+            subject_scat_code,
+            sorted(_allowed_scats),
+            _scat_distribution_before,
+            _scat_distribution_after,
+        )
 
     # --- Size-band filter ---
     _retail_like = business_type in ("retail", "hair_beauty")
@@ -1372,7 +1428,10 @@ def run_csa(
 
         _debug = {
             "business_type": business_type,
-            "n_initial_comps": len(comps),
+            "subject_scat_code": subject_scat_code,
+            "candidate_scat_distribution_before_filter": _scat_distribution_before,
+            "candidate_scat_distribution_after_filter": _scat_distribution_after,
+            "n_initial_comps": _n_input_comps,
             "n_after_size_and_launderette": len(filtered),
             "n_after_distance": len(with_dist),
             "n_after_outlier_removal": n_after_outlier,
@@ -1465,6 +1524,20 @@ def run_csa(
                 _same_street_primary,
                 same_street_reverted,
                 tone_source_label,
+            )
+        if _is_restaurant:
+            _csa_log.debug(
+                "CSA_RESTAURANT_DEBUG stage=7_summary business_type=%s subject_scat=%s scat_before=%s scat_after=%s same_street_count=%d same_street_share=%.3f same_street_primary=%s same_street_reverted=%s tone_source=%s tone=%.2f",
+                business_type,
+                subject_scat_code,
+                _scat_distribution_before,
+                _scat_distribution_after,
+                primary_tone_same_street_count,
+                same_street_share_final,
+                _same_street_primary,
+                same_street_reverted,
+                tone_source,
+                tone,
             )
         if _retail_like:
             _csa_log.debug(
