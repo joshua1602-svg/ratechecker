@@ -41,7 +41,9 @@ router = APIRouter()
 def _scat_codes(business_type: str, rules: dict) -> list[int]:
     sc = rules["scat_codes"]
     mapping = {
-        "restaurant_cafe": [sc["cafe"], sc["restaurant"]],
+        # SCAT 409 is the restaurant/cafe universe used for restaurant tone.
+        # SCAT 234 is excluded to prevent retail contamination.
+        "restaurant_cafe": [sc["cafe"]],
         "retail": [sc["retail_shop"], sc["showroom"]],
         "hair_beauty": [sc["hair_beauty"]],
         "nursery": [sc["nursery"]],
@@ -202,6 +204,11 @@ async def run_assessment_pipeline(req: AssessRequest) -> AssessResponse:
         voa_rv=req.property.voa_rv,
         subject_itza_sqm=subject_itza_override,
         subject_address=subject_address_for_csa,
+        subject_scat_code=(
+            int(resolved_subject_record.get("scat_code"))
+            if resolved_subject_record and resolved_subject_record.get("scat_code") is not None
+            else None
+        ),
     )
 
     # 5b. Layout overweighting layer (runs after CSA, before adjustments)
