@@ -41,7 +41,9 @@ router = APIRouter()
 def _scat_codes(business_type: str, rules: dict) -> list[int]:
     sc = rules["scat_codes"]
     mapping = {
-        "restaurant_cafe": [sc["cafe"], sc["restaurant"]],
+        # SCAT 409 is the restaurant/cafe universe used for restaurant tone.
+        # SCAT 234 is excluded to prevent retail contamination.
+        "restaurant_cafe": [sc["cafe"]],
         "retail": [sc["retail_shop"], sc["showroom"]],
         "hair_beauty": [sc["hair_beauty"]],
         "nursery": [sc["nursery"]],
