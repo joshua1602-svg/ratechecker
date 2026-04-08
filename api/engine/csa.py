@@ -795,6 +795,7 @@ def run_csa(
     _allowed_scats_by_type = {
         "restaurant_cafe": {
             int(rules["scat_codes"]["cafe"]),
+            int(rules["scat_codes"]["restaurant"]),
         },
         "retail": {
             int(rules["scat_codes"]["retail_shop"]),
@@ -808,10 +809,33 @@ def run_csa(
         },
     }
     _allowed_scats = _allowed_scats_by_type.get(business_type, set())
-    _scat_distribution_before = dict(sorted(Counter(c.scat_code for c in comps).items()))
+    def _coerce_scat(value: object) -> int | None:
+        try:
+            return int(value)  # tolerate string/decimal-coded SCATs from non-DB callers
+        except (TypeError, ValueError):
+            return None
+
+    _scat_distribution_before = dict(
+        sorted(
+            Counter(
+                _coerce_scat(c.scat_code) for c in comps
+                if _coerce_scat(c.scat_code) is not None
+            ).items()
+        )
+    )
     if _allowed_scats:
-        comps = [c for c in comps if c.scat_code in _allowed_scats]
-    _scat_distribution_after = dict(sorted(Counter(c.scat_code for c in comps).items()))
+        comps = [
+            c for c in comps
+            if _coerce_scat(c.scat_code) in _allowed_scats
+        ]
+    _scat_distribution_after = dict(
+        sorted(
+            Counter(
+                _coerce_scat(c.scat_code) for c in comps
+                if _coerce_scat(c.scat_code) is not None
+            ).items()
+        )
+    )
     if _is_restaurant:
         _csa_log.debug(
             "CSA_RESTAURANT_DEBUG stage=0_scat_scope business_type=%s subject_scat=%s allowed_scats=%s scat_distribution_before=%s scat_distribution_after=%s",
