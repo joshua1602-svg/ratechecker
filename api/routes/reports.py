@@ -28,7 +28,7 @@ from api.models import (
 )
 from api.pending_reports import get_draft, get_draft_payment_status
 from api.reports.pdf_generator import generate_evidence_pack, generate_simplified_report
-from api.routes.assess import run_assessment_pipeline
+from api.services.assessment import run_live_assessment
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -372,7 +372,7 @@ async def download_report(session_id: str, request: Request) -> Response:
             "Stored paid assess_response has no rated_comps; recomputing assessment for session_id=%s",
             session_id,
         )
-        assess_resp = await run_assessment_pipeline(assess_req)
+        assess_resp = await run_live_assessment(assess_req)
 
     # ── 4. Build the report payload from backend truth ──
     product = draft["product"]

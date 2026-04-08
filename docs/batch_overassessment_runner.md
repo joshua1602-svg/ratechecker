@@ -5,7 +5,7 @@ Script: `scripts/batch_overassessment_runner.py`
 ## What it does
 - Pulls a batch of properties from Supabase via SQL.
 - Builds an `AssessRequest` per row.
-- Calls `api.routes.assess.run_assessment_pipeline()` directly (same live pipeline as `/assess`, excluding captcha).
+- Calls `api.services.assessment.run_live_assessment()` directly (same live valuation path used by production).
 - Computes fair range as ±5% around the returned modelled RV (same report logic).
 - Flags overassessed cases and writes ranked CSV output.
 - Continues processing when a row fails and records `status` + `error_message`.

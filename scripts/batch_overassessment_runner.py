@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """Batch overassessment runner using the live /assess valuation pipeline.
 
-This script intentionally calls `run_assessment_pipeline()` directly so each
-row is valued by the same internal logic as the free assess flow (CSA + layout
-+ fit + adjustments), while bypassing only captcha validation.
+This script calls the reusable live assessment service function that powers
+the production assess result path (CSA + layout + fit + adjustments).
 """
 from __future__ import annotations
 
@@ -29,7 +28,6 @@ from api.models import (
     FlagsInput,
     PropertyInput,
 )
-from api.routes.assess import run_assessment_pipeline
 from api.engine.rules import csa_rules
 
 log = logging.getLogger("batch_overassessment_runner")
@@ -174,7 +172,11 @@ def _build_request(row: dict[str, Any]) -> AssessRequest:
     )
 
 
-async def _process_one(row: dict[str, Any], semaphore: asyncio.Semaphore) -> RowResult:
+async def _process_one(
+    row: dict[str, Any],
+    semaphore: asyncio.Semaphore,
+    assess_runner: Any,
+) -> RowResult:
     base = {
         "id": row.get("id"),
         "uarn": row.get("uarn"),
@@ -205,7 +207,7 @@ async def _process_one(row: dict[str, Any], semaphore: asyncio.Semaphore) -> Row
 
     try:
         async with semaphore:
-            resp = await run_assessment_pipeline(req)
+            resp = await assess_runner(req)
 
         modelled_rv = (
             resp.adjusted_estimated_rv
@@ -276,7 +278,19 @@ async def _run(args: argparse.Namespace) -> int:
         return 0
 
     sem = asyncio.Semaphore(args.concurrency)
-    tasks = [asyncio.create_task(_process_one(r, sem)) for r in rows]
+    from api.services.assessment import run_live_assessment
+    assess_runner = run_live_assessment
+
+    tasks = [
+        asyncio.create_task(
+            _process_one(
+                r,
+                sem,
+                assess_runner=assess_runner,
+            )
+        )
+        for r in rows
+    ]
     results = [r.data for r in await asyncio.gather(*tasks)]
     ranked = sorted(results, key=_rank_key)
     _write_csv(ranked, Path(args.output_csv))
