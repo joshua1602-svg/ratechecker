@@ -181,7 +181,10 @@ async def run_assessment_pipeline(req: AssessRequest) -> AssessResponse:
     if resolved_subject_record is not None:
         _sv_lines = resolved_subject_record.get("sv_lines") or []
         if _sv_lines:
-            subject_itza_override = itza_from_voa_sv_lines(_sv_lines)
+            subject_itza_override = itza_from_voa_sv_lines(
+                _sv_lines,
+                is_retail_itza=btype in {"retail", "hair_beauty"},
+            )
 
     subject_address_for_csa = (req.property.address or "").strip()
     if resolved_subject_record is not None:

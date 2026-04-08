@@ -14,7 +14,7 @@ interface ResultsProps {
 
 // Four-tier verdict logic
 // Tier 1 — Undervalued:     voaRv < modelledLow
-// Tier 2 — Broadly inline:  voaRv within modelled band (±5%)
+// Tier 2 — Broadly inline:  voaRv within modelled band (±10%)
 // Tier 3 — Slightly over:   voaRv > modelledHigh, overage < 15%
 // Tier 4 — Overassessed:    voaRv > modelledHigh, overage >= 15%
 function getVerdict(

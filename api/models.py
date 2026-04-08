@@ -253,7 +253,7 @@ class PurchaseResponse(BaseModel):
 # /assess engine outputs.  The frontend must call this (or use the values
 # it computes) rather than inventing report fields.
 
-_SAVING_MARGIN = 0.05  # ±5% around the point estimate for low/high range
+_SAVING_MARGIN = 0.10  # ±10% around the point estimate for low/high range
 
 
 def _candidate_floor_presence(candidate: dict) -> tuple[bool, bool]:
@@ -457,7 +457,7 @@ def build_report_payload_from_assess(
     # Use adjusted RV if available, otherwise base RV
     best_rv = adj_rv if adj_rv is not None else base_rv
 
-    # Compute low/high range as ±5% of best estimate (conservative)
+    # Compute low/high range as ±10% of best estimate.
     if best_rv is not None:
         rv_low = round(best_rv * (1 - _SAVING_MARGIN) / 100) * 100
         rv_high = round(best_rv * (1 + _SAVING_MARGIN) / 100) * 100
@@ -523,7 +523,7 @@ def build_evidence_payload_from_assess(
     assess_response: AssessResponse,
     request: AssessRequest,
     *,
-    tone_basis: str = "Weighted median",
+    tone_basis: str = "Evidence-weighted upper-central anchor",
     recommendation_text: str | None = None,
 ) -> dict:
     """Build a canonical evidence pack payload from actual engine outputs.
