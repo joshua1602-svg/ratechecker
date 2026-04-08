@@ -15,8 +15,20 @@ from api.engine.rules import business_rules, rule_file_name
 from api.models import AreasInput, FlagsInput, NurseryInput, PropertyInput
 
 
-def _relativity_from_description(description: str | None) -> float | None:
+def _relativity_from_description(
+    description: str | None,
+    *,
+    is_retail_itza: bool = False,
+) -> float | None:
     desc = str(description or "").lower()
+    if is_retail_itza:
+        # Retail ITZA calibration:
+        # - trading basement / lower-ground retail: 20% of Zone A
+        # - storage / internal storage:            10% of Zone A
+        if "storage" in desc or "internal store" in desc:
+            return 0.10
+        if "basement" in desc or "lower ground" in desc:
+            return 0.20
     if "zone a" in desc:
         return 1.0
     if "zone b" in desc:
@@ -28,7 +40,7 @@ def _relativity_from_description(description: str | None) -> float | None:
     return None
 
 
-def itza_from_voa_sv_lines(sv_lines: list[dict]) -> float:
+def itza_from_voa_sv_lines(sv_lines: list[dict], *, is_retail_itza: bool = False) -> float:
     """Compute ITZA from VOA structured valuation lines."""
     if not sv_lines:
         return 0.0
@@ -46,7 +58,10 @@ def itza_from_voa_sv_lines(sv_lines: list[dict]) -> float:
         if zone_a_price and price is not None and float(price) > 0:
             relativity = float(price) / zone_a_price
         if relativity is None:
-            relativity = _relativity_from_description(line.get("description"))
+            relativity = _relativity_from_description(
+                line.get("description"),
+                is_retail_itza=is_retail_itza,
+            )
         if relativity is None:
             relativity = 1.0
         total_itza += area * relativity
@@ -461,6 +476,7 @@ def _build_zoning_detail(
     relativities = rules.get("zoning", {}).get("relativities", {})
 
     sv_lines = (voa_subject_record or {}).get("sv_lines") or []
+    is_retail_itza = property.business_type.value in {"retail", "hair_beauty"}
     has_voa_geometry = bool(sv_lines)
 
     # Determine geometry — mirrors _zoning_rv() logic exactly for fallback cases.
@@ -493,7 +509,10 @@ def _build_zoning_detail(
             if zone_a_price and line_price is not None and float(line_price) > 0:
                 relativity = float(line_price) / zone_a_price
             if relativity is None:
-                relativity = _relativity_from_description(line.get("description"))
+                relativity = _relativity_from_description(
+                    line.get("description"),
+                    is_retail_itza=is_retail_itza,
+                )
             if relativity is None:
                 relativity = 1.0
             itza_contrib = area * relativity

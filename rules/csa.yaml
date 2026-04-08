@@ -32,7 +32,7 @@ csa:
     secondary_policy: "downweight_suspicious"  # downweight if included with flags
 
   tone:
-    statistic: "weighted_median"           # robust against outliers
+    statistic: "evidence_weighted_anchor"  # same-street uses dominant cluster / weighted p60
     fallback_statistic: "iqr_mean"
 
   confidence:

@@ -7,7 +7,7 @@ Implements the rules defined in rules/csa.yaml:
   - Launderette exclusion
   - Zone A rate extraction (Tier 1 = VOA published; Tier 2 = implied)
   - Outlier removal (10th–90th percentile)
-  - Tone derivation (weighted median, fallback IQR mean)
+  - Tone derivation (evidence-weighted anchor, fallback IQR mean)
   - Confidence banding (High ≥5, Medium ≥3, Low ≥1)
   - Signal determination vs. supplied VOA RV
 """
@@ -77,7 +77,7 @@ class Comparable:
              (None, 'excluded').  The caller must skip this comparable.
 
         Both tiers produce a £/m² NIA rate so they are directly comparable
-        and can be safely combined in the same weighted-median pool.
+        and can be safely combined in the same weighted pool.
         """
         if (
             self.has_summary
@@ -188,6 +188,43 @@ def _weighted_median(values: list[float], weights: list[float]) -> float:
         if cumulative >= target:
             return v
     return pairs[-1][0]
+
+
+def _weighted_percentile(values: list[float], weights: list[float], percentile: float) -> float:
+    """Return weighted percentile in [0, 1] using cumulative-weight crossing."""
+    p = min(1.0, max(0.0, float(percentile)))
+    pairs = sorted(zip(values, weights), key=lambda item: item[0])
+    total = sum(w for _, w in pairs)
+    if total <= 0:
+        return pairs[-1][0]
+    target = total * p
+    cumulative = 0.0
+    for value, weight in pairs:
+        cumulative += weight
+        if cumulative >= target:
+            return value
+    return pairs[-1][0]
+
+
+def _derive_primary_tone(
+    rated_pool: list[tuple[Comparable, float, float, float]],
+    *,
+    same_street_primary: bool,
+) -> tuple[float, str]:
+    """Derive tone from evidence using cluster-first same-street logic."""
+    rate_vals = [rate for _, _, rate, _ in rated_pool]
+    weights = [weight for _, _, _, weight in rated_pool]
+
+    if same_street_primary:
+        clusters = _find_rate_clusters(rated_pool)
+        if len(clusters) >= 2:
+            dominant = max(clusters, key=lambda c: sum(item[3] for item in c))
+            d_rates = [rate for _, _, rate, _ in dominant]
+            d_weights = [weight for _, _, _, weight in dominant]
+            return _weighted_median(d_rates, d_weights), "same_street_dominant_cluster_median"
+        return _weighted_percentile(rate_vals, weights, 0.60), "same_street_weighted_p60"
+
+    return _weighted_median(rate_vals, weights), "wider_pool_weighted_median"
 
 
 def _iqr_mean(values: list[float]) -> float:
@@ -1372,6 +1409,7 @@ def run_csa(
     same_street_share_final = 0.0
 
     _same_street_subset: list[tuple[Comparable, float, float, float]] = []
+    tone_method = "wider_pool_weighted_median"
     _same_street_primary = False
     if _same_street_primary_eligible and _subject_street_key:
         _same_street_subset = [
@@ -1395,19 +1433,23 @@ def run_csa(
                 "(sufficiently strong same-street set)"
             )
             primary_tone_comp_count = _same_count
-            rate_vals = [r for _, _, r, _ in _same_street_subset]
-            weights = [w for _, _, _, w in _same_street_subset]
+            primary_pool = _same_street_subset
         else:
-            rate_vals = [r for _, _, r, _ in rated]
-            weights = [w for _, _, _, w in rated]
+            primary_pool = rated
     else:
-        rate_vals = [r for _, _, r, _ in rated]
-        weights = [w for _, _, _, w in rated]
+        primary_pool = rated
+
+    rate_vals = [r for _, _, r, _ in primary_pool]
+    weights = [w for _, _, _, w in primary_pool]
 
     try:
-        tone = _weighted_median(rate_vals, weights)
+        tone, tone_method = _derive_primary_tone(
+            primary_pool,
+            same_street_primary=_same_street_primary and bool(_same_street_subset),
+        )
     except Exception:
         tone = _iqr_mean(rate_vals)
+        tone_method = "iqr_mean_fallback"
 
     # --- Debug fields (retail / hair_beauty / restaurant_cafe) ---
     # Temporary diagnostics — remove once tone accuracy is confirmed.
@@ -1474,6 +1516,7 @@ def run_csa(
             "tone_source": tone_source,
             "primary_tone_comp_count": primary_tone_comp_count,
             "primary_tone_same_street_count": primary_tone_same_street_count,
+            "tone_method": tone_method,
             "same_street_share_final": round(same_street_share_final, 3),
             "same_street_primary_triggered": _same_street_primary,
             "same_street_primary_rule_min_count": _RETAIL_PRIMARY_TONE_SAME_STREET_MIN_COUNT,

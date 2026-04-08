@@ -20,6 +20,7 @@ from api.engine.valuation import (
     apply_adjustments,
     build_valuation_detail,
     calculate_rv,
+    itza_from_voa_sv_lines,
 )
 from api.models import AreasInput, BusinessType, FlagsInput, NurseryInput, PropertyInput
 
@@ -371,6 +372,15 @@ class TestSectorMethodSelection:
         assert detail["zoning_rows"][0]["floor"] == "Ground"
         assert detail["zoning_rows"][0]["description"] == "Zone A"
         assert detail["zoning_rows"][0]["zone"] == "Zone A"
+
+    def test_retail_itza_relativity_calibration_for_basement_and_storage(self):
+        sv_lines = [
+            {"description": "Zone A", "area": 40.0, "price": 300.0},
+            {"description": "Basement retail", "area": 20.0, "price": None},
+            {"description": "Internal storage", "area": 10.0, "price": None},
+        ]
+        itza = itza_from_voa_sv_lines(sv_lines, is_retail_itza=True)
+        assert itza == pytest.approx(45.0)
 
     def test_fallback_geometry_unchanged_when_no_voa_sv_lines(self):
         detail = build_valuation_detail(

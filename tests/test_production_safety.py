@@ -197,13 +197,13 @@ class TestCanonicalReportPayload:
         req = self._make_request()
         payload = build_report_payload_from_assess(resp, req)
 
-        # ±5% of 14200 → low=13490, high=14910
+        # ±10% of 14200 → low=12780, high=15620
         assert payload["modelled_rv_low"] is not None
         assert payload["modelled_rv_high"] is not None
         assert payload["modelled_rv_low"] < payload["modelled_rv_high"]
-        # Should be within 10% of the point estimate
-        assert abs(payload["modelled_rv_low"] - 14200) / 14200 < 0.10
-        assert abs(payload["modelled_rv_high"] - 14200) / 14200 < 0.10
+        # Should be within ±10% of the point estimate
+        assert abs(payload["modelled_rv_low"] - 14200) / 14200 <= 0.10
+        assert abs(payload["modelled_rv_high"] - 14200) / 14200 <= 0.10
 
     def test_savings_calculated_correctly(self):
         from api.models import build_report_payload_from_assess

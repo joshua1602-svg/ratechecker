@@ -212,8 +212,8 @@ async def _process_one(row: dict[str, Any], semaphore: asyncio.Semaphore) -> Row
             if resp.adjusted_estimated_rv is not None
             else resp.base_estimated_rv
         )
-        fair_low = round(modelled_rv * 0.95 / 100) * 100 if modelled_rv is not None else None
-        fair_high = round(modelled_rv * 1.05 / 100) * 100 if modelled_rv is not None else None
+        fair_low = round(modelled_rv * 0.90 / 100) * 100 if modelled_rv is not None else None
+        fair_high = round(modelled_rv * 1.10 / 100) * 100 if modelled_rv is not None else None
 
         voa_rv = float(req.property.voa_rv)
         abs_gap = float(voa_rv - modelled_rv) if modelled_rv is not None else None

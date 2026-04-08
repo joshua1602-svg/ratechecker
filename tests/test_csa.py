@@ -1096,6 +1096,29 @@ class TestRetailSameStreetPrimaryTone:
         assert result["tone_source"] == "same_street_evidence"
         assert result["tone_rate"] >= 500.0
 
+    def test_same_street_primary_uses_upper_central_anchor_method(self):
+        same_street = [
+            self._retail_comp_with_address(f"ss{i}", r, "SHOP, 1, HIGH STREET, LONDON")
+            for i, r in enumerate([480, 490, 500, 510, 520, 700])
+        ]
+        wider = [
+            self._retail_comp_with_address(f"lw{i}", r, "SHOP, 9, WORPLE ROAD, LONDON")
+            for i, r in enumerate([210, 220, 230, 240])
+        ]
+        result = _run(
+            same_street + wider,
+            nia_sqm=100.0,
+            voa_rv=float(round(500 * itza_from_nia(100.0))),
+            subject_address="12 High Street, London",
+        )
+        assert result["signal"] != "Insufficient Data"
+        assert result["tone_source"] == "same_street_evidence"
+        dbg = result.get("_debug", {})
+        assert dbg.get("tone_method") in {
+            "same_street_weighted_p60",
+            "same_street_dominant_cluster_median",
+        }
+
     def test_restaurant_same_street_primary_triggers_with_strong_set(self):
         same_street = [
             self._retail_comp_with_address(f"rss{i}", r, "UNIT, 1, HIGH STREET, LONDON")
