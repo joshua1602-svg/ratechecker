@@ -5,7 +5,7 @@ import logging
 from enum import Enum
 from typing import Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from api.reports.narrative import build_rendered_narrative
 
 logger = logging.getLogger(__name__)
@@ -57,6 +57,43 @@ class LayoutInputModel(BaseModel):
     lower_ground_use: str = "not_applicable"
     upper_floor_use: str = "not_applicable"
     kitchen_on_ground: str = "no_kitchen"
+    floors: list["CanonicalFloorInput"] = Field(default_factory=list)
+    total_entered_sqm: Optional[float] = None
+    total_vs_nia_delta_pct: Optional[float] = None
+
+
+class CanonicalFloorLevel(str, Enum):
+    ground = "ground"
+    lower_ground = "lower_ground"
+    basement = "basement"
+    first = "first"
+    second = "second"
+    third = "third"
+    mezzanine = "mezzanine"
+    upper = "upper"
+
+
+class CanonicalFloorUsesInput(BaseModel):
+    trading_sqm: float = 0.0
+    storage_sqm: float = 0.0
+    kitchen_sqm: float = 0.0
+    other_sqm: float = 0.0
+    other_label: Optional[str] = None
+
+    @field_validator("trading_sqm", "storage_sqm", "kitchen_sqm", "other_sqm", mode="before")
+    @classmethod
+    def _coerce_non_negative(cls, value: object) -> float:
+        if value in (None, ""):
+            return 0.0
+        coerced = float(value)
+        if coerced < 0:
+            raise ValueError("sqm fields must be non-negative")
+        return coerced
+
+
+class CanonicalFloorInput(BaseModel):
+    level: CanonicalFloorLevel
+    uses: CanonicalFloorUsesInput = Field(default_factory=CanonicalFloorUsesInput)
 
 
 class NurseryInput(BaseModel):
@@ -135,8 +172,8 @@ class PaidIntakeData(BaseModel):
     # Sub-model overrides (nested dicts matching AssessRequest structure)
     contact: Optional[dict] = None    # ContactInput overrides (business_name, email)
     property: Optional[dict] = None   # partial PropertyInput overrides (address, uprn, frontage_m, depth_m, floors)
-    layout: Optional[dict] = None     # LayoutInputModel fields
-    areas: Optional[dict] = None      # AreasInput fields
+    layout: Optional[LayoutInputModel] = None
+    areas: Optional[AreasInput] = None
     nursery: Optional[dict] = None    # NurseryInput fields
     flags: Optional[dict] = None      # FlagsInput updates
 
