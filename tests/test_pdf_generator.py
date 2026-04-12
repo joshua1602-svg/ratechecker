@@ -3,6 +3,15 @@ from __future__ import annotations
 
 import pytest
 
+from api.models import (
+    AssessRequest,
+    AssessResponse,
+    BusinessType,
+    ContactInput,
+    FlagsInput,
+    PropertyInput,
+    build_evidence_payload_from_assess,
+)
 from api.reports import pdf_generator
 from api.reports.pdf_generator import generate_evidence_pack, generate_simplified_report
 
@@ -268,7 +277,7 @@ class TestPdfTemplateRendering:
         data["business_type"] = "retail"
         data["valuation_method"] = "itza"
         data["valuation_basis"] = "ITZA (Zoning)"
-        data["zoning_rows"] = [{"zone": "Zone A", "depth_m": 6.1, "area_sqm": 40.0, "relativity": 1.0, "tone": 300.0, "value": 12000.0}]
+        data["zoning_rows"] = [{"zone": "Zone A", "floor": "Ground", "area_sqm": 40.0, "itza_weight": 1.0, "itza_contribution_sqm": 40.0, "displayed_tone": 300.0, "row_value": 12000.0}]
         data["geometry_assumed"] = True
         html = pdf_generator._load_template(
             pdf_generator._get_env(),
@@ -289,10 +298,11 @@ class TestPdfTemplateRendering:
             {
                 "zone": "Zone A",
                 "floor": "Ground",
-                "description": "Zone A",
                 "area_sqm": 40.0,
-                "tone": 300.0,
-                "value": 12000.0,
+                "itza_weight": 1.0,
+                "itza_contribution_sqm": 40.0,
+                "displayed_tone": 300.0,
+                "row_value": 12000.0,
             }
         ]
         html = pdf_generator._load_template(
@@ -303,8 +313,33 @@ class TestPdfTemplateRendering:
         assert "VOA structured valuation record" in html
         assert "Assumed 1:3 width-to-depth aspect ratio" not in html
         assert ">Floor<" in html
-        assert ">Description<" in html
+        assert "ITZA Contribution (sqm)" in html
         assert "Zone A" in html
+
+    @pytest.mark.parametrize("business_type", ["retail", "restaurant_cafe", "nursery"])
+    def test_itza_schedule_columns_are_consistent_across_business_types(self, business_type):
+        data = _base_report_data()
+        data["business_type"] = business_type
+        data["valuation_method"] = "itza"
+        data["valuation_basis"] = "ITZA (Zoning)"
+        data["zoning_rows"] = [
+            {
+                "zone": "Zone A",
+                "floor": "Ground",
+                "area_sqm": 24.4,
+                "itza_weight": 1.0,
+                "itza_contribution_sqm": 24.4,
+                "displayed_tone": 300.0,
+                "row_value": 7320.0,
+            }
+        ]
+        html = pdf_generator._load_template(
+            pdf_generator._get_env(),
+            "evidence_pack.html",
+        ).render(**pdf_generator._derive_fields(data))
+        assert "ITZA Weight" in html
+        assert "ITZA Contribution (sqm)" in html
+        assert ">Description<" not in html
 
 
 class TestVoaReconciliationRendering:
@@ -323,3 +358,82 @@ class TestVoaReconciliationRendering:
         assert "55.0 sqm entered; VOA record shows 70.0 sqm." in html
         assert "Floor Plan Difference" not in html
         assert "Floor Split Difference" not in html
+
+
+class TestLiveEvidencePathReconciliation:
+    def test_retail_live_payload_reconciles_itza_rows_and_subtotal(self, monkeypatch):
+        request = AssessRequest(
+            contact=ContactInput(email="x@test.com", business_name="Phoenix Style"),
+            property=PropertyInput(
+                address="1 Test Parade",
+                postcode="SW1A 1AA",
+                business_type=BusinessType.retail,
+                voa_rv=30000,
+                nia_sqm=64.1,
+            ),
+            flags=FlagsInput(consent_disclaimer=True),
+        )
+        response = AssessResponse(
+            signal="High",
+            explanation="x",
+            comparable_count=8,
+            tone_rate=846.4755,
+            base_estimated_rv=27700,
+            adjusted_estimated_rv=27700,
+            rated_comps=[],
+        )
+
+        def _fake_subject_record(*_args, **_kwargs):
+            return {
+                "uarn": "123",
+                "sv_lines": [
+                    {"floor": "Ground", "description": "Zone A", "area": 24.4, "price": 1300.0},
+                    {"floor": "Ground", "description": "Zone B", "area": 11.0, "price": 650.0},
+                    {"floor": "Basement", "description": "Internal storage", "area": 28.7, "price": None},
+                ],
+            }, "reference_override"
+
+        monkeypatch.setattr("api.models.resolve_subject_voa_record", _fake_subject_record)
+
+        payload = build_evidence_payload_from_assess(response, request)
+        rows = payload["zoning_rows"]
+        itza_sum = round(sum(float(r["itza_contribution_sqm"]) for r in rows), 2)
+        subtotal_sum = round(sum(float(r["row_value"]) for r in rows), 2)
+        assert payload["valuation_method"] == "itza"
+        assert payload["valuation_basis_sqm"] == itza_sum
+        assert payload["subtotal_pre"] == subtotal_sum
+        assert payload["subtotal_pre"] == 27739.0
+
+        html = pdf_generator._load_template(
+            pdf_generator._get_env(),
+            "evidence_pack.html",
+        ).render(**pdf_generator._derive_fields(payload))
+        assert "ITZA Weight" in html
+        assert "ITZA Contribution (sqm)" in html
+        assert ">Description<" not in html
+
+    @pytest.mark.parametrize("business_type", [BusinessType.restaurant_cafe, BusinessType.nursery])
+    def test_non_retail_live_payload_paths_remain_nia(self, business_type):
+        request = AssessRequest(
+            contact=ContactInput(email="x@test.com", business_name="Live Path Check"),
+            property=PropertyInput(
+                address="2 Test Parade",
+                postcode="SW1A 1AA",
+                business_type=business_type,
+                voa_rv=25000,
+                nia_sqm=100.0,
+            ),
+            flags=FlagsInput(consent_disclaimer=True),
+        )
+        response = AssessResponse(
+            signal="Medium",
+            explanation="x",
+            comparable_count=6,
+            tone_rate=250.0,
+            base_estimated_rv=25000,
+            adjusted_estimated_rv=25000,
+            rated_comps=[],
+        )
+        payload = build_evidence_payload_from_assess(response, request)
+        assert payload["valuation_method"] == "nia"
+        assert payload["zoning_rows"] == []
