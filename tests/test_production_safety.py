@@ -351,6 +351,20 @@ class TestPdfRateAlignment:
         result = _normalise_comparable(comp)
         assert result["rate_psm"] == 200.0  # 20000/100
 
+    def test_normalise_comparable_retail_itza_fallback_uses_rv_over_itza(self):
+        from api.reports.pdf_generator import _normalise_comparable
+        from api.engine.csa import itza_from_nia
+
+        comp = {"uarn": "456", "rv": 20000, "nia_sqm": 100, "weight": 0.3}
+        result = _normalise_comparable(
+            comp,
+            business_type="retail",
+            valuation_method="itza",
+        )
+        expected = round(20000 / itza_from_nia(100), 2)
+        assert result["rate_psm"] == expected
+        assert result["display_rate_basis"] == "ITZA-fallback"
+
     def test_normalise_comparable_preserves_existing_rate_psm(self):
         from api.reports.pdf_generator import _normalise_comparable
 
@@ -358,6 +372,28 @@ class TestPdfRateAlignment:
                 "rate_psm": 175.0, "weight": 0.3}
         result = _normalise_comparable(comp)
         assert result["rate_psm"] == 175.0  # pre-set takes priority
+
+    def test_derive_fields_sets_itza_rate_header_for_retail_itza_reports(self):
+        from api.reports.pdf_generator import _derive_fields
+
+        data = {
+            "business_type": "retail",
+            "valuation_method": "itza",
+            "comparables": [],
+        }
+        derived = _derive_fields(data)
+        assert derived["comparable_rate_header"] == "Rate £/sqm (ITZA)"
+
+    def test_derive_fields_keeps_default_rate_header_for_nia_paths(self):
+        from api.reports.pdf_generator import _derive_fields
+
+        data = {
+            "business_type": "restaurant_cafe",
+            "valuation_method": "nia",
+            "comparables": [],
+        }
+        derived = _derive_fields(data)
+        assert derived["comparable_rate_header"] == "Rate £/sqm"
 
 
 # ---------------------------------------------------------------------------
