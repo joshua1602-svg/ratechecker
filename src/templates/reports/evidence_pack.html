@@ -575,7 +575,7 @@ table { page-break-inside: avoid; }
         <th style="width:14%;">UARN</th>
         <th style="width:10%;" class="num">Floor Area sqm</th>
         <th style="width:12%;" class="num">Rateable Value &pound;</th>
-        <th style="width:10%;" class="num">Rate &pound;/sqm</th>
+        <th style="width:10%;" class="num">{{ comparable_rate_header | default('Rate £/sqm') }}</th>
         {% if layout_adjustment_applied %}
         <th style="width:12%;">Similarity</th>
         {% endif %}
