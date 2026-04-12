@@ -222,9 +222,9 @@ def _infer_voa_match_quality(reconciliation: dict | None) -> MatchQuality:
     if not reconciliation:
         return "none"
     overall = str(reconciliation.get("overall_status") or "").lower()
-    if overall == "yes":
+    if overall in {"yes", "strong"}:
         return "exact"
-    if overall in {"partially", "no"}:
+    if overall in {"partially", "no", "partial", "broad"}:
         return "partial"
     return "none"
 
@@ -234,17 +234,11 @@ def _extract_deltas(reconciliation: dict | None) -> tuple[float | None, float | 
         return None, None
     checks = reconciliation.get("checks") or {}
 
-    gross = checks.get("gross_floor_space") or {}
+    gross = checks.get("total_area_alignment") or checks.get("gross_floor_space") or {}
     area_delta_pct = gross.get("percentage_difference")
 
-    split = checks.get("floor_split") or {}
-    per_floor = split.get("per_floor_comparison") or {}
-    split_values: list[float] = []
-    for floor_data in per_floor.values():
-        pct = floor_data.get("percentage_difference") if isinstance(floor_data, dict) else None
-        if pct is not None:
-            split_values.append(abs(float(pct)))
-    floor_split_delta_pct = max(split_values) if split_values else None
+    layout = checks.get("layout_categorisation_alignment") or {}
+    floor_split_delta_pct = 15.0 if layout.get("status") == "no" else None
     return area_delta_pct, floor_split_delta_pct
 
 

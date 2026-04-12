@@ -54,13 +54,11 @@ def _base_report_data() -> dict:
         ],
         "nursery_adjustments": None,
         "voa_reconciliation": {
-            "overall_status": "partially",
+            "overall_status": "partial",
             "summary": {"total_checks": 4, "yes": 2, "no": 1, "unknown": 1},
             "checks": {
-                "gross_floor_space": {"status": "no", "detail_text": "55.0 sqm entered; VOA record shows 70.0 sqm."},
-                "floor_plan_configuration": {"status": "yes", "detail_text": None},
-                "floor_split": {"status": "unknown", "detail_text": None},
-                "business_type": {"status": "yes", "detail_text": None},
+                "total_area_alignment": {"status": "no", "detail_text": "Entered total area 55.0 sqm; VOA structured area 70.0 sqm."},
+                "layout_categorisation_alignment": {"status": "yes", "detail_text": None},
             },
         },
         # --- optional layout fields ---
@@ -348,14 +346,14 @@ class TestVoaReconciliationRendering:
         html = pdf_generator._load_template(pdf_generator._get_env(), "simplified_report.html").render(**data)
         assert "VOA Record Match:" in html
         assert "Partial" in html
-        assert "Floor Area Difference" not in html
+        assert "Entered vs VOA Area" not in html
 
     def test_evidence_pack_has_summary_plus_no_rows_only(self):
         data = pdf_generator._derive_fields(_base_report_data())
         html = pdf_generator._load_template(pdf_generator._get_env(), "evidence_pack.html").render(**data)
         assert "VOA Record Match" in html
-        assert "Floor Area Difference" in html
-        assert "55.0 sqm entered; VOA record shows 70.0 sqm." in html
+        assert "Entered vs VOA Area" in html
+        assert "Entered total area 55.0 sqm; VOA structured area 70.0 sqm." in html
         assert "Floor Plan Difference" not in html
         assert "Floor Split Difference" not in html
 

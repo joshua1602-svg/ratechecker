@@ -38,15 +38,10 @@ def _base_case_result() -> dict:
             {"address": "14 Market Road", "postcode": "SW1A 1AA", "rate": 275},
         ],
         "voa_reconciliation": {
-            "overall_status": "partially",
+            "overall_status": "partial",
             "checks": {
-                "gross_floor_space": {"percentage_difference": 6.0},
-                "floor_split": {
-                    "per_floor_comparison": {
-                        "ground": {"percentage_difference": 6.0},
-                        "basement": {"percentage_difference": 4.0},
-                    }
-                },
+                "total_area_alignment": {"percentage_difference": 6.0},
+                "layout_categorisation_alignment": {"status": "no"},
             },
         },
     }
@@ -89,7 +84,7 @@ def test_render_contains_required_phrases():
 
     weak_case = _base_case_result()
     weak_case["case_strength"] = "Weak"
-    weak_case["voa_reconciliation"]["checks"]["gross_floor_space"]["percentage_difference"] = 20.0
+    weak_case["voa_reconciliation"]["checks"]["total_area_alignment"]["percentage_difference"] = 20.0
     weak_signals = build_narrative_signals(weak_case)
     weak_rendered = render_narrative_blocks(weak_signals)
 
