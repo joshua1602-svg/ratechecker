@@ -504,7 +504,6 @@ def _build_zoning_detail(
             if area <= 0:
                 continue
             line_price = line.get("price")
-            line_value = line.get("value")
             relativity: float | None = None
             if zone_a_price and line_price is not None and float(line_price) > 0:
                 relativity = float(line_price) / zone_a_price
@@ -517,21 +516,21 @@ def _build_zoning_detail(
                 relativity = 1.0
             itza_contrib = area * relativity
             itza_total += itza_contrib
-
-            if line_value is None and line_price is not None:
-                line_value = area * float(line_price)
-            elif line_value is None:
-                line_value = itza_contrib * tone_rate
+            displayed_tone = tone_rate * relativity
+            row_value = itza_contrib * tone_rate
 
             zoning_rows.append({
                 "zone": str(line.get("description") or f"Line {idx}"),
                 "area_sqm": round(area, 1),
                 "depth_m": None,
                 "relativity": round(relativity, 4),
-                "tone": round(float(line_price), 2) if line_price is not None else round(tone_rate, 2),
-                "value": round(float(line_value), 2),
+                "itza_weight": round(relativity, 4),
+                "itza_contribution_sqm": round(itza_contrib, 2),
+                "tone": round(displayed_tone, 2),
+                "displayed_tone": round(displayed_tone, 2),
+                "value": round(row_value, 2),
+                "row_value": round(row_value, 2),
                 "floor": line.get("floor"),
-                "description": line.get("description"),
             })
     else:
         # Build zone rows (same maths as itza_from_geometry)
@@ -555,12 +554,16 @@ def _build_zoning_detail(
                 "area_sqm": round(area, 1),
                 "depth_m": round(used, 1),
                 "relativity": relativity,
+                "itza_weight": round(relativity, 4),
+                "itza_contribution_sqm": round(itza_contrib, 2),
                 "tone": round(tone_rate, 2),
+                "displayed_tone": round(tone_rate, 2),
                 "value": round(value, 2),
+                "row_value": round(value, 2),
             })
             remaining -= used
 
-    subtotal_pre = round(itza_total * tone_rate, 2)
+    subtotal_pre = round(sum(float(r.get("row_value", 0.0)) for r in zoning_rows), 2)
 
     # Build allowances summary from triggered adjustments
     triggered = [a for a in adjustments_applied if a.get("triggered")]

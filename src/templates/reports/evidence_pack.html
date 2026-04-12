@@ -644,21 +644,17 @@ table { page-break-inside: avoid; }
   <!-- ── ITZA zoning schedule ── -->
   {% if valuation_method == 'itza' and zoning_rows %}
   <h2>Zoning Schedule</h2>
+  <p style="font-size:8pt; color:#7A8A9A; margin-top:2px;">
+    Row values are calculated using ITZA contribution: (Area &times; ITZA weight) &times; Zone A tone.
+  </p>
   <table class="calc-table">
     <thead>
       <tr>
         <th>Zone</th>
-        {% if geometry_source_indicator == 'VOA structured valuation record' %}
         <th>Floor</th>
-        {% else %}
-        <th class="num">Depth (m)</th>
-        {% endif %}
         <th class="num">Area (sqm)</th>
-        {% if geometry_source_indicator == 'VOA structured valuation record' %}
-        <th>Description</th>
-        {% else %}
-        <th class="num">Relativity</th>
-        {% endif %}
+        <th class="num">ITZA Weight</th>
+        <th class="num">ITZA Contribution (sqm)</th>
         <th class="num">Tone (&pound;/m&sup2;)</th>
         <th class="num">Value (&pound;)</th>
       </tr>
@@ -667,19 +663,12 @@ table { page-break-inside: avoid; }
       {% for row in zoning_rows %}
       <tr>
         <td>{{ row.zone }}</td>
-        {% if geometry_source_indicator == 'VOA structured valuation record' %}
         <td>{{ row.floor or "—" }}</td>
-        {% else %}
-        <td class="num">{{ row.depth_m }}</td>
-        {% endif %}
         <td class="num">{{ row.area_sqm }}</td>
-        {% if geometry_source_indicator == 'VOA structured valuation record' %}
-        <td>{{ row.description or "—" }}</td>
-        {% else %}
-        <td class="num">{{ row.relativity }}</td>
-        {% endif %}
-        <td class="num">&pound;{{ row.tone }}</td>
-        <td class="num">&pound;{{ row.value | format_currency }}</td>
+        <td class="num">{{ row.itza_weight if row.itza_weight is defined else row.relativity }}</td>
+        <td class="num">{{ row.itza_contribution_sqm if row.itza_contribution_sqm is defined else row.area_sqm }}</td>
+        <td class="num">&pound;{{ row.displayed_tone if row.displayed_tone is defined else row.tone }}</td>
+        <td class="num">&pound;{{ (row.row_value if row.row_value is defined else row.value) | format_currency }}</td>
       </tr>
       {% endfor %}
     </tbody>
