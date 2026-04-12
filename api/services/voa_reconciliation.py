@@ -1,24 +1,27 @@
 """VOA subject-record reconciliation diagnostics.
 
-This module provides a deterministic, rule-based comparison between
-user-entered subject facts and the mapped VOA subject record.
+This module keeps valuation logic untouched and focuses only on:
+  - total-area matching
+  - layout/categorisation diagnostics
+  - structured-record inconsistency flags for reporting
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any
 
-GROSS_AREA_MATCH_THRESHOLD_PCT = 10.0
-FLOOR_SPLIT_MATCH_THRESHOLD_PCT = 10.0
-
 STATUS_YES = "yes"
 STATUS_NO = "no"
 STATUS_UNKNOWN = "unknown"
 
-# Release-1 explicit business-type mapping (retail only by requirement)
-ACCEPTED_SCAT_BY_BUSINESS_TYPE: dict[str, set[int]] = {
-    "retail": {249, 251},
-}
+AREA_MATCH_STRONG = "strong"
+AREA_MATCH_BROAD = "broad"
+AREA_MATCH_PARTIAL = "partial"
+AREA_MATCH_UNRESOLVED = "unresolved"
+
+LAYOUT_MATCH_ALIGNED = "aligned"
+LAYOUT_MATCH_DIFFERENT = "different"
+LAYOUT_MATCH_UNKNOWN = "unknown"
 
 
 @dataclass(frozen=True)
@@ -37,12 +40,6 @@ def _to_float(value: Any) -> float | None:
         return out
     except (TypeError, ValueError):
         return None
-
-
-def _pct_difference(user: float, voa: float) -> float | None:
-    if voa <= 0:
-        return None
-    return abs((user - voa) / voa) * 100
 
 
 def _floor_presence_from_user(normalized_facts: dict[str, Any]) -> FloorPresence:
@@ -64,225 +61,154 @@ def _floor_presence_from_voa(voa_record: dict[str, Any]) -> FloorPresence:
     )
 
 
-def _check_gross_floor_space(user_total_sqm: Any, voa_total_sqm: Any) -> dict[str, Any]:
+def _voa_structured_total_area(voa_record: dict[str, Any]) -> tuple[float | None, str]:
+    """Prefer summed positive-area SV lines when available, else total_area_sqm."""
+    sv_lines = voa_record.get("sv_lines") or []
+    areas: list[float] = []
+    for line in sv_lines:
+        area = _to_float((line or {}).get("area"))
+        if area is not None and area > 0:
+            areas.append(area)
+    if areas:
+        return round(sum(areas), 2), "sv_lines_sum"
+
+    voa_total = _to_float(voa_record.get("total_area_sqm"))
+    return (round(voa_total, 2), "record_total") if voa_total is not None else (None, "missing")
+
+
+def _classify_area_match(user_total_sqm: Any, voa_total_sqm: Any) -> dict[str, Any]:
     user_val = _to_float(user_total_sqm)
     voa_val = _to_float(voa_total_sqm)
     if user_val is None or voa_val is None or voa_val <= 0:
         return {
             "status": STATUS_UNKNOWN,
+            "match_status": AREA_MATCH_UNRESOLVED,
             "user_value_sqm": user_val,
             "voa_value_sqm": voa_val,
             "absolute_difference_sqm": None,
             "percentage_difference": None,
             "reason_code": "MISSING_AREA_DATA",
-            "summary_text": "Gross floor space could not be reconciled.",
-            "detail_text": "Insufficient structured area data on user input or VOA record.",
+            "summary_text": "Total floor area could not be reconciled.",
+            "detail_text": "No reliable VOA structured total area was available for comparison.",
         }
 
     abs_diff = abs(user_val - voa_val)
-    pct_diff = _pct_difference(user_val, voa_val)
-    status = STATUS_YES if pct_diff is not None and pct_diff <= GROSS_AREA_MATCH_THRESHOLD_PCT else STATUS_NO
-    if status == STATUS_YES:
-        reason = "AREA_DIFFERENCE_WITHIN_THRESHOLD"
-        summary = "Gross floor space matches VOA records."
-        detail = None
+    pct_diff = (abs_diff / voa_val) * 100 if voa_val > 0 else None
+    if abs_diff <= 2.0 or (pct_diff is not None and pct_diff <= 5.0):
+        match_status = AREA_MATCH_STRONG
+        status = STATUS_YES
+    elif abs_diff <= 5.0 or (pct_diff is not None and pct_diff <= 10.0):
+        match_status = AREA_MATCH_BROAD
+        status = STATUS_YES
     else:
-        reason = "AREA_DIFFERENCE_OVER_THRESHOLD"
-        summary = "Gross floor space does not match VOA records."
-        detail = f"{user_val:.1f} sqm entered; VOA record shows {voa_val:.1f} sqm."
+        match_status = AREA_MATCH_PARTIAL
+        status = STATUS_NO
 
     return {
         "status": status,
-        "user_value_sqm": user_val,
-        "voa_value_sqm": voa_val,
-        "absolute_difference_sqm": round(abs_diff, 1),
-        "percentage_difference": round(pct_diff, 1) if pct_diff is not None else None,
-        "reason_code": reason,
-        "summary_text": summary,
-        "detail_text": detail,
+        "match_status": match_status,
+        "user_value_sqm": round(user_val, 2),
+        "voa_value_sqm": round(voa_val, 2),
+        "absolute_difference_sqm": round(abs_diff, 2),
+        "percentage_difference": round(pct_diff, 2) if pct_diff is not None else None,
+        "reason_code": "TOTAL_AREA_COMPARISON",
+        "summary_text": "Entered total area compared with VOA structured total area.",
+        "detail_text": f"Entered total area {user_val:.1f} sqm; VOA structured area {voa_val:.1f} sqm.",
     }
 
 
-def _check_floor_plan_configuration(normalized_facts: dict[str, Any], voa_record: dict[str, Any]) -> dict[str, Any]:
+def _check_layout_categorisation(
+    normalized_facts: dict[str, Any],
+    voa_record: dict[str, Any],
+) -> dict[str, Any]:
     user_presence = _floor_presence_from_user(normalized_facts)
     voa_presence = _floor_presence_from_voa(voa_record)
+    detail_notes: list[str] = []
 
-    if None in (user_presence.ground_present, user_presence.basement_present, voa_presence.ground_present, voa_presence.basement_present):
-        return {
-            "status": STATUS_UNKNOWN,
-            "user_ground_present": user_presence.ground_present,
-            "user_basement_present": user_presence.basement_present,
-            "voa_ground_present": voa_presence.ground_present,
-            "voa_basement_present": voa_presence.basement_present,
-            "reason_code": "MISSING_FLOOR_CONFIGURATION_DATA",
-            "summary_text": "Floor plan configuration could not be reconciled.",
-            "detail_text": "Insufficient floor-presence data on user input or VOA record.",
-        }
+    if None not in (user_presence.ground_present, user_presence.basement_present, voa_presence.ground_present, voa_presence.basement_present):
+        if user_presence.basement_present != voa_presence.basement_present:
+            detail_notes.append(
+                "Basement presence differs between entered layout and VOA structured record."
+            )
 
-    same = (
-        user_presence.ground_present == voa_presence.ground_present
-        and user_presence.basement_present == voa_presence.basement_present
-    )
-    if same:
+    user_components = normalized_facts.get("entered_area_components") or {}
+    user_kitchen = _to_float(user_components.get("kitchen_sqm")) or 0.0
+    user_storage = _to_float(user_components.get("storage_sqm")) or 0.0
+    has_user_kitchen = bool(user_components.get("kitchen_present")) or user_kitchen > 0
+
+    sv_lines = voa_record.get("sv_lines") or []
+    descs = [str((line or {}).get("description") or "").lower() for line in sv_lines]
+    has_voa_kitchen = any("kitchen" in d for d in descs)
+    has_voa_storage = any("storage" in d or "store" in d for d in descs)
+
+    if has_user_kitchen and not has_voa_kitchen:
+        detail_notes.append(
+            "Entered layout includes kitchen space, but VOA structured lines do not separately identify kitchen."
+        )
+    if user_storage > 0 and sv_lines and not has_voa_storage:
+        detail_notes.append(
+            "Entered layout includes storage space, but VOA structured lines do not separately identify storage."
+        )
+
+    if not detail_notes and sv_lines:
         return {
             "status": STATUS_YES,
-            "user_ground_present": user_presence.ground_present,
-            "user_basement_present": user_presence.basement_present,
-            "voa_ground_present": voa_presence.ground_present,
-            "voa_basement_present": voa_presence.basement_present,
-            "reason_code": "CONFIGURATION_ALIGNS",
-            "summary_text": "Floor plan configuration matches VOA records.",
+            "match_status": LAYOUT_MATCH_ALIGNED,
+            "reason_code": "LAYOUT_CATEGORISATION_ALIGNS",
+            "summary_text": "Internal layout/categorisation appears broadly aligned.",
             "detail_text": None,
         }
-
-    return {
-        "status": STATUS_NO,
-        "user_ground_present": user_presence.ground_present,
-        "user_basement_present": user_presence.basement_present,
-        "voa_ground_present": voa_presence.ground_present,
-        "voa_basement_present": voa_presence.basement_present,
-        "reason_code": "CONFIGURATION_MISMATCH",
-        "summary_text": "Floor plan configuration does not match VOA records.",
-        "detail_text": (
-            f"Entered as {'Ground' if user_presence.ground_present else 'No Ground'}"
-            f"{' + Lower Ground' if user_presence.basement_present else ''}; "
-            f"VOA shows {'Ground' if voa_presence.ground_present else 'No Ground'}"
-            f"{' + Lower Ground' if voa_presence.basement_present else ''}."
-        ),
-    }
-
-
-def _check_floor_split(user_floor_areas: dict[str, Any], voa_floor_areas: dict[str, Any]) -> dict[str, Any]:
-    floors = ("ground", "basement")
-    per_floor: dict[str, dict[str, float | None]] = {}
-    compared = 0.0
-    material_mismatch = False
-    comparable_floor_count = 0
-
-    for floor in floors:
-        user_val = _to_float(user_floor_areas.get(floor))
-        voa_val = _to_float(voa_floor_areas.get(floor))
-        if user_val is not None and voa_val is not None and voa_val > 0:
-            comparable_floor_count += 1
-            diff = user_val - voa_val
-            pct = (diff / voa_val) * 100
-            compared += voa_val
-            if abs(pct) > FLOOR_SPLIT_MATCH_THRESHOLD_PCT:
-                material_mismatch = True
-            per_floor[floor] = {
-                "user_sqm": round(user_val, 1),
-                "voa_sqm": round(voa_val, 1),
-                "difference_sqm": round(diff, 1),
-                "percentage_difference": round(pct, 1),
-            }
-        else:
-            per_floor[floor] = {
-                "user_sqm": user_val,
-                "voa_sqm": voa_val,
-                "difference_sqm": None,
-                "percentage_difference": None,
-            }
-
-    if comparable_floor_count == 0:
-        return {
-            "status": STATUS_UNKNOWN,
-            "per_floor_comparison": per_floor,
-            "total_compared_sqm": 0.0,
-            "reason_code": "MISSING_FLOOR_SPLIT_DATA",
-            "summary_text": "Floor split could not be reconciled.",
-            "detail_text": "Insufficient per-floor area data for comparison.",
-        }
-
-    if material_mismatch:
-        ground_row = per_floor.get("ground", {})
+    if detail_notes:
         return {
             "status": STATUS_NO,
-            "per_floor_comparison": per_floor,
-            "total_compared_sqm": round(compared, 1),
-            "reason_code": "FLOOR_SPLIT_DIFFERENCE_OVER_THRESHOLD",
-            "summary_text": "Floor split does not match VOA records.",
-            "detail_text": (
-                f"Ground floor entered as {ground_row.get('user_sqm')} sqm; "
-                f"VOA shows {ground_row.get('voa_sqm')} sqm."
-                if ground_row.get("percentage_difference") is not None
-                else "Per-floor distribution differs materially from VOA records."
-            ),
+            "match_status": LAYOUT_MATCH_DIFFERENT,
+            "reason_code": "LAYOUT_CATEGORISATION_DIFFERENCE",
+            "summary_text": "Internal layout/categorisation differs from VOA structured treatment.",
+            "detail_text": " ".join(detail_notes),
         }
-
     return {
-        "status": STATUS_YES,
-        "per_floor_comparison": per_floor,
-        "total_compared_sqm": round(compared, 1),
-        "reason_code": "FLOOR_SPLIT_WITHIN_THRESHOLD",
-        "summary_text": "Floor split matches VOA records.",
-        "detail_text": None,
+        "status": STATUS_UNKNOWN,
+        "match_status": LAYOUT_MATCH_UNKNOWN,
+        "reason_code": "INSUFFICIENT_LAYOUT_CATEGORISATION_DATA",
+        "summary_text": "Layout/categorisation could not be reconciled.",
+        "detail_text": "Insufficient structured line detail to compare internal categorisation.",
     }
 
 
-def _check_business_type(user_business_type: Any, voa_scat_code: Any, voa_description: Any) -> dict[str, Any]:
-    user_type = str(user_business_type or "").strip().lower()
-    scat = None
-    try:
-        scat = int(voa_scat_code) if voa_scat_code is not None else None
-    except (TypeError, ValueError):
-        scat = None
+def _structured_inconsistency(
+    user_payload: dict[str, Any],
+    normalized_facts: dict[str, Any],
+    voa_record: dict[str, Any],
+    area_match: dict[str, Any],
+    layout_match: dict[str, Any],
+) -> tuple[bool, list[str]]:
+    notes: list[str] = []
+    bt = str(user_payload.get("business_type") or "").strip().lower()
+    if bt not in {"retail", "restaurant_cafe", "hair_beauty"}:
+        return False, notes
 
-    if not user_type or scat is None:
-        return {
-            "status": STATUS_UNKNOWN,
-            "user_business_type": user_type or None,
-            "voa_scat_code": scat,
-            "voa_description": voa_description,
-            "reason_code": "MISSING_BUSINESS_TYPE" if not user_type else "MISSING_SCAT_CODE",
-            "summary_text": "Business type could not be reconciled with VOA classification.",
-            "detail_text": "Insufficient business type or SCAT data.",
-        }
+    if area_match.get("match_status") in {AREA_MATCH_STRONG, AREA_MATCH_BROAD} and layout_match.get("match_status") == LAYOUT_MATCH_DIFFERENT:
+        notes.append(
+            "Total area aligns, but component categorisation differs between entered layout and VOA structured lines."
+        )
 
-    accepted = ACCEPTED_SCAT_BY_BUSINESS_TYPE.get(user_type)
-    if accepted is None:
-        return {
-            "status": STATUS_UNKNOWN,
-            "user_business_type": user_type,
-            "voa_scat_code": scat,
-            "voa_description": voa_description,
-            "reason_code": "BUSINESS_TYPE_NOT_CONFIGURED",
-            "summary_text": "Business type reconciliation is not configured for this sector.",
-            "detail_text": "This release supports explicit SCAT reconciliation for retail only.",
-        }
+    user_components = normalized_facts.get("entered_area_components") or {}
+    has_user_kitchen = bool(user_components.get("kitchen_present")) or (_to_float(user_components.get("kitchen_sqm")) or 0.0) > 0
+    sv_lines = voa_record.get("sv_lines") or []
+    has_voa_kitchen = any("kitchen" in str((line or {}).get("description") or "").lower() for line in sv_lines)
+    if has_user_kitchen and sv_lines and not has_voa_kitchen:
+        notes.append(
+            "VOA structured record does not separately identify kitchen despite entered kitchen detail."
+        )
+    return bool(notes), notes
 
-    if scat in accepted:
-        return {
-            "status": STATUS_YES,
-            "user_business_type": user_type,
-            "voa_scat_code": scat,
-            "voa_description": voa_description,
-            "reason_code": "SCAT_CODE_ACCEPTED_FOR_RETAIL",
-            "summary_text": "Business type matches VOA classification.",
-            "detail_text": None,
-        }
 
+def _overall_status(area_match_status: str) -> str:
     return {
-        "status": STATUS_NO,
-        "user_business_type": user_type,
-        "voa_scat_code": scat,
-        "voa_description": voa_description,
-        "reason_code": "SCAT_CODE_NOT_ACCEPTED_FOR_RETAIL",
-        "summary_text": "Business type does not match VOA classification.",
-        "detail_text": f"Entered as {user_type.title()}; VOA classification does not align.",
-    }
-
-
-def _overall_status(statuses: list[str]) -> str:
-    """Conservative roll-up: only all-yes or all-unknown are definitive.
-
-    Any mixed outcome (including any mismatch and uncertain combinations)
-    resolves to "partially" to avoid overstating certainty.
-    """
-    if statuses and all(status == STATUS_YES for status in statuses):
-        return STATUS_YES
-    if statuses and all(status == STATUS_UNKNOWN for status in statuses):
-        return STATUS_UNKNOWN
-    return "partially"
+        AREA_MATCH_STRONG: "strong",
+        AREA_MATCH_BROAD: "broad",
+        AREA_MATCH_PARTIAL: "partial",
+    }.get(area_match_status, "unresolved")
 
 
 def reconcile_subject_against_voa(
@@ -291,42 +217,50 @@ def reconcile_subject_against_voa(
     voa_subject_record: dict[str, Any],
     normalized_facts: dict[str, Any],
 ) -> dict[str, Any]:
-    """Build the VOA reconciliation diagnostic object.
+    """Build VOA reconciliation diagnostics.
 
-    Inputs are expected to be pre-mapped and pre-normalised by existing pipeline
-    components. This function is read-only and never mutates valuation outputs.
+    Primary driver is total area alignment (entered total vs VOA structured total).
+    Layout/categorisation is secondary and never downgrades strong/broad area match
+    into a false "partial" record match.
     """
-    gross = _check_gross_floor_space(
-        user_payload.get("total_area_sqm"),
-        voa_subject_record.get("total_area_sqm"),
-    )
-    config = _check_floor_plan_configuration(normalized_facts, voa_subject_record)
-    split = _check_floor_split(
-        normalized_facts.get("floor_areas") or {},
-        voa_subject_record.get("floor_areas") or {},
-    )
-    business = _check_business_type(
-        user_payload.get("business_type"),
-        voa_subject_record.get("scat_code"),
-        voa_subject_record.get("description"),
+    voa_total, total_source = _voa_structured_total_area(voa_subject_record)
+    area_match = _classify_area_match(user_payload.get("total_area_sqm"), voa_total)
+    layout_match = _check_layout_categorisation(normalized_facts, voa_subject_record)
+    inconsistency_flag, inconsistency_notes = _structured_inconsistency(
+        user_payload=user_payload,
+        normalized_facts=normalized_facts,
+        voa_record=voa_subject_record,
+        area_match=area_match,
+        layout_match=layout_match,
     )
 
-    statuses = [gross["status"], config["status"], split["status"], business["status"]]
+    match_summary = {
+        "strong": "Total area broadly aligns with the VOA structured record.",
+        "broad": "Total area is broadly aligned with minor variance against VOA structured record.",
+        "partial": "There is a material difference between entered total area and VOA structured area.",
+        "unresolved": "No reliable VOA structured area was available for total-area comparison.",
+    }[_overall_status(area_match.get("match_status"))]
 
+    statuses = [area_match["status"], layout_match["status"]]
     return {
         "voa_reconciliation": {
-            "overall_status": _overall_status(statuses),
+            "overall_status": _overall_status(area_match.get("match_status")),
+            "voa_record_match_status": _overall_status(area_match.get("match_status")),
+            "voa_area_match_status": area_match.get("match_status"),
+            "voa_layout_match_status": layout_match.get("match_status"),
+            "voa_structured_total_area_source": total_source,
+            "voa_structured_inconsistency_flag": inconsistency_flag,
+            "voa_structured_inconsistency_notes": inconsistency_notes,
+            "summary_text": match_summary,
             "summary": {
-                "total_checks": 4,
+                "total_checks": 2,
                 "yes": statuses.count(STATUS_YES),
                 "no": statuses.count(STATUS_NO),
                 "unknown": statuses.count(STATUS_UNKNOWN),
             },
             "checks": {
-                "gross_floor_space": gross,
-                "floor_plan_configuration": config,
-                "floor_split": split,
-                "business_type": business,
+                "total_area_alignment": area_match,
+                "layout_categorisation_alignment": layout_match,
             },
         }
     }

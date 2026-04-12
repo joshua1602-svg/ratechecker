@@ -360,12 +360,31 @@ def _build_voa_reconciliation_inputs(request: AssessRequest) -> tuple[dict, dict
         user_basement = True
     user_ground = True if floor_config is not None else None
 
+    user_sales = (request.areas.sales_area_sqm if request.areas is not None else 0.0) or 0.0
+    user_storage = (request.areas.storage_sqm if request.areas is not None else 0.0) or 0.0
+    user_basement_sqm = (request.areas.basement_sqm if request.areas is not None else 0.0) or 0.0
+    user_upper = (request.areas.upper_sqm if request.areas is not None else 0.0) or 0.0
+    user_visible_kitchen = (request.areas.visible_kitchen_sqm if request.areas is not None else 0.0) or 0.0
+    user_non_visible_kitchen = (request.areas.non_visible_kitchen_sqm if request.areas is not None else 0.0) or 0.0
+    user_kitchen = user_visible_kitchen + user_non_visible_kitchen
+    kitchen_present = bool(user_kitchen > 0)
+    if request.layout is not None and str(request.layout.kitchen_on_ground).lower() in {"yes", "ground", "true"}:
+        kitchen_present = True
+
     normalized_facts = {
         "ground_present": user_ground,
         "basement_present": user_basement if user_ground is not None else None,
         "floor_areas": {
-            "ground": (request.areas.sales_area_sqm if request.areas is not None else None),
+            "ground": user_sales if user_sales > 0 else None,
             "basement": (request.areas.basement_sqm if request.areas is not None else None),
+        },
+        "entered_area_components": {
+            "sales_sqm": user_sales,
+            "storage_sqm": user_storage,
+            "basement_sqm": user_basement_sqm,
+            "upper_sqm": user_upper,
+            "kitchen_sqm": user_kitchen,
+            "kitchen_present": kitchen_present,
         },
     }
     user_payload = {

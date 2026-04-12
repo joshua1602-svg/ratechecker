@@ -217,6 +217,10 @@ def _format_reconciliation_status(value: Any) -> str:
         "no": "No",
         "unknown": "Unknown",
         "partially": "Partial",
+        "strong": "Strong",
+        "broad": "Broad",
+        "partial": "Partial",
+        "unresolved": "Unavailable",
     }
     return mapping.get(str(value or "").lower(), "Unknown")
 
@@ -226,19 +230,27 @@ def _build_reconciliation_detail_rows(reconciliation: dict[str, Any] | None) -> 
         return []
     checks = reconciliation.get("checks") or {}
     rows: list[dict[str, str]] = []
-    labels = {
-        "gross_floor_space": "Floor Area Difference",
-        "floor_plan_configuration": "Floor Plan Difference",
-        "floor_split": "Floor Split Difference",
-        "business_type": "Business Type Difference",
-    }
-    for key in ("gross_floor_space", "floor_plan_configuration", "floor_split", "business_type"):
-        check = checks.get(key) or {}
-        if check.get("status") == "no":
-            rows.append({
-                "label": labels[key],
-                "value": check.get("detail_text") or check.get("summary_text") or "Does not match VOA record",
-            })
+    area = checks.get("total_area_alignment") or checks.get("gross_floor_space") or {}
+    if area:
+        rows.append({
+            "label": "Entered vs VOA Area",
+            "value": area.get("detail_text") or area.get("summary_text") or "Area comparison unavailable.",
+        })
+
+    layout = checks.get("layout_categorisation_alignment") or {}
+    if layout and layout.get("status") == "no":
+        rows.append({
+            "label": "Layout / Categorisation Note",
+            "value": layout.get("detail_text") or layout.get("summary_text") or "Internal categorisation differs.",
+        })
+
+    inconsistency_flag = bool(reconciliation.get("voa_structured_inconsistency_flag"))
+    inconsistency_notes = reconciliation.get("voa_structured_inconsistency_notes") or []
+    if inconsistency_flag and inconsistency_notes:
+        rows.append({
+            "label": "VOA Structured Record Note",
+            "value": " ".join(str(n) for n in inconsistency_notes),
+        })
     return rows
 
 def _to_title_case(value: Any) -> str:

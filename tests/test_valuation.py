@@ -370,8 +370,10 @@ class TestSectorMethodSelection:
         assert detail["geometry_source_indicator"] == "VOA structured valuation record"
         assert detail["geometry_assumed"] is False
         assert detail["zoning_rows"][0]["floor"] == "Ground"
-        assert detail["zoning_rows"][0]["description"] == "Zone A"
         assert detail["zoning_rows"][0]["zone"] == "Zone A"
+        assert detail["zoning_rows"][0]["itza_weight"] == 1.0
+        assert detail["zoning_rows"][0]["itza_contribution_sqm"] == 40.0
+        assert detail["zoning_rows"][0]["row_value"] == 12000.0
 
     def test_retail_itza_relativity_calibration_for_basement_and_storage(self):
         sv_lines = [
