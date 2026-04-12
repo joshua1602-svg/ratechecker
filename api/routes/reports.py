@@ -18,6 +18,7 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import Response
+from api.layout_compat import normalize_paid_intake_layout
 from api.models import (
     AssessRequest,
     AssessResponse,
@@ -261,7 +262,7 @@ def _merge_paid_intake(assess_request_dict: dict, paid_intake: dict) -> dict:
     paid_intake value replaces the assess_request value outright.
     """
     # Re-route flat convenience keys into the correct nested positions.
-    intake = dict(paid_intake)
+    intake = normalize_paid_intake_layout(dict(paid_intake))
 
     # business_name → contact.business_name
     flat_biz = intake.pop("business_name", None)

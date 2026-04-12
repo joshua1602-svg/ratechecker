@@ -13,6 +13,7 @@ import os
 import stripe
 from fastapi import APIRouter, HTTPException
 
+from api.layout_compat import normalize_paid_intake_layout
 from api.models import PurchaseRequest, PurchaseResponse
 from api.pending_reports import RATECHECKER_SESSION_METADATA_KEY, create_draft
 
@@ -53,11 +54,15 @@ async def purchase(req: PurchaseRequest) -> PurchaseResponse:
         assess_response["rated_comps"] = req.rated_comps
         log.info("Merged %d rated_comps into assess_response from top-level field", len(req.rated_comps))
 
+    normalized_paid_intake = normalize_paid_intake_layout(
+        req.paid_intake.model_dump(exclude_none=True)
+    )
+
     session_id = create_draft(
         product=product,
         assess_request=req.assess_request,
         assess_response=assess_response,
-        paid_intake=req.paid_intake.model_dump(exclude_none=True),
+        paid_intake=normalized_paid_intake,
     )
 
     # ── 2. Extract customer email for Stripe (best-effort) ──
