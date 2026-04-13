@@ -366,7 +366,7 @@ table { page-break-inside: avoid; }
         <th style="width:40%;">Address</th>
         <th style="width:12%;">Floor Area</th>
         <th style="width:16%;" class="num">Rateable Value</th>
-        <th style="width:16%;" class="num">Rate per sqm</th>
+        <th style="width:16%;" class="num">{{ comparable_rate_header | default('Rate per sqm') }}</th>
         {% if layout_adjustment_applied %}
         <th style="width:16%;">Similarity</th>
         {% endif %}

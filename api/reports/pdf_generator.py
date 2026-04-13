@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from jinja2 import Environment, FileSystemLoader, TemplateNotFound
+from api.engine.csa import itza_from_nia
 from api.reports.narrative import build_rendered_narrative
 
 try:
@@ -96,28 +97,86 @@ def _format_floor_config(raw_value: Any) -> str:
     return mapping.get(value, value.replace("_", " ").title()) if value else "Not provided"
 
 
-def _normalise_comparable(comp: dict[str, Any]) -> dict[str, Any]:
+def _normalise_comparable(
+    comp: dict[str, Any],
+    *,
+    business_type: str | None = None,
+    valuation_method: str | None = None,
+    sv_lines: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     """Populate optional template fields so report rendering is resilient.
 
     rate_psm precedence (to avoid basis mismatch):
       1. Use pre-set rate_psm if already provided (from canonical builder).
       2. Use the engine's "rate" field (which is on the correct basis —
-         ITZA for retail/restaurant, NIA for nursery).
-      3. Only as a last resort, fall back to rv/nia_sqm (NIA basis).
+         ITZA for retail ITZA path; NIA for NIA-valued paths).
+      3. For retail/hair_beauty evidence reports on ITZA basis, fall back to
+         rv/itza_from_nia(nia_sqm) so display aligns to CSA retail valuation basis.
+      4. Only as a final fallback, use rv/nia_sqm (NIA basis).
          This case should not occur when using the canonical builder.
     """
     normalised = dict(comp)
+    btype = str(business_type or "").strip().lower()
+    method = str(valuation_method or "").strip().lower()
+    is_retail_itza = btype in {"retail", "hair_beauty"} and method == "itza"
+    rv = normalised.get("rv")
+    nia_sqm = normalised.get("nia_sqm")
 
-    if normalised.get("rate_psm") is None:
-        # Prefer engine "rate" field (correctly normalised by CSA)
-        engine_rate = normalised.get("rate")
-        if engine_rate is not None and float(engine_rate) > 0:
-            normalised["rate_psm"] = round(float(engine_rate), 2)
-        else:
-            rv = normalised.get("rv")
-            nia_sqm = normalised.get("nia_sqm")
+    if is_retail_itza and sv_lines and rv is not None and float(rv) > 0:
+        try:
+            _sv_itza = _retail_itza_from_sv_lines_for_display(sv_lines)
+        except Exception:
+            _sv_itza = 0.0
+        if _sv_itza > 0:
+            normalised["sv_itza_rate_psm"] = round(float(rv) / _sv_itza, 2)
+
+    # Retail ITZA display keeps parity with the CSA tone basis:
+    # prefer engine "rate" (the value used in tone derivation) for display.
+    engine_rate = normalised.get("rate")
+    if engine_rate is not None and float(engine_rate) > 0:
+        normalised["rate_psm"] = round(float(engine_rate), 2)
+        normalised["display_rate_basis"] = "CSA-derived"
+    else:
+        _has_existing_rate = normalised.get("rate_psm") is not None
+        _existing_basis = str(normalised.get("display_rate_basis") or "").strip().lower()
+        _existing_rate_basis = str(normalised.get("rate_basis") or "").strip().upper()
+        _existing_marked_itza = (
+            _existing_basis in {"csa-derived", "itza-fallback", "itza-provided", "sv-lines-itza"}
+            or _existing_rate_basis == "ITZA"
+        )
+
+        # Retail ITZA reports must not display stale NIA-style precomputed rate_psm.
+        # If no CSA rate is present, recompute from rv/itza when possible.
+        if (
+            is_retail_itza
+            and (normalised.get("rate_psm") is None or not _existing_marked_itza)
+            and rv is not None
+            and nia_sqm
+            and float(nia_sqm) > 0
+        ):
+            itza: float | None = None
+            if sv_lines:
+                try:
+                    itza = _retail_itza_from_sv_lines_for_display(sv_lines)
+                except Exception:
+                    itza = None
+            if itza is None or itza <= 0:
+                itza = itza_from_nia(float(nia_sqm))
+            if itza > 0:
+                normalised["rate_psm"] = round(float(rv) / itza, 2)
+                normalised["display_rate_basis"] = "ITZA-fallback"
+            elif not _has_existing_rate:
+                normalised["rate_psm"] = round(float(rv) / float(nia_sqm), 2)
+                normalised["display_rate_basis"] = "NIA-fallback"
+        elif not _has_existing_rate:
             if rv is not None and nia_sqm and float(nia_sqm) > 0:
                 normalised["rate_psm"] = round(float(rv) / float(nia_sqm), 2)
+                normalised["display_rate_basis"] = "NIA-fallback"
+        elif _existing_marked_itza:
+            normalised.setdefault("display_rate_basis", "provided")
+        else:
+            # Non-ITZA paths keep provided values untouched for backward compatibility.
+            normalised.setdefault("display_rate_basis", "provided")
 
     similarity = normalised.get("layout_similarity_score")
     normalised["layout_similarity_score"] = float(similarity or 0)
@@ -129,6 +188,48 @@ def _normalise_comparable(comp: dict[str, Any]) -> dict[str, Any]:
     normalised.setdefault("floor_config", "")
     normalised.setdefault("uarn", "")
     return normalised
+
+
+def _retail_itza_from_sv_lines_for_display(sv_lines: list[dict[str, Any]]) -> float:
+    """Estimate ITZA from SV lines for retail comparable display-rate fallback.
+
+    Description-led relativities are applied first so retail storage/kitchen rows
+    map to standard low relativities instead of inheriting raw matrix price
+    quirks. Price-ratio fallback is used only when description cannot be mapped.
+    """
+    if not sv_lines:
+        return 0.0
+    prices = [
+        float(r["price"])
+        for r in sv_lines
+        if r.get("price") is not None and float(r["price"]) > 0
+    ]
+    zone_a_price = max(prices) if prices else None
+    total = 0.0
+    for line in sv_lines:
+        area = float(line.get("area") or 0.0)
+        if area <= 0:
+            continue
+        desc = str(line.get("description") or "").lower()
+        rel: float | None = None
+        if "zone a" in desc:
+            rel = 1.0
+        elif "zone b" in desc:
+            rel = 0.5
+        elif "zone c" in desc:
+            rel = 0.25
+        elif "remainder" in desc:
+            rel = 0.125
+        elif "storage" in desc or "internal store" in desc or "kitchen" in desc:
+            rel = 0.10
+        elif "basement" in desc or "lower ground" in desc:
+            rel = 0.20
+        if rel is None and zone_a_price and line.get("price") is not None and float(line["price"]) > 0:
+            rel = float(line["price"]) / zone_a_price
+        if rel is None:
+            rel = 1.0
+        total += area * rel
+    return total
 
 
 def _build_weighting_rows(data: dict[str, Any]) -> list[dict[str, str]]:
@@ -399,11 +500,45 @@ def _derive_fields(report_data: dict) -> dict:
 
     # Per-comparable normalisation (rate_psm, layout_similarity_score defaults)
     comps = data.get("comparables")
+    _sv_lines_by_uarn: dict[str, list[dict[str, Any]]] = {}
     if comps:
+        _btype = str(data.get("business_type") or "").strip().lower()
+        _method = str(data.get("valuation_method") or "").strip().lower()
+        if _btype in {"retail", "hair_beauty"} and _method == "itza":
+            _uarns = [
+                str(c.get("uarn")).strip()
+                for c in comps
+                if isinstance(c, dict) and c.get("uarn") is not None
+            ]
+            if _uarns:
+                try:
+                    from api.db import DatabaseError, get_sv_lines_batch
+                    _sv_lines_by_uarn = get_sv_lines_batch(_uarns)
+                except (DatabaseError, Exception):
+                    _sv_lines_by_uarn = {}
         data["comparables"] = [
-            _normalise_comparable(comp) if isinstance(comp, dict) else comp
+            (
+                _normalise_comparable(
+                    comp,
+                    business_type=_btype,
+                    valuation_method=_method,
+                    sv_lines=(
+                        _sv_lines_by_uarn.get(str(comp.get("uarn")).strip(), [])
+                        if isinstance(comp, dict) and comp.get("uarn") is not None
+                        else []
+                    ),
+                )
+                if isinstance(comp, dict) else comp
+            )
             for comp in comps
         ]
+
+    _btype = str(data.get("business_type") or "").strip().lower()
+    _method = str(data.get("valuation_method") or "").strip().lower()
+    if _btype in {"retail", "hair_beauty"} and _method == "itza":
+        data.setdefault("comparable_rate_header", "Rate £/sqm (ITZA)")
+    else:
+        data.setdefault("comparable_rate_header", "Rate £/sqm")
 
     # Pool-level weight normalisation: convert raw weight floats to share-of-pool %.
     # Handles both 'adjusted_weight' (layout path) and 'weight' (CSA-only path).
