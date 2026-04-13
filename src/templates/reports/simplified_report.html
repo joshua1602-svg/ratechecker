@@ -218,6 +218,12 @@ table { page-break-inside: avoid; }
   text-align: justify;
 }
 
+.upsell-note {
+  margin: 6px 0 2px 0;
+  font-size: 8.5pt;
+  color: #2B4360;
+}
+
 /* ── Comparables table ── */
 .comp-table {
   width: 100%;
@@ -354,6 +360,7 @@ table { page-break-inside: avoid; }
   <p>We also used the layout details you provided to prioritise comparables with a similar floor plan.</p>
   {% endif %}
   <p>All figures reflect market conditions as of 1 April 2024, the date the VOA used to set 2026 rateable values.</p>
+  <p class="upsell-note">A Full Evidence Pack is available if you want fuller comparable evidence, detailed valuation methodology, and stronger formal Challenge support; if you upgrade, the &pound;49 paid for this assessment is credited in full.</p>
 </div>
 
 <!-- ═══ COMPARABLES ═══ -->
@@ -368,7 +375,7 @@ table { page-break-inside: avoid; }
         <th style="width:16%;" class="num">Rateable Value</th>
         <th style="width:16%;" class="num">{{ comparable_rate_header | default('Rate per sqm') }}</th>
         {% if layout_adjustment_applied %}
-        <th style="width:16%;">Similarity</th>
+        <th style="width:12%;">Similarity</th>
         {% endif %}
       </tr>
     </thead>
@@ -377,7 +384,7 @@ table { page-break-inside: avoid; }
       {% if not comp.address is subject_comp(property_address) %}
       <tr>
         <td>{{ comp.address }}</td>
-        <td>{{ comp.nia_sqm }}</td>
+        <td class="num">{{ comp.nia_sqm }}</td>
         <td class="num">&pound;{{ comp.rv | format_currency }}</td>
         <td class="num">&pound;{{ comp.rate_psm }}</td>
         {% if layout_adjustment_applied %}
