@@ -368,10 +368,25 @@ class TestPdfRateAlignment:
     def test_normalise_comparable_preserves_existing_rate_psm(self):
         from api.reports.pdf_generator import _normalise_comparable
 
-        comp = {"uarn": "789", "rv": 20000, "nia_sqm": 100, "rate": 180.0,
+        comp = {"uarn": "789", "rv": 20000, "nia_sqm": 100,
                 "rate_psm": 175.0, "weight": 0.3}
         result = _normalise_comparable(comp)
         assert result["rate_psm"] == 175.0  # pre-set takes priority
+
+    def test_normalise_comparable_retail_itza_overrides_stale_preset_rate_psm(self):
+        from api.reports.pdf_generator import _normalise_comparable
+        from api.engine.csa import itza_from_nia
+
+        # Legacy payload with stale NIA-style rate_psm must be overridden.
+        comp = {"uarn": "790", "rv": 39750, "nia_sqm": 79.23, "rate_psm": 777.04, "weight": 0.3}
+        result = _normalise_comparable(
+            comp,
+            business_type="retail",
+            valuation_method="itza",
+        )
+        expected = round(39750 / itza_from_nia(79.23), 2)
+        assert result["rate_psm"] == expected
+        assert result["display_rate_basis"] == "ITZA-fallback"
 
     def test_derive_fields_sets_itza_rate_header_for_retail_itza_reports(self):
         from api.reports.pdf_generator import _derive_fields
@@ -394,6 +409,36 @@ class TestPdfRateAlignment:
         }
         derived = _derive_fields(data)
         assert derived["comparable_rate_header"] == "Rate £/sqm"
+
+    def test_derive_fields_retail_itza_uses_sv_lines_when_available(self, monkeypatch):
+        from api.reports.pdf_generator import _derive_fields
+
+        def _fake_get_sv_lines_batch(uarns):
+            assert "63519084" in [str(u) for u in uarns]
+            return {
+                "63519084": [
+                    {"floor": "Ground", "description": "Retail Zone A", "area": 18.79, "price": 1300.0, "value": 24427.0},
+                    {"floor": "Ground", "description": "Retail Zone B", "area": 13.30, "price": 650.0, "value": 8645.0},
+                    {"floor": "Ground", "description": "Retail Zone B", "area": 6.84, "price": 585.0, "value": 4001.0},
+                    {"floor": "Basement", "description": "Internal Storage", "area": 22.44, "price": 65.0, "value": 1459.0},
+                    {"floor": "Basement", "description": "Internal Storage", "area": 15.49, "price": 65.0, "value": 1007.0},
+                    {"floor": "Basement", "description": "Kitchen", "area": 2.37, "price": 65.0, "value": 154.0},
+                ]
+            }
+
+        monkeypatch.setattr("api.db.get_sv_lines_batch", _fake_get_sv_lines_batch)
+
+        data = {
+            "business_type": "retail",
+            "valuation_method": "itza",
+            "comparables": [
+                {"uarn": "63519084", "rv": 39750, "nia_sqm": 79.23, "rate_psm": 777.04}
+            ],
+        }
+        derived = _derive_fields(data)
+        comp = derived["comparables"][0]
+        assert comp["rate_psm"] == pytest.approx(1208.57, abs=0.1)
+        assert comp["display_rate_basis"] == "ITZA-fallback"
 
 
 # ---------------------------------------------------------------------------

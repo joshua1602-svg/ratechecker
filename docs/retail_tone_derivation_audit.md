@@ -40,8 +40,9 @@ Report rendering now applies a retail ITZA guard for comparable display rates:
 
 - for retail/hair_beauty evidence reports on ITZA valuation basis, if a comparable
   already carries CSA `rate`, that value is shown;
-- if missing, fallback display rate is `rv / itza_from_nia(nia_sqm)` rather than
-  `rv / nia_sqm`;
+- if missing, fallback display rate is `rv / comparable_itza`, where comparable
+  ITZA is derived from SV lines when available (description-led retail zoning
+  relativities, with price-ratio fallback), then falls back to `itza_from_nia`;
 - table header is set to `Rate £/sqm (ITZA)` for those reports.
 
 ## Caveat
