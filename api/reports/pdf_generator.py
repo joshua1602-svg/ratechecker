@@ -120,9 +120,22 @@ def _normalise_comparable(
     method = str(valuation_method or "").strip().lower()
     is_retail_itza = btype in {"retail", "hair_beauty"} and method == "itza"
 
-    # Prefer engine "rate" field (correctly normalised by CSA).
+    # Retail ITZA display: prefer SV-line-derived effective ITZA rate when
+    # available so table values reflect comparable zoning evidence directly.
+    if is_retail_itza and sv_lines:
+        rv = normalised.get("rv")
+        if rv is not None and float(rv) > 0:
+            try:
+                _sv_itza = _retail_itza_from_sv_lines_for_display(sv_lines)
+            except Exception:
+                _sv_itza = 0.0
+            if _sv_itza > 0:
+                normalised["rate_psm"] = round(float(rv) / _sv_itza, 2)
+                normalised["display_rate_basis"] = "SV-lines-ITZA"
+
+    # Then prefer engine "rate" field (correctly normalised by CSA).
     engine_rate = normalised.get("rate")
-    if engine_rate is not None and float(engine_rate) > 0:
+    if normalised.get("rate_psm") is None and engine_rate is not None and float(engine_rate) > 0:
         normalised["rate_psm"] = round(float(engine_rate), 2)
         normalised["display_rate_basis"] = "CSA-derived"
     else:
@@ -132,13 +145,19 @@ def _normalise_comparable(
         _existing_basis = str(normalised.get("display_rate_basis") or "").strip().lower()
         _existing_rate_basis = str(normalised.get("rate_basis") or "").strip().upper()
         _existing_marked_itza = (
-            _existing_basis in {"csa-derived", "itza-fallback", "itza-provided"}
+            _existing_basis in {"csa-derived", "itza-fallback", "itza-provided", "sv-lines-itza"}
             or _existing_rate_basis == "ITZA"
         )
 
         # Retail ITZA reports must not display stale NIA-style precomputed rate_psm.
         # If no CSA rate is present, recompute from rv/itza when possible.
-        if is_retail_itza and rv is not None and nia_sqm and float(nia_sqm) > 0:
+        if (
+            is_retail_itza
+            and (normalised.get("rate_psm") is None or not _existing_marked_itza)
+            and rv is not None
+            and nia_sqm
+            and float(nia_sqm) > 0
+        ):
             itza: float | None = None
             if sv_lines:
                 try:
