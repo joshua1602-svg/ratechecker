@@ -119,28 +119,24 @@ def _normalise_comparable(
     btype = str(business_type or "").strip().lower()
     method = str(valuation_method or "").strip().lower()
     is_retail_itza = btype in {"retail", "hair_beauty"} and method == "itza"
+    rv = normalised.get("rv")
+    nia_sqm = normalised.get("nia_sqm")
 
-    # Retail ITZA display: prefer SV-line-derived effective ITZA rate when
-    # available so table values reflect comparable zoning evidence directly.
-    if is_retail_itza and sv_lines:
-        rv = normalised.get("rv")
-        if rv is not None and float(rv) > 0:
-            try:
-                _sv_itza = _retail_itza_from_sv_lines_for_display(sv_lines)
-            except Exception:
-                _sv_itza = 0.0
-            if _sv_itza > 0:
-                normalised["rate_psm"] = round(float(rv) / _sv_itza, 2)
-                normalised["display_rate_basis"] = "SV-lines-ITZA"
+    if is_retail_itza and sv_lines and rv is not None and float(rv) > 0:
+        try:
+            _sv_itza = _retail_itza_from_sv_lines_for_display(sv_lines)
+        except Exception:
+            _sv_itza = 0.0
+        if _sv_itza > 0:
+            normalised["sv_itza_rate_psm"] = round(float(rv) / _sv_itza, 2)
 
-    # Then prefer engine "rate" field (correctly normalised by CSA).
+    # Retail ITZA display keeps parity with the CSA tone basis:
+    # prefer engine "rate" (the value used in tone derivation) for display.
     engine_rate = normalised.get("rate")
-    if normalised.get("rate_psm") is None and engine_rate is not None and float(engine_rate) > 0:
+    if engine_rate is not None and float(engine_rate) > 0:
         normalised["rate_psm"] = round(float(engine_rate), 2)
         normalised["display_rate_basis"] = "CSA-derived"
     else:
-        rv = normalised.get("rv")
-        nia_sqm = normalised.get("nia_sqm")
         _has_existing_rate = normalised.get("rate_psm") is not None
         _existing_basis = str(normalised.get("display_rate_basis") or "").strip().lower()
         _existing_rate_basis = str(normalised.get("rate_basis") or "").strip().upper()

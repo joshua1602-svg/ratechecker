@@ -38,9 +38,9 @@ This is ITZA-consistent arithmetic for the subject table.
 
 Report rendering now applies a retail ITZA guard for comparable display rates:
 
-- for retail/hair_beauty evidence reports on ITZA valuation basis, if SV lines
-  are available the table shows `rv / comparable_itza_from_sv_lines`;
-- if SV lines are absent and comparable carries CSA `rate`, that value is shown;
+- for retail/hair_beauty evidence reports on ITZA valuation basis, table rate
+  display prioritises CSA `rate` (same basis used to derive tone);
+- SV-line-derived ITZA rate is computed as auxiliary metadata when available;
 - if missing, fallback display rate is `rv / comparable_itza`, where comparable
   ITZA is derived from SV lines when available (description-led retail zoning
   relativities, with price-ratio fallback), then falls back to `itza_from_nia`;

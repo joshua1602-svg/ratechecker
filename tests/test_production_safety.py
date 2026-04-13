@@ -388,7 +388,7 @@ class TestPdfRateAlignment:
         assert result["rate_psm"] == expected
         assert result["display_rate_basis"] == "ITZA-fallback"
 
-    def test_normalise_comparable_retail_itza_prefers_sv_lines_over_engine_rate(self):
+    def test_normalise_comparable_retail_itza_prefers_engine_rate_for_tone_parity(self):
         from api.reports.pdf_generator import _normalise_comparable
 
         sv_lines = [
@@ -406,8 +406,9 @@ class TestPdfRateAlignment:
             valuation_method="itza",
             sv_lines=sv_lines,
         )
-        assert result["rate_psm"] == pytest.approx(1208.57, abs=0.1)
-        assert result["display_rate_basis"] == "SV-lines-ITZA"
+        assert result["rate_psm"] == pytest.approx(777.04, abs=0.1)
+        assert result["display_rate_basis"] == "CSA-derived"
+        assert result["sv_itza_rate_psm"] == pytest.approx(1208.57, abs=0.1)
 
     def test_derive_fields_sets_itza_rate_header_for_retail_itza_reports(self):
         from api.reports.pdf_generator import _derive_fields
@@ -459,7 +460,7 @@ class TestPdfRateAlignment:
         derived = _derive_fields(data)
         comp = derived["comparables"][0]
         assert comp["rate_psm"] == pytest.approx(1208.57, abs=0.1)
-        assert comp["display_rate_basis"] == "SV-lines-ITZA"
+        assert comp["display_rate_basis"] == "ITZA-fallback"
 
 
 # ---------------------------------------------------------------------------

@@ -647,6 +647,11 @@ table { page-break-inside: avoid; }
   <p style="font-size:8pt; color:#7A8A9A; margin-top:2px;">
     Row values are calculated using ITZA contribution: (Area &times; ITZA weight) &times; Zone A tone.
   </p>
+  {% if business_type in ['retail', 'hair_beauty'] %}
+  <p style="font-size:8pt; color:#7A8A9A; margin-top:2px;">
+    Comparable rates are shown on an effective ITZA basis; the adopted tone is an evidence-weighted central anchor and may sit below the highest displayed comparable rates.
+  </p>
+  {% endif %}
   <table class="calc-table">
     <thead>
       <tr>

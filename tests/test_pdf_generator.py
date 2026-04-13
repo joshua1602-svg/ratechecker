@@ -314,6 +314,50 @@ class TestPdfTemplateRendering:
         assert "ITZA Contribution (sqm)" in html
         assert "Zone A" in html
 
+    def test_retail_itza_renders_central_anchor_explanatory_note(self):
+        data = _base_report_data()
+        data["business_type"] = "retail"
+        data["valuation_method"] = "itza"
+        data["valuation_basis"] = "ITZA (Zoning)"
+        data["zoning_rows"] = [
+            {
+                "zone": "Zone A",
+                "floor": "Ground",
+                "area_sqm": 40.0,
+                "itza_weight": 1.0,
+                "itza_contribution_sqm": 40.0,
+                "displayed_tone": 300.0,
+                "row_value": 12000.0,
+            }
+        ]
+        html = pdf_generator._load_template(
+            pdf_generator._get_env(),
+            "evidence_pack.html",
+        ).render(**pdf_generator._derive_fields(data))
+        assert "adopted tone is an evidence-weighted central anchor" in html
+
+    def test_non_retail_itza_does_not_render_central_anchor_explanatory_note(self):
+        data = _base_report_data()
+        data["business_type"] = "restaurant_cafe"
+        data["valuation_method"] = "itza"
+        data["valuation_basis"] = "ITZA (Zoning)"
+        data["zoning_rows"] = [
+            {
+                "zone": "Zone A",
+                "floor": "Ground",
+                "area_sqm": 40.0,
+                "itza_weight": 1.0,
+                "itza_contribution_sqm": 40.0,
+                "displayed_tone": 300.0,
+                "row_value": 12000.0,
+            }
+        ]
+        html = pdf_generator._load_template(
+            pdf_generator._get_env(),
+            "evidence_pack.html",
+        ).render(**pdf_generator._derive_fields(data))
+        assert "adopted tone is an evidence-weighted central anchor" not in html
+
     @pytest.mark.parametrize("business_type", ["retail", "restaurant_cafe", "nursery"])
     def test_itza_schedule_columns_are_consistent_across_business_types(self, business_type):
         data = _base_report_data()
