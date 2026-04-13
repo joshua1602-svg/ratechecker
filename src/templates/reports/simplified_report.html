@@ -370,10 +370,10 @@ table { page-break-inside: avoid; }
   <table class="comp-table">
     <thead>
       <tr>
-        <th style="width:46%;">Address</th>
-        <th style="width:{% if layout_adjustment_applied %}14%{% else %}18%{% endif %};" class="num">Floor Area</th>
-        <th style="width:{% if layout_adjustment_applied %}14%{% else %}18%{% endif %};" class="num">Rateable Value</th>
-        <th style="width:{% if layout_adjustment_applied %}14%{% else %}18%{% endif %};" class="num">{{ comparable_rate_header | default('Rate per sqm') }}</th>
+        <th style="width:40%;">Address</th>
+        <th style="width:12%;">Floor Area</th>
+        <th style="width:16%;" class="num">Rateable Value</th>
+        <th style="width:16%;" class="num">{{ comparable_rate_header | default('Rate per sqm') }}</th>
         {% if layout_adjustment_applied %}
         <th style="width:12%;">Similarity</th>
         {% endif %}

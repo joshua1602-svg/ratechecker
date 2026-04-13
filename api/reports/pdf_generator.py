@@ -154,14 +154,9 @@ def _normalise_comparable(
             and nia_sqm
             and float(nia_sqm) > 0
         ):
-            itza: float | None = None
-            if sv_lines:
-                try:
-                    itza = _retail_itza_from_sv_lines_for_display(sv_lines)
-                except Exception:
-                    itza = None
-            if itza is None or itza <= 0:
-                itza = itza_from_nia(float(nia_sqm))
+            # Keep fallback aligned with CSA tone basis for itza_retail branch:
+            # rv / itza_from_nia(nia_sqm).
+            itza = itza_from_nia(float(nia_sqm))
             if itza > 0:
                 normalised["rate_psm"] = round(float(rv) / itza, 2)
                 normalised["display_rate_basis"] = "ITZA-fallback"

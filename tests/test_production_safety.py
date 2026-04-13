@@ -434,6 +434,7 @@ class TestPdfRateAlignment:
 
     def test_derive_fields_retail_itza_uses_sv_lines_when_available(self, monkeypatch):
         from api.reports.pdf_generator import _derive_fields
+        from api.engine.csa import itza_from_nia
 
         def _fake_get_sv_lines_batch(uarns):
             assert "63519084" in [str(u) for u in uarns]
@@ -459,8 +460,9 @@ class TestPdfRateAlignment:
         }
         derived = _derive_fields(data)
         comp = derived["comparables"][0]
-        assert comp["rate_psm"] == pytest.approx(1208.57, abs=0.1)
+        assert comp["rate_psm"] == pytest.approx(round(39750 / itza_from_nia(79.23), 2), abs=0.1)
         assert comp["display_rate_basis"] == "ITZA-fallback"
+        assert comp["sv_itza_rate_psm"] == pytest.approx(1208.57, abs=0.1)
 
 
 # ---------------------------------------------------------------------------
