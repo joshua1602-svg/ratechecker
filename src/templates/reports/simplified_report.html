@@ -329,8 +329,8 @@ table { page-break-inside: avoid; }
     <div class="banner-value">&pound;{{ modelled_rv_low | format_currency }}&ndash;&pound;{{ modelled_rv_high | format_currency }}</div>
   </div>
   <div class="banner-box banner-box-accent">
-    <div class="banner-label">Potential Annual Saving</div>
-    <div class="banner-value">&pound;{{ annual_saving_low | format_currency }}&ndash;&pound;{{ annual_saving_high | format_currency }}</div>
+    <div class="banner-label">Potential Total Saving</div>
+    <div class="banner-value">&pound;{{ implied_total_saving_low | format_currency }}&ndash;&pound;{{ implied_total_saving_high | format_currency }}</div>
   </div>
   <div class="banner-box">
     <div class="banner-label">Case Strength</div>
@@ -343,7 +343,8 @@ table { page-break-inside: avoid; }
   <div class="summary-text">
     Based on {{ comp_count }} comparable properties nearby, your current rateable value of &pound;{{ voa_rv | format_currency }} appears
     {% if voa_rv > modelled_rv_high %}
-    higher than similar units. This suggests you may be overpaying by &pound;{{ annual_saving_low | format_currency }}&ndash;&pound;{{ annual_saving_high | format_currency }} per year.
+    higher than similar units. This suggests indicative total savings of &pound;{{ implied_total_saving_low | format_currency }}&ndash;&pound;{{ implied_total_saving_high | format_currency }}
+    over the remaining {{ years_remaining_in_cycle }} year(s) in the current cycle.
     {% elif voa_rv < modelled_rv_low %}
     lower than similar units. Your property may be correctly assessed or undervalued.
     {% else %}

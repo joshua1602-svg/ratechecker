@@ -7,6 +7,7 @@ from typing import Optional
 
 from pydantic import AliasChoices, BaseModel, Field, field_validator
 from api.reports.narrative import build_rendered_narrative
+from api.services.savings import calculate_implied_savings
 
 logger = logging.getLogger(__name__)
 
@@ -267,8 +268,16 @@ class SimplifiedReportRequest(BaseModel):
     voa_rv: float
     modelled_rv_low: float
     modelled_rv_high: float
-    annual_saving_low: float
-    annual_saving_high: float
+    implied_annual_saving_point: float
+    implied_annual_saving_low: float
+    implied_annual_saving_high: float
+    implied_total_saving_point: float
+    implied_total_saving_low: float
+    implied_total_saving_high: float
+    years_remaining_in_cycle: int
+    # Backward-compatible aliases retained for existing consumers.
+    annual_saving_low: Optional[float] = None
+    annual_saving_high: Optional[float] = None
     case_strength: str
     comparables: list[dict] = Field(default_factory=list)
     comp_count: int
@@ -569,13 +578,12 @@ def build_report_payload_from_assess(
         rv_low = None
         rv_high = None
 
-    # Savings: difference between VOA RV and our modelled range
-    if rv_low is not None and voa_rv > 0:
-        saving_low = max(0, round(voa_rv - rv_high))
-        saving_high = max(0, round(voa_rv - rv_low))
-    else:
-        saving_low = None
-        saving_high = None
+    savings = calculate_implied_savings(
+        current_rv=voa_rv,
+        modelled_rv_point=best_rv,
+        modelled_rv_low=rv_low,
+        modelled_rv_high=rv_high,
+    )
 
     # Case strength maps directly from signal
     signal = assess_response.signal
@@ -610,8 +618,20 @@ def build_report_payload_from_assess(
         "voa_rv": voa_rv,
         "modelled_rv_low": rv_low,
         "modelled_rv_high": rv_high,
-        "annual_saving_low": saving_low,
-        "annual_saving_high": saving_high,
+        "implied_annual_saving_point": savings["implied_annual_saving_point"],
+        "implied_annual_saving_low": savings["implied_annual_saving_low"],
+        "implied_annual_saving_high": savings["implied_annual_saving_high"],
+        "implied_total_saving_point": savings["implied_total_saving_point"],
+        "implied_total_saving_low": savings["implied_total_saving_low"],
+        "implied_total_saving_high": savings["implied_total_saving_high"],
+        "years_remaining_in_cycle": savings["years_remaining_in_cycle"],
+        "annual_saving_low": savings["implied_annual_saving_low"],
+        "annual_saving_high": savings["implied_annual_saving_high"],
+        "indicative_total_saving_low": savings["implied_total_saving_low"],
+        "indicative_total_saving_high": savings["implied_total_saving_high"],
+        "rv_difference_point": None if best_rv is None else max(0, round(voa_rv - best_rv)),
+        "rv_difference_low": None if rv_high is None else max(0, round(voa_rv - rv_high)),
+        "rv_difference_high": None if rv_low is None else max(0, round(voa_rv - rv_low)),
         "case_strength": case_strength_map.get(signal, signal),
         "comparables": comps_for_report,
         "comp_count": comp_count,

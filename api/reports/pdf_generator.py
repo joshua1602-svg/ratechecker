@@ -35,8 +35,11 @@ _SIMPLIFIED_REQUIRED = [
     "voa_rv",
     "modelled_rv_low",
     "modelled_rv_high",
-    "annual_saving_low",
-    "annual_saving_high",
+    "implied_annual_saving_low",
+    "implied_annual_saving_high",
+    "implied_total_saving_low",
+    "implied_total_saving_high",
+    "years_remaining_in_cycle",
     "case_strength",
     "comparables",
     "comp_count",
@@ -442,16 +445,22 @@ def _derive_fields(report_data: dict) -> dict:
     if voa_rv and nia_sqm:
         data.setdefault("rate_psm", round(voa_rv / nia_sqm, 2))
 
-    # RV delta (evidence pack)
+    # RV difference labelling (evidence pack)
     modelled_rv = data.get("modelled_rv")
     if voa_rv and modelled_rv:
         rv_delta = voa_rv - modelled_rv
         data.setdefault("rv_delta", rv_delta)
-        data.setdefault("rv_central_saving", max(0, rv_delta))
+        data.setdefault("rv_difference_point", max(0, rv_delta))
         if voa_rv != 0:
             rv_delta_pct = round((rv_delta / voa_rv) * 100, 1)
             data.setdefault("rv_delta_pct", rv_delta_pct)
-            data.setdefault("rv_central_saving_pct", max(0.0, rv_delta_pct))
+            data.setdefault("rv_difference_pct", max(0.0, rv_delta_pct))
+
+    # Backward-compatible aliases for templates still reading annual_saving_*.
+    if data.get("annual_saving_low") is None:
+        data["annual_saving_low"] = data.get("implied_annual_saving_low")
+    if data.get("annual_saving_high") is None:
+        data["annual_saving_high"] = data.get("implied_annual_saving_high")
 
     # ── Exclude the subject property from comparables by UARN ──
     # This is the authoritative filter: it catches ALL report paths (direct
@@ -623,8 +632,9 @@ def _derive_fields(report_data: dict) -> dict:
                 f"with a current VOA rateable value of £{voa_rv:,.0f}. "
                 f"Based on analysis of {data.get('comp_count', 0)} comparable "
                 f"properties, the estimated fair rateable value inferred from the weighted comparable set is £{modelled_rv:,.0f}, "
-                f"indicating a potential annual saving of £{data.get('rv_central_saving', 0):,.0f} "
-                f"({data.get('rv_central_saving_pct', 0)}%)."
+                f"indicating implied total savings of £{data.get('implied_total_saving_point', 0):,.0f} "
+                f"over {data.get('years_remaining_in_cycle', 0)} year(s), "
+                f"with estimated annual savings of £{data.get('implied_annual_saving_point', 0):,.0f}."
                 f"{layout_sentence} These property-specific nuances influenced comparable weighting only; they did not create separate subject-level deductions or allowances in this report."
             ),
         )
