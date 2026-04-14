@@ -1124,7 +1124,7 @@ class TestRetailSameStreetPrimaryTone:
         assert result["tone_source"] == "same_street_evidence"
         assert result["tone_rate"] >= 500.0
 
-    def test_same_street_primary_uses_upper_central_anchor_method(self):
+    def test_same_street_primary_uses_primary_cluster_weighted_median_method(self):
         same_street = [
             self._retail_comp_with_address(f"ss{i}", r, "SHOP, 1, HIGH STREET, LONDON")
             for i, r in enumerate([480, 490, 500, 510, 520, 700])
@@ -1142,10 +1142,72 @@ class TestRetailSameStreetPrimaryTone:
         assert result["signal"] != "Insufficient Data"
         assert result["tone_source"] == "same_street_evidence"
         dbg = result.get("_debug", {})
-        assert dbg.get("tone_method") in {
-            "same_street_weighted_p60",
-            "same_street_dominant_cluster_median",
-        }
+        assert dbg.get("tone_method") == "primary_cluster_weighted_median"
+
+    def test_retail_final_tone_matches_weighted_median_of_selected_primary_cluster(self):
+        same_street = [
+            self._retail_comp_with_address(f"ss{i}", r, "SHOP, 1, HIGH STREET, LONDON")
+            for i, r in enumerate([460, 480, 500, 520, 540, 560])
+        ]
+        result = _run(
+            same_street,
+            nia_sqm=100.0,
+            voa_rv=float(round(500 * itza_from_nia(100.0))),
+            subject_address="12 High Street, London",
+        )
+        assert result["signal"] != "Insufficient Data"
+        primary = result.get("_primary_tone_comps", [])
+        assert primary
+        pairs = sorted((float(c["rate"]), float(c["weight"])) for c in primary)
+        target = sum(w for _, w in pairs) / 2
+        cumulative = 0.0
+        weighted_median = pairs[-1][0]
+        for rate, weight in pairs:
+            cumulative += weight
+            if cumulative >= target:
+                weighted_median = rate
+                break
+        assert result["tone_rate"] == pytest.approx(weighted_median, abs=0.01)
+
+    def test_retail_primary_cluster_weighted_median_respects_weights(self):
+        from api.engine.csa import _derive_primary_tone
+
+        primary_cluster = [
+            (self._retail_comp_with_address("a", 300, "SHOP, 1, HIGH STREET, LONDON"), 80.0, 300.0, 0.2),
+            (self._retail_comp_with_address("b", 320, "SHOP, 2, HIGH STREET, LONDON"), 80.0, 320.0, 0.2),
+            (self._retail_comp_with_address("c", 340, "SHOP, 3, HIGH STREET, LONDON"), 80.0, 340.0, 1.0),
+        ]
+        tone, method = _derive_primary_tone(primary_cluster)
+        assert method == "primary_cluster_weighted_median"
+        assert tone == pytest.approx(340.0, abs=0.01)
+
+    def test_retail_primary_cluster_outlier_is_excluded_before_final_tone(self):
+        from api.engine.csa import _derive_primary_tone, _exclude_cluster_outliers
+
+        central = [300, 310, 320, 330, 340, 350]
+        pool = [
+            (
+                self._retail_comp_with_address(f"m{i}", rate, "SHOP, 1, HIGH STREET, LONDON"),
+                80.0,
+                float(rate),
+                1.0,
+            )
+            for i, rate in enumerate(central)
+        ]
+        pool.append(
+            (
+                self._retail_comp_with_address("out", 900, "SHOP, 3, HIGH STREET, LONDON"),
+                80.0,
+                900.0,
+                1.0,
+            )
+        )
+
+        filtered, removed = _exclude_cluster_outliers(pool)
+        tone, method = _derive_primary_tone(filtered)
+        assert removed >= 1
+        assert method == "primary_cluster_weighted_median"
+        assert tone == pytest.approx(320.0, abs=0.1)
 
     def test_restaurant_same_street_primary_triggers_with_strong_set(self):
         same_street = [

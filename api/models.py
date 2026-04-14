@@ -627,7 +627,7 @@ def build_evidence_payload_from_assess(
     assess_response: AssessResponse,
     request: AssessRequest,
     *,
-    tone_basis: str = "Evidence-weighted upper-central anchor",
+    tone_basis: str = "Evidence-weighted median of primary comparable cluster",
     recommendation_text: str | None = None,
 ) -> dict:
     """Build a canonical evidence pack payload from actual engine outputs.

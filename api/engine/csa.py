@@ -7,7 +7,7 @@ Implements the rules defined in rules/csa.yaml:
   - Launderette exclusion
   - Zone A rate extraction (Tier 1 = VOA published; Tier 2 = implied)
   - Outlier removal (10th–90th percentile)
-  - Tone derivation (evidence-weighted anchor, fallback IQR mean)
+  - Tone derivation (primary-cluster weighted median, fallback IQR mean)
   - Confidence banding (High ≥5, Medium ≥3, Low ≥1)
   - Signal determination vs. supplied VOA RV
 """
@@ -192,41 +192,48 @@ def _weighted_median(values: list[float], weights: list[float]) -> float:
     return pairs[-1][0]
 
 
-def _weighted_percentile(values: list[float], weights: list[float], percentile: float) -> float:
-    """Return weighted percentile in [0, 1] using cumulative-weight crossing."""
-    p = min(1.0, max(0.0, float(percentile)))
-    pairs = sorted(zip(values, weights), key=lambda item: item[0])
-    total = sum(w for _, w in pairs)
-    if total <= 0:
-        return pairs[-1][0]
-    target = total * p
-    cumulative = 0.0
-    for value, weight in pairs:
-        cumulative += weight
-        if cumulative >= target:
-            return value
-    return pairs[-1][0]
-
-
 def _derive_primary_tone(
     rated_pool: list[tuple[Comparable, float, float, float]],
-    *,
-    same_street_primary: bool,
 ) -> tuple[float, str]:
-    """Derive tone from evidence using cluster-first same-street logic."""
+    """Derive tone as the evidence-weighted median of the selected primary cluster."""
     rate_vals = [rate for _, _, rate, _ in rated_pool]
     weights = [weight for _, _, _, weight in rated_pool]
+    return _weighted_median(rate_vals, weights), "primary_cluster_weighted_median"
 
-    if same_street_primary:
-        clusters = _find_rate_clusters(rated_pool)
-        if len(clusters) >= 2:
-            dominant = max(clusters, key=lambda c: sum(item[3] for item in c))
-            d_rates = [rate for _, _, rate, _ in dominant]
-            d_weights = [weight for _, _, _, weight in dominant]
-            return _weighted_median(d_rates, d_weights), "same_street_dominant_cluster_median"
-        return _weighted_percentile(rate_vals, weights, 0.60), "same_street_weighted_p60"
 
-    return _weighted_median(rate_vals, weights), "wider_pool_weighted_median"
+def _exclude_cluster_outliers(
+    rated_pool: list[tuple[Comparable, float, float, float]],
+) -> tuple[list[tuple[Comparable, float, float, float]], int]:
+    """Exclude outlier rates within a selected cluster using robust fences."""
+    if len(rated_pool) < 4:
+        return rated_pool, 0
+
+    rates = sorted(rate for _, _, rate, _ in rated_pool)
+    n = len(rates)
+    q1 = rates[max(0, int(n * 0.25))]
+    q3 = rates[min(n - 1, int(n * 0.75))]
+    iqr = q3 - q1
+    if iqr <= 0:
+        return rated_pool, 0
+
+    tukey_lo = q1 - 1.5 * iqr
+    tukey_hi = q3 + 1.5 * iqr
+    # Tighten with a light 10th–90th percentile band for larger clusters so
+    # single-tail extremes are excluded before final weighted-median adoption.
+    if n >= 6:
+        p10 = rates[int((n - 1) * 0.10)]
+        p90 = rates[int((n - 1) * 0.90)]
+        lo = max(tukey_lo, p10)
+        hi = min(tukey_hi, p90)
+    else:
+        lo = tukey_lo
+        hi = tukey_hi
+
+    filtered = [(c, d, r, w) for c, d, r, w in rated_pool if lo <= r <= hi]
+    # Preserve minimum evidence floor for valuation.
+    if len(filtered) < _MIN_COMPS_FOR_VALUATION:
+        return rated_pool, 0
+    return filtered, len(rated_pool) - len(filtered)
 
 
 def _iqr_mean(values: list[float]) -> float:
@@ -1186,13 +1193,18 @@ def run_csa(
                 or _post_outlier_same_street_share >= _RETAIL_PRIMARY_TONE_SAME_STREET_MIN_SHARE
             )
         if _same_street_primary_early and _post_outlier_same_street_subset:
-            rated = _post_outlier_same_street_subset
             same_street_key = _subject_street_key
-            same_street_count = len(rated)
+            same_street_count = len(_post_outlier_same_street_subset)
             _location_tier = "same_street_primary"
-            _selection_reason = "same_street_primary_override"
-            cluster_count = 1
-            selected_cluster_id = 0
+            _selection_reason = "same_street_primary_cluster_selection"
+            clusters = _find_rate_clusters(_post_outlier_same_street_subset)
+            cluster_count = len(clusters)
+            rated, selected_cluster_id, _selection_reason = _retail_select_cluster(
+                clusters,
+                subject_nia=nia_sqm,
+                min_comps=_MIN_COMPS_FOR_VALUATION,
+                same_street_anchor=_subject_street_key,
+            )
         else:
             # --- Location-tier pool selection (retail only) ---
             # Preference order: same-street → same-postcode-sector → full pool.
@@ -1411,7 +1423,7 @@ def run_csa(
     same_street_share_final = 0.0
 
     _same_street_subset: list[tuple[Comparable, float, float, float]] = []
-    tone_method = "wider_pool_weighted_median"
+    tone_method = "primary_cluster_weighted_median"
     _same_street_primary = False
     if _same_street_primary_eligible and _subject_street_key:
         _same_street_subset = [
@@ -1441,14 +1453,14 @@ def run_csa(
     else:
         primary_pool = rated
 
+    outliers_removed_from_primary_cluster = 0
+    if _retail_like:
+        primary_pool, outliers_removed_from_primary_cluster = _exclude_cluster_outliers(primary_pool)
+
     rate_vals = [r for _, _, r, _ in primary_pool]
-    weights = [w for _, _, _, w in primary_pool]
 
     try:
-        tone, tone_method = _derive_primary_tone(
-            primary_pool,
-            same_street_primary=_same_street_primary and bool(_same_street_subset),
-        )
+        tone, tone_method = _derive_primary_tone(primary_pool)
     except Exception:
         tone = _iqr_mean(rate_vals)
         tone_method = "iqr_mean_fallback"
@@ -1529,6 +1541,7 @@ def run_csa(
             "post_outlier_same_street_primary_triggered": _same_street_primary_early,
             "final_comparable_count": len(rated),
             "primary_tone_subset_size": len(rate_vals),
+            "outliers_removed_from_primary_cluster": outliers_removed_from_primary_cluster,
             "final_tone_source_used": tone_source,
             "final_tone_source_label": tone_source_label,
             "same_street_comp_uarns": [str(item[0].uarn) for item in _same_street_subset],

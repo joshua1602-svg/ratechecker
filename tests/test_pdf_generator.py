@@ -345,7 +345,7 @@ class TestPdfTemplateRendering:
         assert "ITZA Contribution (sqm)" in html
         assert "Zone A" in html
 
-    def test_retail_itza_renders_central_anchor_explanatory_note(self):
+    def test_retail_itza_renders_primary_cluster_median_explanatory_note(self):
         data = _base_report_data()
         data["business_type"] = "retail"
         data["valuation_method"] = "itza"
@@ -365,9 +365,9 @@ class TestPdfTemplateRendering:
             pdf_generator._get_env(),
             "evidence_pack.html",
         ).render(**pdf_generator._derive_fields(data))
-        assert "adopted tone is an evidence-weighted central anchor" in html
+        assert "adopted tone is the evidence-weighted median of the primary comparable cluster after outlier exclusion" in html
 
-    def test_non_retail_itza_does_not_render_central_anchor_explanatory_note(self):
+    def test_non_retail_itza_does_not_render_primary_cluster_median_explanatory_note(self):
         data = _base_report_data()
         data["business_type"] = "restaurant_cafe"
         data["valuation_method"] = "itza"
@@ -387,7 +387,7 @@ class TestPdfTemplateRendering:
             pdf_generator._get_env(),
             "evidence_pack.html",
         ).render(**pdf_generator._derive_fields(data))
-        assert "adopted tone is an evidence-weighted central anchor" not in html
+        assert "adopted tone is the evidence-weighted median of the primary comparable cluster after outlier exclusion" not in html
 
     @pytest.mark.parametrize("business_type", ["retail", "restaurant_cafe", "nursery"])
     def test_itza_schedule_columns_are_consistent_across_business_types(self, business_type):
