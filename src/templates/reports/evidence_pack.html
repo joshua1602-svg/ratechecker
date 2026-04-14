@@ -755,18 +755,26 @@ table { page-break-inside: avoid; }
 </div>
 
 <!-- ═══════════════════════════════════════════════════════════════════
-     SECTION 5 — EVIDENCE INTERPRETATION & RECOMMENDED ACTION
+     SECTION 5 — CONCLUSION & NEXT STEP
      ═══════════════════════════════════════════════════════════════════ -->
 <div class="section">
-  <h1>Evidence Interpretation &amp; Recommended Action</h1>
+  <h1>Conclusion and Next Step</h1>
 
-  <h2>Evidence Interpretation</h2>
+  <h2>Summary</h2>
+  <table class="facts-table">
+    <tr><td class="label-cell">VOA Rateable Value</td><td class="value-cell">&pound;{{ voa_rv | format_currency }}</td></tr>
+    <tr><td class="label-cell">Modelled Rateable Value</td><td class="value-cell">&pound;{{ modelled_rv | format_currency }}</td></tr>
+    <tr><td class="label-cell">Difference</td><td class="value-cell">&pound;{{ rv_delta | format_currency }} ({{ rv_delta_pct }}%)</td></tr>
+    <tr><td class="label-cell">Case Position</td><td class="value-cell">{{ case_position_label | default(case_strength) }}</td></tr>
+  </table>
+
+  <h2>What the evidence shows</h2>
   <p>{{ evidence_interpretation }}</p>
 
-  <h2>Case Assessment</h2>
+  <h2>What this means in practice</h2>
   <p>{{ case_assessment }}</p>
 
-  <h2>Recommended Action</h2>
+  <h2>Recommended next step</h2>
   <p>{{ recommended_action }}</p>
 </div>
 

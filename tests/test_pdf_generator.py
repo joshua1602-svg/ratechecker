@@ -245,6 +245,18 @@ class TestPdfTemplateRendering:
         assert "Based on the central modelled value" in html
         assert "this reflects a potential annual saving" not in html
 
+    def test_evidence_pack_uses_conclusion_and_next_step_structure(self):
+        data = pdf_generator._derive_fields(_base_report_data())
+        html = pdf_generator._load_template(
+            pdf_generator._get_env(),
+            "evidence_pack.html",
+        ).render(**data)
+        assert "Conclusion and Next Step" in html
+        assert "What the evidence shows" in html
+        assert "What this means in practice" in html
+        assert "Recommended next step" in html
+        assert "Case Position" in html
+
     def test_evidence_pack_comparable_right_columns_are_right_aligned(self):
         data = pdf_generator._derive_fields(_base_report_data())
         html = pdf_generator._load_template(

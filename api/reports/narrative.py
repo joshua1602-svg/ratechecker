@@ -172,8 +172,8 @@ STRUCTURAL_TEMPLATES = {
 
 CASE_STRENGTH_TEMPLATES = {
     "strong": "This case is assessed as Strong because the modelled value is materially below the current assessment and is supported by a sufficiently strong and locally relevant body of comparable evidence.",
-    "moderate": "This case is assessed as Moderate because the comparable evidence supports a possible reduction, but either the value gap, factual alignment, or consistency of evidence is not strong enough to treat the case as clear-cut.",
-    "weak": "This case is assessed as Weak because the comparable evidence does not currently demonstrate a sufficiently clear overassessment relative to the existing VOA rateable value.",
+    "moderate": "Moderate — arguable basis for review. The current assessment may sit close to the central estimate, but the comparable evidence is not perfectly uniform and some nearby hereditaments sit lower.",
+    "weak": "Moderate — reviewable, but not clear-cut. The evidence does not guarantee a reduction, but it can still justify a closer review where facts and tone selection are tested carefully.",
 }
 
 
@@ -366,6 +366,8 @@ def render_case_strength_support(signals: NarrativeSignals) -> Optional[str]:
         return "Case strength should be considered alongside the differences noted between the entered property details and the matched VOA record."
     if signals.dispersion_band == "high":
         return "The spread of comparable evidence is relatively wide, which reduces certainty in the inferred tone."
+    if signals.case_strength in {"moderate", "weak"}:
+        return "Outcome can depend on how the local evidence is interpreted and presented, particularly where the comparable set contains a mix of higher and lower tone indicators."
     return None
 
 
@@ -376,9 +378,17 @@ def render_recommended_action(signals: NarrativeSignals) -> str:
         return "Recommended next step: proceed to Check and prepare to advance to Challenge if the assessment is not corrected."
 
     if signals.case_strength == "moderate":
-        return "Recommended next step: submit a Check to verify property facts and test the basis of assessment before deciding whether to proceed further."
+        return "Recommended next step: submit a Check to verify VOA facts, test the adopted tone, and determine whether a fuller Challenge is justified."
 
-    return "Recommended next step: only proceed if factual errors can be established or if stronger comparable evidence becomes available."
+    return "Recommended next step: submit a Check to verify VOA facts and test the basis of assessment. The case is not clear-cut, but it remains arguable."
+
+
+def render_case_position_label(signals: NarrativeSignals) -> str:
+    if signals.case_strength == "strong":
+        return "Strong — Clear basis for review"
+    if signals.case_strength == "moderate":
+        return "Moderate — Arguable basis for review"
+    return "Moderate — Reviewable, but not clear-cut"
 
 
 def render_narrative_blocks(signals: NarrativeSignals) -> dict:
@@ -402,6 +412,7 @@ def render_narrative_blocks(signals: NarrativeSignals) -> dict:
         "evidence_interpretation": " ".join(evidence_lines),
         "case_assessment": " ".join(case_lines),
         "recommended_action": render_recommended_action(signals),
+        "case_position_label": render_case_position_label(signals),
     }
 
 
