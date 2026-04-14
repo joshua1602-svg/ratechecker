@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi.testclient import TestClient
 
 from api.layout_compat import normalize_paid_intake_layout
+from api.models import PaidIntakeData
 from api.main import app
 
 
@@ -124,6 +125,58 @@ def test_purchase_accepts_canonical_floors_and_derives_legacy(monkeypatch) -> No
     assert captured["paid_intake"]["areas"]["visible_kitchen_sqm"] == 5
     assert captured["paid_intake"]["areas"]["basement_sqm"] == 25
     assert captured["paid_intake"]["areas"]["upper_sqm"] == 25
+
+
+def test_non_ground_breakdown_alias_fields_map_to_internal_uses_and_ancillary() -> None:
+    paid_intake = PaidIntakeData.model_validate(
+        {
+            "layout": {
+                "floors": [
+                    {
+                        "level": "lower_ground",
+                        "uses": {
+                            "tradingArea": 12,
+                            "storageArea": 8,
+                            "kitchenPrepArea": 6,
+                            "otherArea": 4,
+                        },
+                    }
+                ]
+            }
+        }
+    ).model_dump(exclude_none=True)
+
+    out = normalize_paid_intake_layout(paid_intake)
+
+    floor_uses = out["layout"]["floors"][0]["uses"]
+    assert floor_uses["trading_sqm"] == 12
+    assert floor_uses["storage_sqm"] == 8
+    assert floor_uses["kitchen_sqm"] == 6
+    assert floor_uses["other_sqm"] == 4
+    assert out["areas"]["sales_area_sqm"] == 12
+    assert out["areas"]["storage_sqm"] == 8
+    assert out["areas"]["visible_kitchen_sqm"] == 6
+    assert out["areas"]["ancillary_area_sqm"] == 4
+    assert out["areas"]["non_ground_ancillary_sqm"] == 4
+    # Ancillary ("other") is counted in non-ground total area only.
+    assert out["areas"]["basement_sqm"] == 30
+
+
+def test_legacy_floor_breakdown_without_new_fields_preserves_behavior() -> None:
+    payload = {
+        "layout": {
+            "floors": [
+                {"level": "lower_ground", "uses": {"trading_sqm": 12, "storage_sqm": 8, "kitchen_sqm": 6}},
+            ],
+        }
+    }
+    out = normalize_paid_intake_layout(payload)
+
+    assert out["areas"]["sales_area_sqm"] == 12
+    assert out["areas"]["storage_sqm"] == 8
+    assert out["areas"]["visible_kitchen_sqm"] == 6
+    assert out["areas"]["basement_sqm"] == 26
+    assert out["layout"]["lower_ground_use"] == "trading"
 
 
 def test_purchase_rejects_negative_floor_sqm(monkeypatch) -> None:
