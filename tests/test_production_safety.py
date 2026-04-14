@@ -197,13 +197,26 @@ class TestCanonicalReportPayload:
         req = self._make_request()
         payload = build_report_payload_from_assess(resp, req)
 
-        # ±10% of 14200 → low=12780, high=15620
+        # Downside-only 5% band around point estimate.
         assert payload["modelled_rv_low"] is not None
         assert payload["modelled_rv_high"] is not None
         assert payload["modelled_rv_low"] < payload["modelled_rv_high"]
-        # Should be within ±10% of the point estimate
-        assert abs(payload["modelled_rv_low"] - 14200) / 14200 <= 0.10
-        assert abs(payload["modelled_rv_high"] - 14200) / 14200 <= 0.10
+        assert payload["modelled_rv_low"] == 13500
+        assert payload["modelled_rv_high"] == 14200
+
+    def test_modelled_rv_has_no_upside_flex(self):
+        from api.models import build_report_payload_from_assess
+        resp = self._make_assess_response(
+            signal="Low",
+            adjusted_estimated_rv=19000,
+            base_estimated_rv=19000,
+        )
+        req = self._make_request()  # voa_rv=20000
+        payload = build_report_payload_from_assess(resp, req)
+
+        assert payload["modelled_rv_low"] == 18000
+        assert payload["modelled_rv_high"] == 19000
+        assert payload["modelled_rv_high"] < req.property.voa_rv
 
     def test_savings_calculated_correctly(self):
         from api.models import build_report_payload_from_assess
@@ -223,7 +236,7 @@ class TestCanonicalReportPayload:
         for signal, expected in [
             ("High", "Strong"),
             ("Medium", "Moderate"),
-            ("Low", "Weak"),
+            ("Low", "Moderate"),
             ("Insufficient Data", "Insufficient Data"),
         ]:
             resp = self._make_assess_response(signal=signal)

@@ -108,6 +108,19 @@ class TestFingerprintFromSubject:
         fp = fingerprint_from_subject(layout)
         assert fp.kitchen_on_ground is True
 
+    def test_explicit_ancillary_area_is_reflected_in_subject_fingerprint(self):
+        layout = LayoutInput(
+            floor_config="ground_lower_ground",
+            ground_floor_trading_sqm=60,
+            ground_floor_storage_sqm=20,
+            total_nia_sqm=100,
+            ancillary_area_sqm=10,
+            non_ground_ancillary_area_sqm=6,
+        )
+        fp = fingerprint_from_subject(layout)
+        assert fp.ancillary_known is True
+        assert fp.ancillary_ratio == pytest.approx(0.1)
+
 
 # ---------------------------------------------------------------------------
 # fingerprint_from_sv_lines
@@ -263,6 +276,50 @@ class TestLayoutSimilarityScore:
         )
         score = layout_similarity_score(subject, comp, is_restaurant=True)
         # No bonus applied because kitchen_on_ground doesn't match
+        expected = 1.0 * 0.35 + 0.5 * 0.35 + 1.0 * 0.30
+        assert score == pytest.approx(expected)
+
+    def test_ancillary_alignment_modestly_improves_similarity(self):
+        subject = LayoutFingerprint(
+            storage_ratio=0.2,
+            trading_ratio=0.7,
+            ancillary_ratio=0.1,
+            ancillary_known=True,
+            has_lower_ground=True,
+            has_upper_floor=False,
+        )
+        comp_close = LayoutFingerprint(
+            storage_ratio=0.2,
+            trading_ratio=0.7,
+            ancillary_ratio=0.12,
+            ancillary_known=True,
+            has_lower_ground=True,
+            has_upper_floor=False,
+        )
+        comp_far = LayoutFingerprint(
+            storage_ratio=0.2,
+            trading_ratio=0.7,
+            ancillary_ratio=0.45,
+            ancillary_known=True,
+            has_lower_ground=True,
+            has_upper_floor=False,
+        )
+        close_score = layout_similarity_score(subject, comp_close)
+        far_score = layout_similarity_score(subject, comp_far)
+        assert close_score > far_score
+
+    def test_legacy_no_ancillary_signal_keeps_prior_similarity_behaviour(self):
+        subject = LayoutFingerprint(
+            storage_ratio=0.2, trading_ratio=0.8,
+            has_lower_ground=True, has_upper_floor=False,
+            ancillary_known=False,
+        )
+        comp = LayoutFingerprint(
+            storage_ratio=0.2, trading_ratio=0.6,
+            has_lower_ground=True, has_upper_floor=False,
+            ancillary_known=False,
+        )
+        score = layout_similarity_score(subject, comp)
         expected = 1.0 * 0.35 + 0.5 * 0.35 + 1.0 * 0.30
         assert score == pytest.approx(expected)
 

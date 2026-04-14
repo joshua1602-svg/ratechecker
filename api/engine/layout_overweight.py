@@ -162,6 +162,7 @@ class LayoutFingerprint:
     storage_ratio: float = 0.0     # total storage sqm / total NIA
     trading_ratio: float = 0.0     # total trading sqm / total NIA
     ancillary_ratio: float = 0.0   # total ancillary sqm / total NIA (for future use)
+    ancillary_known: bool = False  # True when ancillary input/measurement is available
     has_lower_ground: bool = False
     has_upper_floor: bool = False
     kitchen_on_ground: bool = False
@@ -190,6 +191,8 @@ class LayoutInput:
     upper_floor_use: str = "not_applicable"
     kitchen_on_ground: str = "no_kitchen"  # "yes" / "no" / "no_kitchen"
     total_nia_sqm: float = 0.0
+    ancillary_area_sqm: Optional[float] = None
+    non_ground_ancillary_area_sqm: Optional[float] = None
 
 
 def fingerprint_from_subject(layout: LayoutInput) -> LayoutFingerprint:
@@ -198,6 +201,11 @@ def fingerprint_from_subject(layout: LayoutInput) -> LayoutFingerprint:
 
     storage_sqm = layout.ground_floor_storage_sqm
     trading_sqm = layout.ground_floor_trading_sqm
+    ancillary_known = (
+        layout.ancillary_area_sqm is not None
+        or layout.non_ground_ancillary_area_sqm is not None
+    )
+    ancillary_sqm = float(layout.ancillary_area_sqm or 0.0)
 
     has_lower_ground = layout.floor_config in (
         "ground_lower_ground", "ground_lower_ground_first",
@@ -224,6 +232,8 @@ def fingerprint_from_subject(layout: LayoutInput) -> LayoutFingerprint:
     return LayoutFingerprint(
         storage_ratio=min(storage_sqm / total_nia, 1.0),
         trading_ratio=min(trading_sqm / total_nia, 1.0),
+        ancillary_ratio=min(ancillary_sqm / total_nia, 1.0),
+        ancillary_known=ancillary_known,
         has_lower_ground=has_lower_ground,
         has_upper_floor=has_upper_floor,
         kitchen_on_ground=layout.kitchen_on_ground == "yes",
@@ -281,6 +291,7 @@ def fingerprint_from_sv_lines(
         storage_ratio=min(storage_sqm / denom, 1.0),
         trading_ratio=min(trading_sqm / denom, 1.0),
         ancillary_ratio=min(ancillary_sqm / denom, 1.0),
+        ancillary_known=True,
         has_lower_ground=has_lower_ground,
         has_upper_floor=has_upper_floor,
         kitchen_on_ground=kitchen_on_ground,
@@ -294,6 +305,7 @@ def fingerprint_from_sv_lines(
 _WEIGHT_STORAGE = 0.35
 _WEIGHT_TRADING = 0.35
 _WEIGHT_FLOOR_CONFIG = 0.30  # split equally between lower_ground and upper_floor
+_WEIGHT_ANCILLARY = 0.10
 
 
 def _ratio_score(subject_ratio: float, comp_ratio: float) -> float:
@@ -327,11 +339,17 @@ def layout_similarity_score(
         + floor_score * _WEIGHT_FLOOR_CONFIG
     )
 
+    # Ancillary is a secondary signal: modest penalty for mismatch,
+    # modest lift for close alignment, and no impact when unknown.
+    if subject.ancillary_known and comp.ancillary_known:
+        ancillary_score = _ratio_score(subject.ancillary_ratio, comp.ancillary_ratio)
+        raw += (ancillary_score - 0.5) * _WEIGHT_ANCILLARY
+
     # Restaurant kitchen bonus
     if is_restaurant and subject.kitchen_on_ground == comp.kitchen_on_ground:
         raw *= 1.15
 
-    return min(raw, 1.0)
+    return max(0.0, min(raw, 1.0))
 
 
 # ---------------------------------------------------------------------------

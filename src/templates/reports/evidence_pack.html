@@ -555,7 +555,7 @@ table { page-break-inside: avoid; }
 
   <p class="case-label">Case Strength: <span style="color:{% if case_strength == 'High' %}#2E7D32{% elif case_strength == 'Medium' %}#D4956A{% else %}#7A8A9A{% endif %};">{{ case_strength }}</span></p>
 
-  <p>This assessment analysed {{ comp_count }} comparable properties drawn from the VOA's published bulk data. The evidence suggests a fair rateable value in the range &pound;{{ modelled_rv_low | format_currency }}&ndash;&pound;{{ modelled_rv_high | format_currency }}, compared to the current assessment of &pound;{{ voa_rv | format_currency }} — a difference of &pound;{{ rv_delta | format_currency }} ({{ rv_delta_pct }}%).</p>
+  <p>This assessment analysed {{ comp_count }} comparable properties drawn from the VOA's published bulk data. Based on the central modelled value of &pound;{{ modelled_rv | format_currency }} (range &pound;{{ modelled_rv_low | format_currency }}&ndash;&pound;{{ modelled_rv_high | format_currency }}), this reflects a potential annual saving of &pound;{{ rv_central_saving | format_currency }} ({{ rv_delta_pct }}%).</p>
   {% if layout_adjustment_applied %}
   <p>Layout details provided by the ratepayer were used to prioritise structurally similar comparables.</p>
   {% endif %}
