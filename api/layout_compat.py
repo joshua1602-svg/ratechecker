@@ -53,6 +53,57 @@ def _derive_floor_config(levels: set[str]) -> str:
     return "ground_only"
 
 
+def _has_flat_layout_breakdown(layout: dict[str, Any]) -> bool:
+    return any(
+        key in layout
+        for key in (
+            "ground_floor_trading_sqm",
+            "ground_floor_storage_sqm",
+            "ground_floor_kitchen_sqm",
+            "ground_floor_other_sqm",
+            "lower_ground_trading_sqm",
+            "lower_ground_storage_sqm",
+            "lower_ground_kitchen_sqm",
+            "lower_ground_other_sqm",
+            "upper_floor_trading_sqm",
+            "upper_floor_storage_sqm",
+            "upper_floor_kitchen_sqm",
+            "upper_floor_other_sqm",
+        )
+    )
+
+
+def _canonical_floors_from_flat_layout(layout: dict[str, Any]) -> list[dict[str, Any]]:
+    """Build canonical layout.floors[] from legacy flat per-floor keys."""
+    floor_map = [
+        ("ground_floor", "ground"),
+        ("lower_ground", "lower_ground"),
+        ("upper_floor", "first"),
+    ]
+    floors: list[dict[str, Any]] = []
+    for prefix, level in floor_map:
+        trading = _f(layout.get(f"{prefix}_trading_sqm"))
+        storage = _f(layout.get(f"{prefix}_storage_sqm"))
+        kitchen = _f(layout.get(f"{prefix}_kitchen_sqm"))
+        other = _f(layout.get(f"{prefix}_other_sqm"))
+        other_label = layout.get(f"{prefix}_other_label")
+        if (trading + storage + kitchen + other) <= 0 and not other_label:
+            continue
+        floors.append(
+            {
+                "level": level,
+                "uses": {
+                    "trading_sqm": trading,
+                    "storage_sqm": storage,
+                    "kitchen_sqm": kitchen,
+                    "other_sqm": other,
+                    "other_label": other_label,
+                },
+            }
+        )
+    return floors
+
+
 def normalize_paid_intake_layout(paid_intake: dict[str, Any]) -> dict[str, Any]:
     """Normalize paid_intake so canonical layout.floors remains source truth.
 
@@ -65,6 +116,11 @@ def normalize_paid_intake_layout(paid_intake: dict[str, Any]) -> dict[str, Any]:
     business_type = str(property_data.get("business_type") or "").strip().lower()
     is_retail_sector = business_type in {"retail", "hair_beauty"}
     floors = layout.get("floors")
+    if (not isinstance(floors, list) or len(floors) == 0) and _has_flat_layout_breakdown(layout):
+        floors = _canonical_floors_from_flat_layout(layout)
+        if floors:
+            layout["floors"] = floors
+            normalized["layout"] = layout
     if not isinstance(floors, list) or len(floors) == 0:
         return normalized
 
