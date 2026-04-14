@@ -5,7 +5,7 @@ import logging
 from enum import Enum
 from typing import Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import AliasChoices, BaseModel, Field, field_validator
 from api.reports.narrative import build_rendered_narrative
 
 logger = logging.getLogger(__name__)
@@ -44,6 +44,8 @@ class AreasInput(BaseModel):
     visible_kitchen_sqm: float = 0
     non_visible_kitchen_sqm: float = 0
     storage_sqm: float = 0
+    ancillary_area_sqm: float = 0
+    non_ground_ancillary_sqm: float = 0
     basement_sqm: float = 0
     upper_sqm: float = 0
     outdoor_seating: bool = False
@@ -74,10 +76,49 @@ class CanonicalFloorLevel(str, Enum):
 
 
 class CanonicalFloorUsesInput(BaseModel):
-    trading_sqm: float = 0.0
-    storage_sqm: float = 0.0
-    kitchen_sqm: float = 0.0
-    other_sqm: float = 0.0
+    trading_sqm: float = Field(
+        default=0.0,
+        validation_alias=AliasChoices(
+            "trading_sqm",
+            "trading_area_sqm",
+            "trading_area",
+            "tradingAreaSqm",
+            "tradingArea",
+        ),
+    )
+    storage_sqm: float = Field(
+        default=0.0,
+        validation_alias=AliasChoices(
+            "storage_sqm",
+            "storage_area_sqm",
+            "storage_area",
+            "storageAreaSqm",
+            "storageArea",
+        ),
+    )
+    kitchen_sqm: float = Field(
+        default=0.0,
+        validation_alias=AliasChoices(
+            "kitchen_sqm",
+            "kitchen_prep_sqm",
+            "kitchen_prep_area_sqm",
+            "kitchen_prep_area",
+            "kitchenPrepSqm",
+            "kitchenPrepAreaSqm",
+            "kitchenPrepArea",
+        ),
+    )
+    other_sqm: float = Field(
+        default=0.0,
+        validation_alias=AliasChoices(
+            "other_sqm",
+            "other_area_sqm",
+            "other_area",
+            "ancillary_sqm",
+            "otherAreaSqm",
+            "otherArea",
+        ),
+    )
     other_label: Optional[str] = None
 
     @field_validator("trading_sqm", "storage_sqm", "kitchen_sqm", "other_sqm", mode="before")
@@ -765,6 +806,8 @@ def build_evidence_payload_from_assess(
             "sales_area_sqm": request.areas.sales_area_sqm or None,
             "visible_kitchen_sqm": request.areas.visible_kitchen_sqm or None,
             "storage_sqm": request.areas.storage_sqm or None,
+            "ancillary_area_sqm": request.areas.ancillary_area_sqm or None,
+            "non_ground_ancillary_sqm": request.areas.non_ground_ancillary_sqm or None,
             "basement_sqm": request.areas.basement_sqm or None,
             "upper_sqm": request.areas.upper_sqm or None,
             "outdoor_seating": request.areas.outdoor_seating,
