@@ -53,6 +53,57 @@ def _derive_floor_config(levels: set[str]) -> str:
     return "ground_only"
 
 
+def _has_flat_layout_breakdown(layout: dict[str, Any]) -> bool:
+    return any(
+        key in layout
+        for key in (
+            "ground_floor_trading_sqm",
+            "ground_floor_storage_sqm",
+            "ground_floor_kitchen_sqm",
+            "ground_floor_other_sqm",
+            "lower_ground_trading_sqm",
+            "lower_ground_storage_sqm",
+            "lower_ground_kitchen_sqm",
+            "lower_ground_other_sqm",
+            "upper_floor_trading_sqm",
+            "upper_floor_storage_sqm",
+            "upper_floor_kitchen_sqm",
+            "upper_floor_other_sqm",
+        )
+    )
+
+
+def _canonical_floors_from_flat_layout(layout: dict[str, Any]) -> list[dict[str, Any]]:
+    """Build canonical layout.floors[] from legacy flat per-floor keys."""
+    floor_map = [
+        ("ground_floor", "ground"),
+        ("lower_ground", "lower_ground"),
+        ("upper_floor", "first"),
+    ]
+    floors: list[dict[str, Any]] = []
+    for prefix, level in floor_map:
+        trading = _f(layout.get(f"{prefix}_trading_sqm"))
+        storage = _f(layout.get(f"{prefix}_storage_sqm"))
+        kitchen = _f(layout.get(f"{prefix}_kitchen_sqm"))
+        other = _f(layout.get(f"{prefix}_other_sqm"))
+        other_label = layout.get(f"{prefix}_other_label")
+        if (trading + storage + kitchen + other) <= 0 and not other_label:
+            continue
+        floors.append(
+            {
+                "level": level,
+                "uses": {
+                    "trading_sqm": trading,
+                    "storage_sqm": storage,
+                    "kitchen_sqm": kitchen,
+                    "other_sqm": other,
+                    "other_label": other_label,
+                },
+            }
+        )
+    return floors
+
+
 def normalize_paid_intake_layout(paid_intake: dict[str, Any]) -> dict[str, Any]:
     """Normalize paid_intake so canonical layout.floors remains source truth.
 
@@ -61,12 +112,21 @@ def normalize_paid_intake_layout(paid_intake: dict[str, Any]) -> dict[str, Any]:
     """
     normalized = dict(paid_intake or {})
     layout = dict(normalized.get("layout") or {})
+    property_data = dict(normalized.get("property") or {})
+    business_type = str(property_data.get("business_type") or "").strip().lower()
+    is_retail_sector = business_type in {"retail", "hair_beauty"}
     floors = layout.get("floors")
+    if (not isinstance(floors, list) or len(floors) == 0) and _has_flat_layout_breakdown(layout):
+        floors = _canonical_floors_from_flat_layout(layout)
+        if floors:
+            layout["floors"] = floors
+            normalized["layout"] = layout
     if not isinstance(floors, list) or len(floors) == 0:
         return normalized
 
     sales_area = storage_area = visible_kitchen = 0.0
     basement_sqm = upper_sqm = 0.0
+    ancillary_area_sqm = non_ground_ancillary_sqm = 0.0
     ground_trading = ground_storage = ground_kitchen = 0.0
     lower_totals = {"trading": 0.0, "storage": 0.0, "kitchen": 0.0}
     upper_totals = {"trading": 0.0, "storage": 0.0, "kitchen": 0.0}
@@ -89,11 +149,20 @@ def normalize_paid_intake_layout(paid_intake: dict[str, Any]) -> dict[str, Any]:
 
         trading = _f(uses.get("trading_sqm"))
         storage = _f(uses.get("storage_sqm"))
+        # Retail flows may omit kitchen field entirely; in that case kitchen
+        # remains zero and "other" captures mixed ancillary (incl. kitchen/toilet).
+        # We intentionally do not infer/split kitchen from "other".
         kitchen = _f(uses.get("kitchen_sqm"))
+        other = _f(uses.get("other_sqm"))
 
         sales_area += trading
         storage_area += storage
         visible_kitchen += kitchen
+        ancillary_area_sqm += other
+        if is_retail_sector and kitchen == 0 and other > 0:
+            log.info(
+                "layout_compat: retail sector floor uses absent kitchen_sqm; preserving other_sqm as ancillary only",
+            )
 
         floor_total = _floor_total(uses)
         if level == "ground":
@@ -102,11 +171,13 @@ def normalize_paid_intake_layout(paid_intake: dict[str, Any]) -> dict[str, Any]:
             ground_kitchen += kitchen
         if level in CANONICAL_LOWER_LEVELS:
             basement_sqm += floor_total
+            non_ground_ancillary_sqm += other
             lower_totals["trading"] += trading
             lower_totals["storage"] += storage
             lower_totals["kitchen"] += kitchen
         if level in CANONICAL_UPPER_LEVELS:
             upper_sqm += floor_total
+            non_ground_ancillary_sqm += other
             upper_totals["trading"] += trading
             upper_totals["storage"] += storage
             upper_totals["kitchen"] += kitchen
@@ -131,6 +202,9 @@ def normalize_paid_intake_layout(paid_intake: dict[str, Any]) -> dict[str, Any]:
             "sales_area_sqm": round(sales_area, 4),
             "storage_sqm": round(storage_area, 4),
             "visible_kitchen_sqm": round(visible_kitchen, 4),
+            "ancillary_area_sqm": round(ancillary_area_sqm, 4),
+            "non_ground_ancillary_area_sqm": round(non_ground_ancillary_sqm, 4),
+            "non_ground_ancillary_sqm": round(non_ground_ancillary_sqm, 4),
             "basement_sqm": round(basement_sqm, 4),
             "upper_sqm": round(upper_sqm, 4),
         }

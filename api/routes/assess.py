@@ -234,6 +234,22 @@ async def run_assessment_pipeline(req: AssessRequest) -> AssessResponse:
             upper_floor_use=req.layout.upper_floor_use,
             kitchen_on_ground=req.layout.kitchen_on_ground,
             total_nia_sqm=req.property.nia_sqm,
+            ancillary_area_sqm=(
+                req.areas.ancillary_area_sqm
+                if req.areas is not None and req.areas.ancillary_area_sqm > 0
+                else None
+            ),
+            non_ground_ancillary_area_sqm=(
+                (
+                    req.areas.non_ground_ancillary_area_sqm
+                    or req.areas.non_ground_ancillary_sqm
+                )
+                if req.areas is not None and (
+                    (req.areas.non_ground_ancillary_area_sqm or 0) > 0
+                    or (req.areas.non_ground_ancillary_sqm or 0) > 0
+                )
+                else None
+            ),
         )
         # Fetch SV lines for all comps in the rated set
         rated_comps = result.get("_rated_comps", [])
