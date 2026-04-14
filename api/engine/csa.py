@@ -23,6 +23,7 @@ _csa_log = logging.getLogger(__name__)
 from dataclasses import dataclass, field
 from typing import List, Optional
 
+from api.engine.itza_utils import retail_itza_from_sv_lines_effective
 from api.engine.rules import csa_rules
 
 
@@ -43,6 +44,7 @@ class Comparable:
     lat: float
     lon: float
     description: str = field(default="")
+    sv_lines: Optional[list[dict]] = field(default=None)
 
     @property
     def rate_source(self) -> str:
@@ -966,14 +968,10 @@ def run_csa(
         return _insufficient_data()
 
     # --- Extract effective Zone A rates and combined weights ---
-    # For itza_retail comparables we ALWAYS use rv / itza_from_nia(nia_sqm)
-    # (the effective rate), NOT unadjusted_price_psm (the matrix rate).
-    # The VOA "unadjusted" field is the primary survey unit rate before quantity
-    # allowances (e.g. ~15-25% deductions applied to large or irregular shops).
-    # Using the matrix rate systematically over-states tone by ~20%.
-    # Using rv/itza gives the effective rate actually used to set the RV, and
-    # also self-corrects for any aspect-ratio error in itza_from_nia because
-    # the same formula is applied to both comparable and subject.
+    # For itza_retail comparables, use effective ITZA rates from SV lines when
+    # available; otherwise fall back to rv / itza_from_nia(nia_sqm).
+    # This keeps CSA tone derivation on the same effective-ITZA basis now
+    # shown in the evidence-pack comparable table.
     # For area_retail and non-retail segments, unadjusted_price_psm (or
     # rv/nia_sqm) is used as-is via normalised_rate().
     rated: list[tuple[Comparable, float, float, float]] = []  # (comp, dist, rate, weight)
@@ -987,7 +985,11 @@ def run_csa(
         rate, tier = c.normalised_rate()
         # Effective-rate override for itza_retail (both tier-1 and tier-2).
         if _retail_like and _classify_retail_method(c.description) == "itza_retail":
-            _c_itza = itza_from_nia(c.nia_sqm, zone_depth)
+            _c_itza = 0.0
+            if c.sv_lines:
+                _c_itza = retail_itza_from_sv_lines_effective(c.sv_lines)
+            if _c_itza <= 0:
+                _c_itza = itza_from_nia(c.nia_sqm, zone_depth)
             if _c_itza > 0 and c.rv > 0:
                 rate = c.rv / _c_itza
         if rate is None or rate <= 0:
@@ -1827,6 +1829,21 @@ def run_csa(
         }
         for c, d, r, w in rated
     ]
+    _primary_tone_comps = [
+        {
+            "uarn": c.uarn,
+            "address": c.address,
+            "rv": c.rv,
+            "nia_sqm": c.nia_sqm,
+            "rate": round(r, 4),
+            "weight": round(w, 6),
+            "distance_m": round(d, 1),
+            "is_same_street": bool(
+                _subject_street_key and _extract_street_key(c.address) == _subject_street_key
+            ),
+        }
+        for c, d, r, w in primary_pool
+    ]
 
     result = {
         "signal": signal,
@@ -1846,6 +1863,7 @@ def run_csa(
             "subject_basis_label": basis_label,
         },
         "_rated_comps": _rated_comps,
+        "_primary_tone_comps": _primary_tone_comps,
     }
     if _debug:
         result["_debug"] = _debug
