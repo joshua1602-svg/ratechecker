@@ -4,6 +4,7 @@ from datetime import date, datetime
 
 _ESTIMATED_RATES_MULTIPLIER = 0.49
 _CYCLE_SWITCH_DATE = date(2026, 7, 31)
+_SAVING_MARGIN = 0.05
 
 
 def estimate_annual_rates_payable(rateable_value: float | int | None) -> float | None:
@@ -31,6 +32,23 @@ def _non_negative(value: float | None) -> float | None:
     if value is None:
         return None
     return max(0.0, value)
+
+
+def build_downside_rv_range(
+    modelled_rv_point: float | int | None,
+    *,
+    margin: float = _SAVING_MARGIN,
+) -> tuple[int | None, int | None]:
+    """Build a downside-only low/high RV range around a point estimate.
+
+    The low value applies the configured downside margin; the high value is
+    capped at the rounded point estimate.
+    """
+    if modelled_rv_point is None:
+        return None, None
+    low = round(float(modelled_rv_point) * (1 - margin) / 100) * 100
+    high = round(float(modelled_rv_point) / 100) * 100
+    return int(low), int(high)
 
 
 def calculate_implied_savings(
