@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi.testclient import TestClient
 
 from api.layout_compat import normalize_paid_intake_layout
+from api.models import PaidIntakeData
 from api.main import app
 
 
@@ -124,6 +125,154 @@ def test_purchase_accepts_canonical_floors_and_derives_legacy(monkeypatch) -> No
     assert captured["paid_intake"]["areas"]["visible_kitchen_sqm"] == 5
     assert captured["paid_intake"]["areas"]["basement_sqm"] == 25
     assert captured["paid_intake"]["areas"]["upper_sqm"] == 25
+
+
+def test_non_ground_breakdown_alias_fields_map_to_internal_uses_and_ancillary() -> None:
+    paid_intake = PaidIntakeData.model_validate(
+        {
+            "property": {"business_type": "restaurant_cafe"},
+            "layout": {
+                "floors": [
+                    {
+                        "level": "lower_ground",
+                        "uses": {
+                            "tradingArea": 12,
+                            "storageArea": 8,
+                            "kitchenPrepArea": 6,
+                            "otherArea": 4,
+                        },
+                    }
+                ]
+            }
+        }
+    ).model_dump(exclude_none=True)
+
+    out = normalize_paid_intake_layout(paid_intake)
+
+    floor_uses = out["layout"]["floors"][0]["uses"]
+    assert floor_uses["trading_sqm"] == 12
+    assert floor_uses["storage_sqm"] == 8
+    assert floor_uses["kitchen_sqm"] == 6
+    assert floor_uses["other_sqm"] == 4
+    assert out["areas"]["sales_area_sqm"] == 12
+    assert out["areas"]["storage_sqm"] == 8
+    assert out["areas"]["visible_kitchen_sqm"] == 6
+    assert out["areas"]["ancillary_area_sqm"] == 4
+    assert out["areas"]["non_ground_ancillary_area_sqm"] == 4
+    assert out["areas"]["non_ground_ancillary_sqm"] == 4
+    # Ancillary ("other") is counted in non-ground total area only.
+    assert out["areas"]["basement_sqm"] == 30
+
+
+def test_retail_without_kitchen_field_treats_other_as_ancillary_only() -> None:
+    payload = {
+        "property": {"business_type": "retail"},
+        "layout": {
+            "floors": [
+                {
+                    "level": "lower_ground",
+                    "uses": {"trading_sqm": 0, "storage_sqm": 10, "other_sqm": 20},
+                },
+            ],
+        },
+    }
+    out = normalize_paid_intake_layout(payload)
+
+    # Kitchen is absent and remains zero; "other" is wholly ancillary.
+    assert out["areas"]["visible_kitchen_sqm"] == 0
+    assert out["areas"]["ancillary_area_sqm"] == 20
+    assert out["areas"]["non_ground_ancillary_area_sqm"] == 20
+    assert out["areas"]["sales_area_sqm"] == 0
+    assert out["areas"]["storage_sqm"] == 10
+    assert out["areas"]["basement_sqm"] == 30
+
+
+def test_restaurant_with_explicit_kitchen_keeps_other_ancillary_only() -> None:
+    payload = {
+        "property": {"business_type": "restaurant_cafe"},
+        "layout": {
+            "floors": [
+                {
+                    "level": "lower_ground",
+                    "uses": {"trading_sqm": 0, "storage_sqm": 10, "kitchen_sqm": 12, "other_sqm": 8},
+                },
+            ],
+        },
+    }
+    out = normalize_paid_intake_layout(payload)
+
+    assert out["areas"]["visible_kitchen_sqm"] == 12
+    assert out["areas"]["ancillary_area_sqm"] == 8
+    assert out["areas"]["non_ground_ancillary_area_sqm"] == 8
+    assert out["areas"]["storage_sqm"] == 10
+    assert out["areas"]["basement_sqm"] == 30
+
+
+def test_legacy_floor_breakdown_without_new_fields_preserves_behavior() -> None:
+    payload = {
+        "layout": {
+            "floors": [
+                {"level": "lower_ground", "uses": {"trading_sqm": 12, "storage_sqm": 8, "kitchen_sqm": 6}},
+            ],
+        }
+    }
+    out = normalize_paid_intake_layout(payload)
+
+    assert out["areas"]["sales_area_sqm"] == 12
+    assert out["areas"]["storage_sqm"] == 8
+    assert out["areas"]["visible_kitchen_sqm"] == 6
+    assert out["areas"]["basement_sqm"] == 26
+    assert out["layout"]["lower_ground_use"] == "trading"
+
+
+def test_retail_flat_layout_fields_from_intake_tsx_map_other_to_ancillary() -> None:
+    payload = {
+        "property": {"business_type": "retail"},
+        "layout": {
+            "floor_config": "ground_lower_ground",
+            "ground_floor_trading_sqm": 35,
+            "ground_floor_storage_sqm": 0,
+            "ground_floor_other_sqm": 0,
+            "lower_ground_trading_sqm": 19,
+            "lower_ground_storage_sqm": 8,
+            "lower_ground_other_sqm": 3,
+        },
+    }
+    out = normalize_paid_intake_layout(payload)
+
+    assert out["layout"]["floors"][0]["level"] == "ground"
+    assert out["layout"]["floors"][1]["level"] == "lower_ground"
+    assert out["areas"]["sales_area_sqm"] == 54
+    assert out["areas"]["storage_sqm"] == 8
+    assert out["areas"]["visible_kitchen_sqm"] == 0
+    assert out["areas"]["ancillary_area_sqm"] == 3
+    assert out["areas"]["non_ground_ancillary_area_sqm"] == 3
+    assert out["areas"]["basement_sqm"] == 30
+
+
+def test_restaurant_flat_layout_fields_keep_kitchen_separate_from_other() -> None:
+    payload = {
+        "property": {"business_type": "restaurant_cafe"},
+        "layout": {
+            "floor_config": "ground_lower_ground",
+            "ground_floor_trading_sqm": 20,
+            "ground_floor_storage_sqm": 5,
+            "ground_floor_kitchen_sqm": 10,
+            "ground_floor_other_sqm": 2,
+            "lower_ground_trading_sqm": 0,
+            "lower_ground_storage_sqm": 10,
+            "lower_ground_kitchen_sqm": 6,
+            "lower_ground_other_sqm": 4,
+        },
+    }
+    out = normalize_paid_intake_layout(payload)
+
+    assert out["areas"]["sales_area_sqm"] == 20
+    assert out["areas"]["storage_sqm"] == 15
+    assert out["areas"]["visible_kitchen_sqm"] == 16
+    assert out["areas"]["ancillary_area_sqm"] == 6
+    assert out["areas"]["non_ground_ancillary_area_sqm"] == 4
+    assert out["areas"]["basement_sqm"] == 20
 
 
 def test_purchase_rejects_negative_floor_sqm(monkeypatch) -> None:
