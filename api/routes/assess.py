@@ -157,6 +157,14 @@ async def run_assessment_pipeline(req: AssessRequest) -> AssessResponse:
             len(excluded_subject_rows),
         )
 
+    sv_lines_by_uarn: dict[str, list[dict]] = {}
+    try:
+        comp_uarns = [str(r["uarn"]) for r in rows if r.get("uarn") is not None]
+        if comp_uarns:
+            sv_lines_by_uarn = get_sv_lines_batch(comp_uarns)
+    except DatabaseError:
+        sv_lines_by_uarn = {}
+
     # 4. Convert DB rows → Comparable objects
     comps = [
         Comparable(
@@ -171,6 +179,7 @@ async def run_assessment_pipeline(req: AssessRequest) -> AssessResponse:
             lat=float(r["lat"]),
             lon=float(r["lon"]),
             description=r.get("description") or "",
+            sv_lines=sv_lines_by_uarn.get(str(r["uarn"]), []),
         )
         for r in rows
     ]

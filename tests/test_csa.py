@@ -31,6 +31,7 @@ def _comp(
     lat: float = 51.5,
     lon: float = -0.1,
     scat_code: int = 249,
+    sv_lines: list[dict] | None = None,
 ) -> Comparable:
     return Comparable(
         uarn=uarn,
@@ -43,6 +44,7 @@ def _comp(
         has_summary=has_summary,
         lat=lat,
         lon=lon,
+        sv_lines=sv_lines or [],
     )
 
 
@@ -128,6 +130,32 @@ class TestToneIsRateBased:
             f"Expected estimated_rv ≈ {expected} (tone×ITZA), got {result['estimated_rv']}"
         )
         assert result["rate_normalisation"]["subject_basis_label"] == "ITZA"
+
+    def test_retail_tone_uses_sv_line_effective_itza_when_available(self):
+        """Retail tone derivation should use sv-line effective ITZA rates."""
+        sv_lines = [
+            {"floor": "Ground", "description": "Retail Zone A", "area": 18.79, "price": 1300.0},
+            {"floor": "Ground", "description": "Retail Zone B", "area": 13.30, "price": 650.0},
+            {"floor": "Ground", "description": "Retail Zone B", "area": 6.84, "price": 585.0},
+            {"floor": "Basement", "description": "Internal Storage", "area": 22.44, "price": 65.0},
+            {"floor": "Basement", "description": "Internal Storage", "area": 15.49, "price": 65.0},
+            {"floor": "Basement", "description": "Kitchen", "area": 2.37, "price": 65.0},
+        ]
+        comps = [
+            _comp(
+                uarn=uarn,
+                rv=39693,
+                nia_sqm=79.23,
+                unadjusted_price_psm=1300.0,
+                has_summary=True,
+                sv_lines=sv_lines,
+            )
+            for uarn in ("A", "B", "C")
+        ]
+        result = _run(comps, nia_sqm=79.23, business_type="retail")
+
+        assert result["signal"] != "Insufficient Data"
+        assert result["tone_rate"] == pytest.approx(1211.2, abs=0.3)
 
     def test_nursery_reconstruction_uses_nia(self):
         """

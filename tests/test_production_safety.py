@@ -326,7 +326,7 @@ class TestPlaceholderRejection:
 # ---------------------------------------------------------------------------
 
 class TestPdfRateAlignment:
-    """PDF generator must use engine-supplied rate, not re-derive rv/nia."""
+    """PDF generator must render rates on the intended valuation basis."""
 
     def test_normalise_comparable_prefers_engine_rate(self):
         from api.reports.pdf_generator import _normalise_comparable
@@ -388,27 +388,27 @@ class TestPdfRateAlignment:
         assert result["rate_psm"] == expected
         assert result["display_rate_basis"] == "ITZA-fallback"
 
-    def test_normalise_comparable_retail_itza_prefers_engine_rate_for_tone_parity(self):
+    def test_normalise_comparable_retail_itza_prefers_sv_lines_effective_itza_rate(self):
         from api.reports.pdf_generator import _normalise_comparable
 
         sv_lines = [
-            {"description": "Retail Zone A", "area": 18.79, "price": 1300.0},
-            {"description": "Retail Zone B", "area": 13.30, "price": 650.0},
-            {"description": "Retail Zone B", "area": 6.84, "price": 585.0},
-            {"description": "Internal Storage", "area": 22.44, "price": 65.0},
-            {"description": "Internal Storage", "area": 15.49, "price": 65.0},
-            {"description": "Kitchen", "area": 2.37, "price": 65.0},
+            {"floor": "Ground", "description": "Retail Zone A", "area": 18.79, "price": 1300.0},
+            {"floor": "Ground", "description": "Retail Zone B", "area": 13.30, "price": 650.0},
+            {"floor": "Ground", "description": "Retail Zone B", "area": 6.84, "price": 585.0},
+            {"floor": "Basement", "description": "Internal Storage", "area": 22.44, "price": 65.0},
+            {"floor": "Basement", "description": "Internal Storage", "area": 15.49, "price": 65.0},
+            {"floor": "Basement", "description": "Kitchen", "area": 2.37, "price": 65.0},
         ]
-        comp = {"uarn": "63519084", "rv": 39750, "nia_sqm": 79.23, "rate": 777.04}
+        comp = {"uarn": "63519084", "rv": 39693, "nia_sqm": 79.23, "rate": 777.04}
         result = _normalise_comparable(
             comp,
             business_type="retail",
             valuation_method="itza",
             sv_lines=sv_lines,
         )
-        assert result["rate_psm"] == pytest.approx(777.04, abs=0.1)
-        assert result["display_rate_basis"] == "CSA-derived"
-        assert result["sv_itza_rate_psm"] == pytest.approx(1208.57, abs=0.1)
+        assert result["rate_psm"] == pytest.approx(1211.2, abs=0.2)
+        assert result["display_rate_basis"] == "sv-lines-itza"
+        assert result["sv_itza_rate_psm"] == pytest.approx(1211.2, abs=0.2)
 
     def test_derive_fields_sets_itza_rate_header_for_retail_itza_reports(self):
         from api.reports.pdf_generator import _derive_fields

@@ -9,6 +9,7 @@ from typing import Any
 
 from jinja2 import Environment, FileSystemLoader, TemplateNotFound
 from api.engine.csa import itza_from_nia
+from api.engine.itza_utils import retail_itza_from_sv_lines_effective
 from api.reports.narrative import build_rendered_narrative
 
 try:
@@ -130,13 +131,35 @@ def _normalise_comparable(
         if _sv_itza > 0:
             normalised["sv_itza_rate_psm"] = round(float(rv) / _sv_itza, 2)
 
-    # Retail ITZA display keeps parity with the CSA tone basis:
-    # prefer engine "rate" (the value used in tone derivation) for display.
-    engine_rate = normalised.get("rate")
-    if engine_rate is not None and float(engine_rate) > 0:
-        normalised["rate_psm"] = round(float(engine_rate), 2)
-        normalised["display_rate_basis"] = "CSA-derived"
+    # Retail ITZA evidence table should display effective ITZA derived from
+    # comparable SV lines when available (same basis implied by the schedule).
+    if (
+        is_retail_itza
+        and normalised.get("sv_itza_rate_psm") is not None
+        and float(normalised.get("sv_itza_rate_psm") or 0) > 0
+    ):
+        normalised["rate_psm"] = round(float(normalised["sv_itza_rate_psm"]), 2)
+        normalised["display_rate_basis"] = "sv-lines-itza"
     else:
+        # Fallback order:
+        #  1) engine "rate" (CSA-derived)
+        #  2) rv / itza_from_nia (retail ITZA fallback)
+        #  3) rv / nia_sqm (final generic fallback)
+        engine_rate = normalised.get("rate")
+        if engine_rate is not None and float(engine_rate) > 0:
+            normalised["rate_psm"] = round(float(engine_rate), 2)
+            normalised["display_rate_basis"] = "CSA-derived"
+            similarity = normalised.get("layout_similarity_score")
+            normalised["layout_similarity_score"] = float(similarity or 0)
+
+            # weight_pct is intentionally left unset here; pool-level normalisation
+            # in _derive_fields() computes the correct share-of-pool percentage.
+            normalised.setdefault("weight_pct", "")
+
+            normalised.setdefault("floor_config", "")
+            normalised.setdefault("uarn", "")
+            return normalised
+
         _has_existing_rate = normalised.get("rate_psm") is not None
         _existing_basis = str(normalised.get("display_rate_basis") or "").strip().lower()
         _existing_rate_basis = str(normalised.get("rate_basis") or "").strip().upper()
@@ -192,39 +215,7 @@ def _retail_itza_from_sv_lines_for_display(sv_lines: list[dict[str, Any]]) -> fl
     map to standard low relativities instead of inheriting raw matrix price
     quirks. Price-ratio fallback is used only when description cannot be mapped.
     """
-    if not sv_lines:
-        return 0.0
-    prices = [
-        float(r["price"])
-        for r in sv_lines
-        if r.get("price") is not None and float(r["price"]) > 0
-    ]
-    zone_a_price = max(prices) if prices else None
-    total = 0.0
-    for line in sv_lines:
-        area = float(line.get("area") or 0.0)
-        if area <= 0:
-            continue
-        desc = str(line.get("description") or "").lower()
-        rel: float | None = None
-        if "zone a" in desc:
-            rel = 1.0
-        elif "zone b" in desc:
-            rel = 0.5
-        elif "zone c" in desc:
-            rel = 0.25
-        elif "remainder" in desc:
-            rel = 0.125
-        elif "storage" in desc or "internal store" in desc or "kitchen" in desc:
-            rel = 0.10
-        elif "basement" in desc or "lower ground" in desc:
-            rel = 0.20
-        if rel is None and zone_a_price and line.get("price") is not None and float(line["price"]) > 0:
-            rel = float(line["price"]) / zone_a_price
-        if rel is None:
-            rel = 1.0
-        total += area * rel
-    return total
+    return retail_itza_from_sv_lines_effective(sv_lines)
 
 
 def _build_weighting_rows(data: dict[str, Any]) -> list[dict[str, str]]:
