@@ -130,6 +130,7 @@ def test_purchase_accepts_canonical_floors_and_derives_legacy(monkeypatch) -> No
 def test_non_ground_breakdown_alias_fields_map_to_internal_uses_and_ancillary() -> None:
     paid_intake = PaidIntakeData.model_validate(
         {
+            "property": {"business_type": "restaurant_cafe"},
             "layout": {
                 "floors": [
                     {
@@ -157,8 +158,53 @@ def test_non_ground_breakdown_alias_fields_map_to_internal_uses_and_ancillary() 
     assert out["areas"]["storage_sqm"] == 8
     assert out["areas"]["visible_kitchen_sqm"] == 6
     assert out["areas"]["ancillary_area_sqm"] == 4
+    assert out["areas"]["non_ground_ancillary_area_sqm"] == 4
     assert out["areas"]["non_ground_ancillary_sqm"] == 4
     # Ancillary ("other") is counted in non-ground total area only.
+    assert out["areas"]["basement_sqm"] == 30
+
+
+def test_retail_without_kitchen_field_treats_other_as_ancillary_only() -> None:
+    payload = {
+        "property": {"business_type": "retail"},
+        "layout": {
+            "floors": [
+                {
+                    "level": "lower_ground",
+                    "uses": {"trading_sqm": 0, "storage_sqm": 10, "other_sqm": 20},
+                },
+            ],
+        },
+    }
+    out = normalize_paid_intake_layout(payload)
+
+    # Kitchen is absent and remains zero; "other" is wholly ancillary.
+    assert out["areas"]["visible_kitchen_sqm"] == 0
+    assert out["areas"]["ancillary_area_sqm"] == 20
+    assert out["areas"]["non_ground_ancillary_area_sqm"] == 20
+    assert out["areas"]["sales_area_sqm"] == 0
+    assert out["areas"]["storage_sqm"] == 10
+    assert out["areas"]["basement_sqm"] == 30
+
+
+def test_restaurant_with_explicit_kitchen_keeps_other_ancillary_only() -> None:
+    payload = {
+        "property": {"business_type": "restaurant_cafe"},
+        "layout": {
+            "floors": [
+                {
+                    "level": "lower_ground",
+                    "uses": {"trading_sqm": 0, "storage_sqm": 10, "kitchen_sqm": 12, "other_sqm": 8},
+                },
+            ],
+        },
+    }
+    out = normalize_paid_intake_layout(payload)
+
+    assert out["areas"]["visible_kitchen_sqm"] == 12
+    assert out["areas"]["ancillary_area_sqm"] == 8
+    assert out["areas"]["non_ground_ancillary_area_sqm"] == 8
+    assert out["areas"]["storage_sqm"] == 10
     assert out["areas"]["basement_sqm"] == 30
 
 

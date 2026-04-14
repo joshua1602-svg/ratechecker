@@ -61,6 +61,9 @@ def normalize_paid_intake_layout(paid_intake: dict[str, Any]) -> dict[str, Any]:
     """
     normalized = dict(paid_intake or {})
     layout = dict(normalized.get("layout") or {})
+    property_data = dict(normalized.get("property") or {})
+    business_type = str(property_data.get("business_type") or "").strip().lower()
+    is_retail_sector = business_type in {"retail", "hair_beauty"}
     floors = layout.get("floors")
     if not isinstance(floors, list) or len(floors) == 0:
         return normalized
@@ -90,6 +93,9 @@ def normalize_paid_intake_layout(paid_intake: dict[str, Any]) -> dict[str, Any]:
 
         trading = _f(uses.get("trading_sqm"))
         storage = _f(uses.get("storage_sqm"))
+        # Retail flows may omit kitchen field entirely; in that case kitchen
+        # remains zero and "other" captures mixed ancillary (incl. kitchen/toilet).
+        # We intentionally do not infer/split kitchen from "other".
         kitchen = _f(uses.get("kitchen_sqm"))
         other = _f(uses.get("other_sqm"))
 
@@ -97,6 +103,10 @@ def normalize_paid_intake_layout(paid_intake: dict[str, Any]) -> dict[str, Any]:
         storage_area += storage
         visible_kitchen += kitchen
         ancillary_area_sqm += other
+        if is_retail_sector and kitchen == 0 and other > 0:
+            log.info(
+                "layout_compat: retail sector floor uses absent kitchen_sqm; preserving other_sqm as ancillary only",
+            )
 
         floor_total = _floor_total(uses)
         if level == "ground":
@@ -137,6 +147,7 @@ def normalize_paid_intake_layout(paid_intake: dict[str, Any]) -> dict[str, Any]:
             "storage_sqm": round(storage_area, 4),
             "visible_kitchen_sqm": round(visible_kitchen, 4),
             "ancillary_area_sqm": round(ancillary_area_sqm, 4),
+            "non_ground_ancillary_area_sqm": round(non_ground_ancillary_sqm, 4),
             "non_ground_ancillary_sqm": round(non_ground_ancillary_sqm, 4),
             "basement_sqm": round(basement_sqm, 4),
             "upper_sqm": round(upper_sqm, 4),

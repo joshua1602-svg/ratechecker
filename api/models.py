@@ -45,6 +45,8 @@ class AreasInput(BaseModel):
     non_visible_kitchen_sqm: float = 0
     storage_sqm: float = 0
     ancillary_area_sqm: float = 0
+    non_ground_ancillary_area_sqm: float = 0
+    # Backward-compatible alias retained for older payloads.
     non_ground_ancillary_sqm: float = 0
     basement_sqm: float = 0
     upper_sqm: float = 0
@@ -802,12 +804,18 @@ def build_evidence_payload_from_assess(
 
     # Area breakdown from second-screen intake
     if request.areas is not None:
+        non_ground_ancillary = (
+            request.areas.non_ground_ancillary_area_sqm
+            or request.areas.non_ground_ancillary_sqm
+            or None
+        )
         payload.update({
             "sales_area_sqm": request.areas.sales_area_sqm or None,
             "visible_kitchen_sqm": request.areas.visible_kitchen_sqm or None,
             "storage_sqm": request.areas.storage_sqm or None,
             "ancillary_area_sqm": request.areas.ancillary_area_sqm or None,
-            "non_ground_ancillary_sqm": request.areas.non_ground_ancillary_sqm or None,
+            "non_ground_ancillary_area_sqm": non_ground_ancillary,
+            "non_ground_ancillary_sqm": non_ground_ancillary,
             "basement_sqm": request.areas.basement_sqm or None,
             "upper_sqm": request.areas.upper_sqm or None,
             "outdoor_seating": request.areas.outdoor_seating,
