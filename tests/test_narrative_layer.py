@@ -89,4 +89,6 @@ def test_render_contains_required_phrases():
     weak_rendered = render_narrative_blocks(weak_signals)
 
     assert "material difference" in weak_rendered["evidence_interpretation"]
-    assert "does not currently demonstrate a sufficiently clear overassessment" in weak_rendered["case_assessment"]
+    assert "reviewable, but not clear-cut" in weak_rendered["case_assessment"]
+    assert "submit a Check" in weak_rendered["recommended_action"]
+    assert "Moderate" in weak_rendered["case_position_label"]

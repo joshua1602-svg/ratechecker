@@ -5,7 +5,7 @@ import logging
 from enum import Enum
 from typing import Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import AliasChoices, BaseModel, Field, field_validator
 from api.reports.narrative import build_rendered_narrative
 
 logger = logging.getLogger(__name__)
@@ -44,6 +44,10 @@ class AreasInput(BaseModel):
     visible_kitchen_sqm: float = 0
     non_visible_kitchen_sqm: float = 0
     storage_sqm: float = 0
+    ancillary_area_sqm: float = 0
+    non_ground_ancillary_area_sqm: float = 0
+    # Backward-compatible alias retained for older payloads.
+    non_ground_ancillary_sqm: float = 0
     basement_sqm: float = 0
     upper_sqm: float = 0
     outdoor_seating: bool = False
@@ -74,10 +78,49 @@ class CanonicalFloorLevel(str, Enum):
 
 
 class CanonicalFloorUsesInput(BaseModel):
-    trading_sqm: float = 0.0
-    storage_sqm: float = 0.0
-    kitchen_sqm: float = 0.0
-    other_sqm: float = 0.0
+    trading_sqm: float = Field(
+        default=0.0,
+        validation_alias=AliasChoices(
+            "trading_sqm",
+            "trading_area_sqm",
+            "trading_area",
+            "tradingAreaSqm",
+            "tradingArea",
+        ),
+    )
+    storage_sqm: float = Field(
+        default=0.0,
+        validation_alias=AliasChoices(
+            "storage_sqm",
+            "storage_area_sqm",
+            "storage_area",
+            "storageAreaSqm",
+            "storageArea",
+        ),
+    )
+    kitchen_sqm: float = Field(
+        default=0.0,
+        validation_alias=AliasChoices(
+            "kitchen_sqm",
+            "kitchen_prep_sqm",
+            "kitchen_prep_area_sqm",
+            "kitchen_prep_area",
+            "kitchenPrepSqm",
+            "kitchenPrepAreaSqm",
+            "kitchenPrepArea",
+        ),
+    )
+    other_sqm: float = Field(
+        default=0.0,
+        validation_alias=AliasChoices(
+            "other_sqm",
+            "other_area_sqm",
+            "other_area",
+            "ancillary_sqm",
+            "otherAreaSqm",
+            "otherArea",
+        ),
+    )
     other_label: Optional[str] = None
 
     @field_validator("trading_sqm", "storage_sqm", "kitchen_sqm", "other_sqm", mode="before")
@@ -291,7 +334,7 @@ class PurchaseResponse(BaseModel):
 # /assess engine outputs.  The frontend must call this (or use the values
 # it computes) rather than inventing report fields.
 
-_SAVING_MARGIN = 0.10  # ±10% around the point estimate for low/high range
+_SAVING_MARGIN = 0.05  # downside-only margin around the point estimate
 
 
 def _candidate_floor_presence(candidate: dict) -> tuple[bool, bool]:
@@ -516,10 +559,12 @@ def build_report_payload_from_assess(
     # Use adjusted RV if available, otherwise base RV
     best_rv = adj_rv if adj_rv is not None else base_rv
 
-    # Compute low/high range as ±10% of best estimate.
+    # Compute low/high range as a downside-only band around the point estimate.
+    # We avoid an upper flex above the point estimate to prevent overstating
+    # non-opportunity outcomes in product messaging.
     if best_rv is not None:
         rv_low = round(best_rv * (1 - _SAVING_MARGIN) / 100) * 100
-        rv_high = round(best_rv * (1 + _SAVING_MARGIN) / 100) * 100
+        rv_high = round(best_rv / 100) * 100
     else:
         rv_low = None
         rv_high = None
@@ -537,7 +582,7 @@ def build_report_payload_from_assess(
     case_strength_map = {
         "High": "Strong",
         "Medium": "Moderate",
-        "Low": "Weak",
+        "Low": "Moderate",
         "Insufficient Data": "Insufficient Data",
     }
 
@@ -761,10 +806,18 @@ def build_evidence_payload_from_assess(
 
     # Area breakdown from second-screen intake
     if request.areas is not None:
+        non_ground_ancillary = (
+            request.areas.non_ground_ancillary_area_sqm
+            or request.areas.non_ground_ancillary_sqm
+            or None
+        )
         payload.update({
             "sales_area_sqm": request.areas.sales_area_sqm or None,
             "visible_kitchen_sqm": request.areas.visible_kitchen_sqm or None,
             "storage_sqm": request.areas.storage_sqm or None,
+            "ancillary_area_sqm": request.areas.ancillary_area_sqm or None,
+            "non_ground_ancillary_area_sqm": non_ground_ancillary,
+            "non_ground_ancillary_sqm": non_ground_ancillary,
             "basement_sqm": request.areas.basement_sqm or None,
             "upper_sqm": request.areas.upper_sqm or None,
             "outdoor_seating": request.areas.outdoor_seating,

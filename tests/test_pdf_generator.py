@@ -236,6 +236,37 @@ class TestPdfTemplateRendering:
         assert "Tone Source" in html
         assert "Primary tone source: Same street evidence" in html
 
+    def test_evidence_pack_summary_sentence_uses_central_value_without_extra_saving_clause(self):
+        data = pdf_generator._derive_fields(_base_report_data())
+        html = pdf_generator._load_template(
+            pdf_generator._get_env(),
+            "evidence_pack.html",
+        ).render(**data)
+        assert "Based on the central modelled value" in html
+        assert "this reflects a potential annual saving" not in html
+
+    def test_evidence_pack_uses_conclusion_and_next_step_structure(self):
+        data = pdf_generator._derive_fields(_base_report_data())
+        html = pdf_generator._load_template(
+            pdf_generator._get_env(),
+            "evidence_pack.html",
+        ).render(**data)
+        assert "Conclusion and Next Step" in html
+        assert "What the evidence shows" in html
+        assert "What this means in practice" in html
+        assert "Recommended next step" in html
+        assert "Case Position" in html
+
+    def test_evidence_pack_comparable_right_columns_are_right_aligned(self):
+        data = pdf_generator._derive_fields(_base_report_data())
+        html = pdf_generator._load_template(
+            pdf_generator._get_env(),
+            "evidence_pack.html",
+        ).render(**data)
+        assert '<th style="width:12%;" class="num">Similarity</th>' in html
+        assert '<th style="width:6%;" class="num">Fit</th>' in html
+        assert '<td class="num">—</td>' in html
+
 
     def test_evidence_pack_renders_location_signal_indicators(self):
         data = pdf_generator._derive_fields(_base_report_data())
