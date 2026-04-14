@@ -850,6 +850,13 @@ class TestEvidencePayloadBuilder:
         assert payload["voa_rv"] == 20000
         assert payload["tone_rate"] == 150.0
 
+    def test_evidence_payload_defaults_to_primary_cluster_weighted_median_wording(self):
+        from api.models import build_evidence_payload_from_assess
+        resp = self._make_assess_response()
+        req = self._make_request()
+        payload = build_evidence_payload_from_assess(resp, req)
+        assert payload["tone_basis"] == "Evidence-weighted median of primary comparable cluster"
+
     def test_evidence_payload_default_recommendation(self):
         from api.models import build_evidence_payload_from_assess
         resp = self._make_assess_response(signal="High")
