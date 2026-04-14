@@ -32,6 +32,7 @@ from api.models import (
     AssessResponse,
     resolve_subject_voa_record,
 )
+from api.services.savings import build_downside_rv_range, calculate_implied_savings
 
 log = logging.getLogger(__name__)
 
@@ -328,6 +329,15 @@ async def run_assessment_pipeline(req: AssessRequest) -> AssessResponse:
             total_adjustment_factor=adj["adjustments"]["total_adjustment_factor"],
         )
 
+    best_rv = adj_rv if adj_rv is not None else base_rv
+    rv_low, rv_high = build_downside_rv_range(best_rv)
+    savings = calculate_implied_savings(
+        current_rv=req.property.voa_rv,
+        modelled_rv_point=best_rv,
+        modelled_rv_low=rv_low,
+        modelled_rv_high=rv_high,
+    )
+
     location_signals = get_location_signals(
         postcode=req.property.postcode,
         latitude=lat,
@@ -349,4 +359,13 @@ async def run_assessment_pipeline(req: AssessRequest) -> AssessResponse:
         location_signals=location_signals,
         tone_source=result.get("tone_source"),
         tone_source_label=result.get("tone_source_label"),
+        implied_total_saving_point=savings["implied_total_saving_point"],
+        implied_total_saving_low=savings["implied_total_saving_low"],
+        implied_total_saving_high=savings["implied_total_saving_high"],
+        implied_annual_saving_point=savings["implied_annual_saving_point"],
+        implied_annual_saving_low=savings["implied_annual_saving_low"],
+        implied_annual_saving_high=savings["implied_annual_saving_high"],
+        indicative_total_saving_low=savings["implied_total_saving_low"],
+        indicative_total_saving_high=savings["implied_total_saving_high"],
+        years_remaining_in_cycle=savings["years_remaining_in_cycle"],
     )
