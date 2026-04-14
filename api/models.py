@@ -7,7 +7,7 @@ from typing import Optional
 
 from pydantic import AliasChoices, BaseModel, Field, field_validator
 from api.reports.narrative import build_rendered_narrative
-from api.services.savings import calculate_implied_savings
+from api.services.savings import build_downside_rv_range, calculate_implied_savings
 
 logger = logging.getLogger(__name__)
 
@@ -191,6 +191,15 @@ class AssessResponse(BaseModel):
     location_signals: Optional[dict] = None
     tone_source: Optional[str] = None
     tone_source_label: Optional[str] = None
+    implied_total_saving_point: Optional[float] = None
+    implied_total_saving_low: Optional[float] = None
+    implied_total_saving_high: Optional[float] = None
+    implied_annual_saving_point: Optional[float] = None
+    implied_annual_saving_low: Optional[float] = None
+    implied_annual_saving_high: Optional[float] = None
+    indicative_total_saving_low: Optional[float] = None
+    indicative_total_saving_high: Optional[float] = None
+    years_remaining_in_cycle: Optional[int] = None
 
 
 class PurchaseFormData(BaseModel):
@@ -342,9 +351,6 @@ class PurchaseResponse(BaseModel):
 # This function produces the authoritative report payload from actual
 # /assess engine outputs.  The frontend must call this (or use the values
 # it computes) rather than inventing report fields.
-
-_SAVING_MARGIN = 0.05  # downside-only margin around the point estimate
-
 
 def _candidate_floor_presence(candidate: dict) -> tuple[bool, bool]:
     floor = candidate.get("floor_areas") or {}
@@ -571,12 +577,7 @@ def build_report_payload_from_assess(
     # Compute low/high range as a downside-only band around the point estimate.
     # We avoid an upper flex above the point estimate to prevent overstating
     # non-opportunity outcomes in product messaging.
-    if best_rv is not None:
-        rv_low = round(best_rv * (1 - _SAVING_MARGIN) / 100) * 100
-        rv_high = round(best_rv / 100) * 100
-    else:
-        rv_low = None
-        rv_high = None
+    rv_low, rv_high = build_downside_rv_range(best_rv)
 
     savings = calculate_implied_savings(
         current_rv=voa_rv,
