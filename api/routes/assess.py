@@ -245,7 +245,13 @@ async def run_assessment_pipeline(req: AssessRequest) -> AssessResponse:
         layout_result["comps"] if layout_result is not None
         else result.get("_rated_comps", [])
     )
+    _primary_tone_uarns = {
+        str(c.get("uarn"))
+        for c in (result.get("_primary_tone_comps") or [])
+        if isinstance(c, dict) and c.get("uarn") is not None
+    }
     _comps_for_response: list[dict] = []
+    _primary_tone_comps_for_response: list[dict] = []
     if _base_comps:
         _comp_uarns = [str(c["uarn"]) for c in _base_comps]
         # Fit-layer DB queries are non-critical — degrade gracefully to empty
@@ -267,6 +273,13 @@ async def run_assessment_pipeline(req: AssessRequest) -> AssessResponse:
             subject_has_parking=None,
         )
         _comps_for_response = _fit_result["comps"]
+        if _primary_tone_uarns:
+            _primary_tone_comps_for_response = [
+                c for c in _comps_for_response
+                if isinstance(c, dict) and str(c.get("uarn")) in _primary_tone_uarns
+            ]
+    if not _primary_tone_comps_for_response:
+        _primary_tone_comps_for_response = _comps_for_response
 
     # 6. Apply adjustment layer
     base_rv: int | None = result.get("estimated_rv")
@@ -307,6 +320,7 @@ async def run_assessment_pipeline(req: AssessRequest) -> AssessResponse:
         adjustments=adj_breakdown,
         adjustment_summary=adj_summary,
         rated_comps=_comps_for_response,
+        primary_tone_comps=_primary_tone_comps_for_response,
         location_signals=location_signals,
         tone_source=result.get("tone_source"),
         tone_source_label=result.get("tone_source_label"),
