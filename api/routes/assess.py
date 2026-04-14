@@ -337,6 +337,13 @@ async def run_assessment_pipeline(req: AssessRequest) -> AssessResponse:
         modelled_rv_low=rv_low,
         modelled_rv_high=rv_high,
     )
+    log.info(
+        "/assess savings fields point=%s low=%s high=%s years_remaining=%s",
+        savings["implied_total_saving_point"],
+        savings["implied_total_saving_low"],
+        savings["implied_total_saving_high"],
+        savings["years_remaining_in_cycle"],
+    )
 
     location_signals = get_location_signals(
         postcode=req.property.postcode,

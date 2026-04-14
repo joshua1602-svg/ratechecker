@@ -2,8 +2,13 @@ from __future__ import annotations
 
 import asyncio
 
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
 from api.models import AssessRequest, BusinessType, ContactInput, FlagsInput, PropertyInput
+from api.routes.assess import router
 from api.routes.assess import run_assessment_pipeline
+from api.models import AssessResponse
 from api.services.savings import build_downside_rv_range, calculate_implied_savings
 
 
@@ -93,3 +98,45 @@ def test_assess_response_savings_use_shared_cash_savings_logic_not_raw_rv_delta(
     raw_rv_delta = 20_000 - 19_000
     assert response.implied_annual_saving_point is not None
     assert response.implied_annual_saving_point != raw_rv_delta
+
+
+def test_assess_endpoint_serializes_savings_fields_at_top_level(monkeypatch):
+    app = FastAPI()
+    app.include_router(router)
+
+    async def _captcha_ok(_token):
+        return True
+
+    async def _stub_pipeline(_req):
+        return AssessResponse(
+            signal="Medium",
+            explanation="Demo",
+            implied_total_saving_point=1470,
+            implied_total_saving_low=1470,
+            implied_total_saving_high=2940,
+            years_remaining_in_cycle=3,
+        )
+
+    monkeypatch.setattr("api.routes.assess.verify_turnstile", _captcha_ok)
+    monkeypatch.setattr("api.routes.assess.run_assessment_pipeline", _stub_pipeline)
+
+    client = TestClient(app)
+    payload = {
+        "contact": {"email": "test@example.com", "business_name": "Demo Shop"},
+        "property": {
+            "address": "1 High Street",
+            "postcode": "SW1A 1AA",
+            "business_type": "retail",
+            "voa_rv": 20000,
+            "nia_sqm": 100,
+        },
+        "flags": {"consent_disclaimer": True},
+        "captcha_token": "token",
+    }
+    resp = client.post("/assess", json=payload)
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["implied_total_saving_point"] == 1470
+    assert body["implied_total_saving_low"] == 1470
+    assert body["implied_total_saving_high"] == 2940
+    assert body["years_remaining_in_cycle"] == 3
