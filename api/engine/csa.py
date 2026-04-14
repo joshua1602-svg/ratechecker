@@ -25,6 +25,7 @@ from typing import List, Optional
 
 from api.engine.itza_utils import retail_itza_from_sv_lines_effective
 from api.engine.rules import csa_rules
+from api.services.savings import estimate_annual_rates_payable
 
 
 # ---------------------------------------------------------------------------
@@ -1799,10 +1800,12 @@ def run_csa(
     # --- Signal ---
     if voa_rv <= 0:
         signal = "Low"
-        saving = None
+        annual_saving = None
     else:
         delta_pct = (voa_rv - estimated_rv) / voa_rv
-        saving = max(0.0, voa_rv - estimated_rv)
+        current_annual = estimate_annual_rates_payable(voa_rv) or 0.0
+        modelled_annual = estimate_annual_rates_payable(estimated_rv) or 0.0
+        annual_saving = max(0.0, current_annual - modelled_annual)
         if delta_pct >= 0.20 and confidence in ("High", "Medium"):
             signal = "High"
         elif delta_pct >= 0.10:
@@ -1810,7 +1813,7 @@ def run_csa(
         else:
             signal = "Low"
 
-    saving_str = f"£{saving:,.0f}" if saving and saving > 0 else None
+    saving_str = f"£{annual_saving:,.0f}" if annual_saving and annual_saving > 0 else None
 
     if _debug:
         _debug["num_comps_used"] = len(rated)

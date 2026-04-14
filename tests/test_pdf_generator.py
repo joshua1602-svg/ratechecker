@@ -28,8 +28,15 @@ def _base_report_data() -> dict:
         "voa_rv": 25000,
         "modelled_rv_low": 18000,
         "modelled_rv_high": 22000,
-        "annual_saving_low": 1400,
-        "annual_saving_high": 3300,
+        "implied_annual_saving_point": 2450,
+        "implied_annual_saving_low": 1470,
+        "implied_annual_saving_high": 3430,
+        "implied_total_saving_point": 7350,
+        "implied_total_saving_low": 4410,
+        "implied_total_saving_high": 10290,
+        "years_remaining_in_cycle": 3,
+        "annual_saving_low": 1470,
+        "annual_saving_high": 3430,
         "case_strength": "High",
         "comparables": [
             {"address": "10 High Street", "rv": 23000, "nia_sqm": 85},
@@ -210,7 +217,7 @@ class TestPdfTemplateRendering:
         ).render(**data)
 
         assert 'content: "Page " counter(page) " of " counter(pages);' in html
-        assert "Annual Saving" in html
+        assert "Total Saving" in html
         assert "&pound;18,000&ndash;&pound;22,000" in html
         assert 'class="banner-value"' in html
 
