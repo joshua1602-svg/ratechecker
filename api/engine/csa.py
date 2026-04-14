@@ -1827,6 +1827,21 @@ def run_csa(
         }
         for c, d, r, w in rated
     ]
+    _primary_tone_comps = [
+        {
+            "uarn": c.uarn,
+            "address": c.address,
+            "rv": c.rv,
+            "nia_sqm": c.nia_sqm,
+            "rate": round(r, 4),
+            "weight": round(w, 6),
+            "distance_m": round(d, 1),
+            "is_same_street": bool(
+                _subject_street_key and _extract_street_key(c.address) == _subject_street_key
+            ),
+        }
+        for c, d, r, w in primary_pool
+    ]
 
     result = {
         "signal": signal,
@@ -1846,6 +1861,7 @@ def run_csa(
             "subject_basis_label": basis_label,
         },
         "_rated_comps": _rated_comps,
+        "_primary_tone_comps": _primary_tone_comps,
     }
     if _debug:
         result["_debug"] = _debug

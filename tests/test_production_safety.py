@@ -938,6 +938,26 @@ class TestEvidencePayloadBuilder:
         assert payload["tone_source"] == "same_street_evidence"
         assert "Same street evidence" in payload["tone_source_label"]
 
+    def test_evidence_payload_uses_primary_tone_comps_for_table_basis(self):
+        from api.models import build_evidence_payload_from_assess
+        resp = self._make_assess_response(
+            rated_comps=[
+                {"uarn": "10", "address": "10 Market Road", "rv": 9000, "nia_sqm": 20, "rate": 450.0, "weight": 0.2},
+                {"uarn": "11", "address": "11 Market Road", "rv": 10000, "nia_sqm": 20, "rate": 500.0, "weight": 0.2},
+                {"uarn": "12", "address": "12 High Street", "rv": 24000, "nia_sqm": 20, "rate": 1200.0, "weight": 0.6},
+            ],
+            primary_tone_comps=[
+                {"uarn": "12", "address": "12 High Street", "rv": 24000, "nia_sqm": 20, "rate": 1200.0, "weight": 0.6},
+            ],
+            tone_source=None,
+            tone_source_label=None,
+        )
+        req = self._make_request()
+        payload = build_evidence_payload_from_assess(resp, req)
+        assert len(payload["comparables"]) == 1
+        assert payload["comparables"][0]["uarn"] == "12"
+        assert payload["comparables"][0]["rate_psm"] == 1200.0
+
     def test_simplified_payload_passes_route_validation(self):
         """Verify the simplified builder also passes route validation."""
         from api.models import build_report_payload_from_assess

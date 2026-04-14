@@ -143,6 +143,7 @@ class AssessResponse(BaseModel):
     adjustments: Optional[AdjustmentBreakdown] = None
     adjustment_summary: Optional[str] = None
     rated_comps: list[dict] = Field(default_factory=list)
+    primary_tone_comps: list[dict] = Field(default_factory=list)
     location_signals: Optional[dict] = None
     tone_source: Optional[str] = None
     tone_source_label: Optional[str] = None
@@ -496,6 +497,8 @@ def resolve_subject_voa_record(
 def build_report_payload_from_assess(
     assess_response: AssessResponse,
     request: AssessRequest,
+    *,
+    comparable_rows: list[dict] | None = None,
 ) -> dict:
     """Build a canonical simplified report payload from actual engine outputs.
 
@@ -542,7 +545,7 @@ def build_report_payload_from_assess(
     # correct basis — ITZA for retail, NIA for nursery) rather than
     # re-deriving rv/nia_sqm which would produce a wrong-basis figure.
     comps_for_report = []
-    for c in assess_response.rated_comps:
+    for c in (comparable_rows if comparable_rows is not None else assess_response.rated_comps):
         comp = dict(c)
         # The engine's "rate" field is the correctly-normalised rate
         if "rate" in comp and comp.get("rate_psm") is None:
@@ -596,7 +599,12 @@ def build_evidence_payload_from_assess(
     from api.engine.valuation import build_valuation_detail
 
     # Start from the simplified payload (all shared fields)
-    payload = build_report_payload_from_assess(assess_response, request)
+    _evidence_rows = assess_response.primary_tone_comps or assess_response.rated_comps
+    payload = build_report_payload_from_assess(
+        assess_response,
+        request,
+        comparable_rows=_evidence_rows,
+    )
 
     voa_rv = request.property.voa_rv
     best_rv = (
@@ -662,7 +670,7 @@ def build_evidence_payload_from_assess(
     # Thresholds mirror _RETAIL_PRIMARY_TONE_SAME_STREET_* in csa.py.
     _tone_source = getattr(assess_response, "tone_source", None)
     _tone_source_label = getattr(assess_response, "tone_source_label", None)
-    _rated = assess_response.rated_comps or []
+    _rated = _evidence_rows
     if _rated and request.property.business_type.value in ("retail", "hair_beauty"):
         from api.engine.csa import _extract_street_key
         _subj_street = _extract_street_key(request.property.address or "")
