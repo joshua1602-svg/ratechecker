@@ -334,13 +334,7 @@ class PurchaseResponse(BaseModel):
 # /assess engine outputs.  The frontend must call this (or use the values
 # it computes) rather than inventing report fields.
 
-_SAVING_MARGIN = 0.10  # ±10% around the point estimate for low/high range
-_UPSIDE_MARGIN_BY_SIGNAL = {
-    "High": 0.10,
-    "Medium": 0.06,
-    "Low": 0.03,
-    "Insufficient Data": 0.03,
-}
+_SAVING_MARGIN = 0.05  # downside-only margin around the point estimate
 
 
 def _candidate_floor_presence(candidate: dict) -> tuple[bool, bool]:
@@ -565,28 +559,12 @@ def build_report_payload_from_assess(
     # Use adjusted RV if available, otherwise base RV
     best_rv = adj_rv if adj_rv is not None else base_rv
 
-    # Compute low/high range with damped upside when point estimate already
-    # suggests overassessment opportunity (best_rv < voa_rv):
-    #   Option A: asymmetrically shrink upside using gap-to-VOA.
-    #   Option C fallback/cap: confidence(signal)-based upside cap.
+    # Compute low/high range as a downside-only band around the point estimate.
+    # We avoid an upper flex above the point estimate to prevent overstating
+    # non-opportunity outcomes in product messaging.
     if best_rv is not None:
-        downside_margin = _SAVING_MARGIN
-        signal_upside_cap = _UPSIDE_MARGIN_BY_SIGNAL.get(assess_response.signal, _SAVING_MARGIN)
-        upside_margin = _SAVING_MARGIN
-
-        if voa_rv > 0 and best_rv > 0 and best_rv < voa_rv:
-            gap_to_voa_ratio = (voa_rv - best_rv) / best_rv
-            # Option A: when best_rv is close to VOA, cap upside tighter.
-            # Keep a small floor so high still expresses uncertainty.
-            option_a_upside = min(_SAVING_MARGIN, max(0.03, gap_to_voa_ratio))
-            # Option C fallback/cap by confidence signal.
-            upside_margin = min(option_a_upside, signal_upside_cap)
-        else:
-            # No overassessment gap context available: fallback to signal cap.
-            upside_margin = min(_SAVING_MARGIN, signal_upside_cap)
-
-        rv_low = round(best_rv * (1 - downside_margin) / 100) * 100
-        rv_high = round(best_rv * (1 + upside_margin) / 100) * 100
+        rv_low = round(best_rv * (1 - _SAVING_MARGIN) / 100) * 100
+        rv_high = round(best_rv / 100) * 100
     else:
         rv_low = None
         rv_high = None
@@ -604,7 +582,7 @@ def build_report_payload_from_assess(
     case_strength_map = {
         "High": "Strong",
         "Medium": "Moderate",
-        "Low": "Weak",
+        "Low": "Moderate",
         "Insufficient Data": "Insufficient Data",
     }
 
