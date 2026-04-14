@@ -218,36 +218,6 @@ class TestCanonicalReportPayload:
         assert payload["modelled_rv_high"] == 19000
         assert payload["modelled_rv_high"] < req.property.voa_rv
 
-    def test_modelled_rv_upside_is_dampened_when_point_is_close_to_voa(self):
-        from api.models import build_report_payload_from_assess
-        # Best RV is below VOA but close enough that wide upside could cross VOA.
-        resp = self._make_assess_response(
-            signal="Low",
-            adjusted_estimated_rv=19000,
-            base_estimated_rv=19000,
-        )
-        req = self._make_request()  # voa_rv=20000
-        payload = build_report_payload_from_assess(resp, req)
-
-        assert payload["modelled_rv_low"] == 17100
-        # Low-confidence fallback cap (Option C) trims upside to +3% not +10%.
-        assert payload["modelled_rv_high"] == 19600
-        assert payload["modelled_rv_high"] < req.property.voa_rv
-
-    def test_modelled_rv_upside_falls_back_to_signal_cap_without_voa_gap_context(self):
-        from api.models import build_report_payload_from_assess
-        req = self._make_request()
-        req.property.voa_rv = 0
-        resp = self._make_assess_response(
-            signal="Medium",
-            adjusted_estimated_rv=14200,
-            base_estimated_rv=14200,
-        )
-        payload = build_report_payload_from_assess(resp, req)
-
-        # Medium confidence fallback cap is +6%.
-        assert payload["modelled_rv_high"] == 15100
-
     def test_savings_calculated_correctly(self):
         from api.models import build_report_payload_from_assess
         resp = self._make_assess_response(adjusted_estimated_rv=14200)

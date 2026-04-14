@@ -449,7 +449,9 @@ def _derive_fields(report_data: dict) -> dict:
         data.setdefault("rv_delta", rv_delta)
         data.setdefault("rv_central_saving", max(0, rv_delta))
         if voa_rv != 0:
-            data.setdefault("rv_delta_pct", round((rv_delta / voa_rv) * 100, 1))
+            rv_delta_pct = round((rv_delta / voa_rv) * 100, 1)
+            data.setdefault("rv_delta_pct", rv_delta_pct)
+            data.setdefault("rv_central_saving_pct", max(0.0, rv_delta_pct))
 
     # ── Exclude the subject property from comparables by UARN ──
     # This is the authoritative filter: it catches ALL report paths (direct
@@ -622,7 +624,7 @@ def _derive_fields(report_data: dict) -> dict:
                 f"Based on analysis of {data.get('comp_count', 0)} comparable "
                 f"properties, the estimated fair rateable value inferred from the weighted comparable set is £{modelled_rv:,.0f}, "
                 f"indicating a potential annual saving of £{data.get('rv_central_saving', 0):,.0f} "
-                f"({data.get('rv_delta_pct', 0)}%)."
+                f"({data.get('rv_central_saving_pct', 0)}%)."
                 f"{layout_sentence} These property-specific nuances influenced comparable weighting only; they did not create separate subject-level deductions or allowances in this report."
             ),
         )

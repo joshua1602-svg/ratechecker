@@ -555,7 +555,7 @@ table { page-break-inside: avoid; }
 
   <p class="case-label">Case Strength: <span style="color:{% if case_strength == 'High' %}#2E7D32{% elif case_strength == 'Medium' %}#D4956A{% else %}#7A8A9A{% endif %};">{{ case_strength }}</span></p>
 
-  <p>This assessment analysed {{ comp_count }} comparable properties drawn from the VOA's published bulk data. Based on the central modelled value of &pound;{{ modelled_rv | format_currency }} (range &pound;{{ modelled_rv_low | format_currency }}&ndash;&pound;{{ modelled_rv_high | format_currency }}), this reflects a potential annual saving of &pound;{{ rv_central_saving | format_currency }} ({{ rv_delta_pct }}%).</p>
+  <p>This assessment analysed {{ comp_count }} comparable properties drawn from the VOA's published bulk data. Based on the central modelled value of &pound;{{ modelled_rv | format_currency }} (range &pound;{{ modelled_rv_low | format_currency }}&ndash;&pound;{{ modelled_rv_high | format_currency }}).</p>
   {% if layout_adjustment_applied %}
   <p>Layout details provided by the ratepayer were used to prioritise structurally similar comparables.</p>
   {% endif %}
@@ -577,9 +577,9 @@ table { page-break-inside: avoid; }
         <th style="width:12%;" class="num">Rateable Value &pound;</th>
         <th style="width:10%;" class="num">{{ comparable_rate_header | default('Rate £/sqm') }}</th>
         {% if layout_adjustment_applied %}
-        <th style="width:12%;">Similarity</th>
+        <th style="width:12%;" class="num">Similarity</th>
         {% endif %}
-        <th style="width:6%;">Fit</th>
+        <th style="width:6%;" class="num">Fit</th>
         <th style="width:10%;" class="num">Weight %</th>
       </tr>
     </thead>
@@ -593,13 +593,13 @@ table { page-break-inside: avoid; }
         <td class="num">&pound;{{ comp.rv | format_currency }}</td>
         <td class="num">&pound;{{ comp.rate_psm }}</td>
         {% if layout_adjustment_applied %}
-        <td>
+        <td class="num">
           {% if comp.layout_similarity_score >= 0.7 %}High
           {% elif comp.layout_similarity_score >= 0.4 %}Medium
           {% else %}Standard{% endif %}
         </td>
         {% endif %}
-        <td>{{ comp.fit_class | capitalize if comp.fit_class else "—" }}</td>
+        <td class="num">{{ comp.fit_class | capitalize if comp.fit_class else "—" }}</td>
         <td class="num">{{ comp.weight_pct }}</td>
       </tr>
       {% endif %}
@@ -741,9 +741,9 @@ table { page-break-inside: avoid; }
     <tr><td class="label-cell">Estimated Saving Range</td><td class="value-cell">&pound;{{ annual_saving_low | format_currency }}&ndash;&pound;{{ annual_saving_high | format_currency }}</td></tr>
   </table>
   <p style="font-size:8pt; color:#7A8A9A; margin-top:4px;">
-    The point estimate is calculated as Current VOA RV minus Modelled RV.
-    The saving range reflects a &plusmn;10% confidence margin around the modelled RV.
-    Lower saving = VOA RV minus upper modelled estimate; upper saving = VOA RV minus lower modelled estimate.
+    Point-estimate annual saving is calculated as Current VOA RV minus Modelled RV (floored at &pound;0).
+    The saving range uses the modelled RV band shown in this report (5% downside, no upside flex):
+    lower saving = VOA RV minus modelled RV; upper saving = VOA RV minus lower modelled estimate.
   </p>
 
   <!-- ── Layout weighting clarification ── -->
