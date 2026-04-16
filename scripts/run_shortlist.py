@@ -16,6 +16,7 @@ import logging
 import sys
 import time
 from dataclasses import dataclass
+from decimal import Decimal
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -650,7 +651,23 @@ def _write_csv(rows: list[dict[str, Any]], output_path: Path) -> None:
 def _write_json(rows: list[dict[str, Any]], output_path: Path) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with output_path.open("w", encoding="utf-8") as fh:
-        json.dump(rows, fh, indent=2, ensure_ascii=False)
+        json.dump(_json_safe(rows), fh, indent=2, ensure_ascii=False)
+
+
+def _json_safe(value: Any) -> Any:
+    """Recursively coerce values into JSON-serializable primitives.
+
+    Some DB payloads can carry Decimal values (not natively serializable by
+    json.dump). These are converted to float; nested containers are handled
+    recursively.
+    """
+    if isinstance(value, Decimal):
+        return float(value)
+    if isinstance(value, dict):
+        return {str(k): _json_safe(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(v) for v in value]
+    return value
 
 
 def _write_review_csv(rows: list[dict[str, Any]], output_path: Path) -> None:

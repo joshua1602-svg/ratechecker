@@ -1,9 +1,12 @@
 import argparse
+from decimal import Decimal
+import json
 
 from scripts.run_shortlist import (
     _derive_confidence_proxy,
     _early_filter_reason,
     _extract_result,
+    _json_safe,
     _passes_filters,
     _score_components,
     _sorted_rows,
@@ -153,3 +156,10 @@ def test_early_filter_reason_supported():
     assert _early_filter_reason({"postcode": "", "voa_rv": 1, "nia_sqm": 1, "business_type": "retail", "scat_code": 249}) == "missing_postcode"
     assert _early_filter_reason({"postcode": "SW1", "voa_rv": 0, "nia_sqm": 1, "business_type": "retail", "scat_code": 249}) == "non_positive_rv"
     assert _early_filter_reason({"postcode": "SW1", "voa_rv": 1, "nia_sqm": 0, "business_type": "retail", "scat_code": 249}) == "non_positive_nia"
+
+
+def test_json_safe_serializes_decimal():
+    payload = {"a": Decimal("12.34"), "nested": [Decimal("1.5"), {"b": Decimal("2.5")}]}
+    safe = _json_safe(payload)
+    encoded = json.dumps(safe)
+    assert "\"a\": 12.34" in encoded
