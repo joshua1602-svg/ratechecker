@@ -1,21 +1,23 @@
 #!/usr/bin/env python3
 """Batch overassessment runner using the live /assess valuation pipeline.
 
-This script intentionally calls `run_assessment_pipeline()` directly so each
-row is valued by the same internal logic as the free assess flow (CSA + layout
-+ fit + adjustments), while bypassing only captcha validation.
+This script resolves and uses the same callable that powers the live assess
+result path (CSA + layout + fit + adjustments), and only falls back to HTTP
+when no reusable callable is available.
 """
 from __future__ import annotations
 
 import argparse
 import asyncio
 import csv
+import importlib
 import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 import sys
 
+import httpx
 from sqlalchemy import text
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -24,12 +26,12 @@ if str(REPO_ROOT) not in sys.path:
 
 from api.models import (
     AssessRequest,
+    AssessResponse,
     BusinessType,
     ContactInput,
     FlagsInput,
     PropertyInput,
 )
-from api.routes.assess import run_assessment_pipeline
 from api.engine.rules import csa_rules
 
 log = logging.getLogger("batch_overassessment_runner")
@@ -74,6 +76,10 @@ OUTPUT_COLUMNS = [
 @dataclass
 class RowResult:
     data: dict[str, Any]
+
+
+class LiveAssessResolverError(RuntimeError):
+    """Raised when no reusable live assessment callable can be found."""
 
 
 def _scat_to_business_type() -> dict[int, str]:
@@ -174,7 +180,59 @@ def _build_request(row: dict[str, Any]) -> AssessRequest:
     )
 
 
-async def _process_one(row: dict[str, Any], semaphore: asyncio.Semaphore) -> RowResult:
+def _resolve_live_assess_callable() -> Any:
+    """Resolve the callable that drives live returned modelled RVs.
+
+    Order:
+    1) dedicated service module (if present)
+    2) reusable function exported by api.routes.assess (if present)
+
+    If neither exists, caller should fall back to HTTP mode.
+    """
+    # Preferred: a service-layer entrypoint if the codebase exposes one.
+    try:
+        service_mod = importlib.import_module("api.services.assessment")
+        for name in (
+            "run_assessment_pipeline",
+            "run_live_assessment",
+            "assess_property",
+            "run_assess",
+        ):
+            fn = getattr(service_mod, name, None)
+            if callable(fn):
+                log.info("Using live assessment callable from api.services.assessment.%s", name)
+                return fn
+    except ModuleNotFoundError:
+        pass
+
+    # Current repo shape: route module exports a reusable non-HTTP-wrapper function.
+    route_mod = importlib.import_module("api.routes.assess")
+    fn = getattr(route_mod, "run_assessment_pipeline", None)
+    if callable(fn):
+        log.info("Using live assessment callable from api.routes.assess.run_assessment_pipeline")
+        return fn
+
+    raise LiveAssessResolverError("No reusable live assess callable found")
+
+
+async def _run_assess_via_http(req: AssessRequest, assess_url: str, timeout_s: float) -> AssessResponse:
+    """Fallback mode: call live HTTP endpoint when direct import is unavailable."""
+    payload = req.model_dump()
+    # /assess wrappers often require captcha; allow caller to provide one via env/query if needed.
+    payload.setdefault("captcha_token", "")
+    async with httpx.AsyncClient(timeout=timeout_s) as client:
+        response = await client.post(assess_url, json=payload)
+    response.raise_for_status()
+    return AssessResponse.model_validate(response.json())
+
+
+async def _process_one(
+    row: dict[str, Any],
+    semaphore: asyncio.Semaphore,
+    assess_runner: Any | None,
+    assess_url: str | None,
+    http_timeout_s: float,
+) -> RowResult:
     base = {
         "id": row.get("id"),
         "uarn": row.get("uarn"),
@@ -205,7 +263,14 @@ async def _process_one(row: dict[str, Any], semaphore: asyncio.Semaphore) -> Row
 
     try:
         async with semaphore:
-            resp = await run_assessment_pipeline(req)
+            if assess_runner is not None:
+                resp = await assess_runner(req)
+            elif assess_url:
+                resp = await _run_assess_via_http(req=req, assess_url=assess_url, timeout_s=http_timeout_s)
+            else:
+                raise LiveAssessResolverError(
+                    "No reusable callable found and no --assess-url provided for HTTP fallback"
+                )
 
         modelled_rv = (
             resp.adjusted_estimated_rv
@@ -276,7 +341,28 @@ async def _run(args: argparse.Namespace) -> int:
         return 0
 
     sem = asyncio.Semaphore(args.concurrency)
-    tasks = [asyncio.create_task(_process_one(r, sem)) for r in rows]
+    assess_runner = None
+    try:
+        assess_runner = _resolve_live_assess_callable()
+    except LiveAssessResolverError as exc:
+        if not args.assess_url:
+            raise RuntimeError(
+                f"{exc}. Provide --assess-url to run in HTTP mode."
+            ) from exc
+        log.warning("Falling back to HTTP assess mode via %s", args.assess_url)
+
+    tasks = [
+        asyncio.create_task(
+            _process_one(
+                r,
+                sem,
+                assess_runner=assess_runner,
+                assess_url=args.assess_url,
+                http_timeout_s=args.http_timeout_s,
+            )
+        )
+        for r in rows
+    ]
     results = [r.data for r in await asyncio.gather(*tasks)]
     ranked = sorted(results, key=_rank_key)
     _write_csv(ranked, Path(args.output_csv))
@@ -295,6 +381,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--offset", type=int, default=0)
     parser.add_argument("--concurrency", type=int, default=4)
     parser.add_argument("--output-csv", default="artifacts/overassessment_batch_results.csv")
+    parser.add_argument(
+        "--assess-url",
+        default=None,
+        help="Optional HTTP fallback endpoint when no reusable importable assess callable exists (e.g. https://.../assess)",
+    )
+    parser.add_argument("--http-timeout-s", type=float, default=30.0)
     parser.add_argument("--log-level", default="INFO")
     return parser.parse_args()
 

@@ -5,7 +5,8 @@ Script: `scripts/batch_overassessment_runner.py`
 ## What it does
 - Pulls a batch of properties from Supabase via SQL.
 - Builds an `AssessRequest` per row.
-- Calls `api.routes.assess.run_assessment_pipeline()` directly (same live pipeline as `/assess`, excluding captcha).
+- Resolves the reusable live callable (prefers service-layer callable if present; otherwise uses `api.routes.assess.run_assessment_pipeline()` when exposed).
+- Falls back to calling a live HTTP assess endpoint only when no reusable callable exists (`--assess-url`).
 - Computes fair range as ±5% around the returned modelled RV (same report logic).
 - Flags overassessed cases and writes ranked CSV output.
 - Continues processing when a row fails and records `status` + `error_message`.
@@ -36,4 +37,11 @@ python scripts/batch_overassessment_runner.py \
 python scripts/batch_overassessment_runner.py \
   --source-sql "SELECT id,uarn,address,postcode,business_type,scat_code,voa_rv,nia_sqm FROM my_universe LIMIT :limit OFFSET :offset" \
   --limit 500
+```
+
+## HTTP fallback mode (only if importable callable is unavailable)
+```bash
+python scripts/batch_overassessment_runner.py \
+  --assess-url "https://your-api-host/assess" \
+  --limit 200
 ```
