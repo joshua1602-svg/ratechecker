@@ -25,7 +25,7 @@ SUPPORTED_PROPERTY_TYPES = {
     "pub": "Public houses",
 }
 
-UK_POSTCODE = re.compile(r"^[A-Z]{1,2}\\d[A-Z\\d]?\\s*\\d[A-Z]{2}$", re.IGNORECASE)
+UK_POSTCODE = re.compile(r"^[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}$", re.IGNORECASE)
 
 OFFICIAL_GUIDANCE = {
     "find_rateable_value": {
